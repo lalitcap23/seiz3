@@ -8,65 +8,95 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {HLConstants} from "@hyper-evm-lib/src/common/HLConstants.sol";
 
 import {AfterbellVault} from "../src/AfterbellVault.sol";
 import {RiskParams} from "../src/RiskParams.sol";
 import {MockNVDAx} from "../src/mocks/MockNVDAx.sol";
+import {NaiveLiquidator} from "../src/mocks/NaiveLiquidator.sol";
+import {PoolSeeder} from "../src/mocks/PoolSeeder.sol";
 import {DeployHelpers} from "./DeployHelpers.sol";
 
-/// @notice Deploys MockNVDAx, RiskParams and the vault, then writes deployments/<NETWORK>.json.
-/// Flip the deployer into big-block mode first (see README) — the vault exceeds the 3M small-block cap.
+/// @notice Deploys MockNVDAx, RiskParams, the vault, NaiveLiquidator and PoolSeeder; seeds the vault
+///         (inflation guard) and starts HyperCore account activation; writes deployments/<NETWORK>.json.
+/// Flip the deployer into big-block mode first (see README): the vault exceeds the 3M small-block cap.
 ///
-///   NETWORK=testnet forge script script/Deploy.s.sol --rpc-url hyperevm_testnet --broadcast
+///   NETWORK=testnet forge script script/Deploy.s.sol --rpc-url hyperevm_testnet --broadcast --slow
+///
+/// The deployer needs SEED_DEPOSIT + nothing else in USDC; CORE_ACTIVATION comes out of the seed.
+/// Then wait for `coreUserExists(vault)` before funding margin (README, "After deploy").
 contract Deploy is Script {
-    uint24 constant POOL_FEE = 3000;
-    int24 constant TICK_SPACING = 60;
+    struct Config {
+        string network;
+        address usdc;
+        address depositWallet;
+        address morpho;
+        address poolManager;
+        address nvdax; // 0 → deploy MockNVDAx
+        uint32 perpAsset;
+        uint32 perpDexIndex;
+        uint8 szDecimals;
+        uint256 seed;
+        uint256 activation;
+    }
 
     function run() external {
-        string memory network = vm.envOr("NETWORK", string("testnet"));
-        address usdc = vm.envAddress("USDC_ADDRESS");
-        address morpho = vm.envAddress("MORPHO_ADDRESS");
-        address poolManager = vm.envAddress("POOL_MANAGER_ADDRESS");
-        uint32 perpAsset = uint32(vm.envUint("PERP_ASSET"));
-        uint32 perpDexIndex = uint32(vm.envUint("PERP_DEX_INDEX"));
-        uint8 szDecimals = uint8(vm.envUint("SZ_DECIMALS"));
+        Config memory c = _config();
 
         vm.startBroadcast();
-        address deployer = msg.sender;
+        (, address deployer,) = vm.readCallers(); // the broadcasting account, however run() was invoked
 
-        MockNVDAx nvdax = new MockNVDAx(deployer);
+        address nvdax = c.nvdax != address(0) ? c.nvdax : address(new MockNVDAx(deployer));
         RiskParams risk = new RiskParams(deployer, DeployHelpers.defaultRisk());
+        PoolKey memory key = DeployHelpers.poolKey(c.usdc, nvdax);
 
-        PoolKey memory key = _poolKey(usdc, address(nvdax));
         AfterbellVault vault = new AfterbellVault(
             deployer,
             AfterbellVault.Wiring({
-                usdc: IERC20(usdc),
-                nvdax: IERC20(address(nvdax)),
-                morpho: IMorpho(morpho),
-                poolManager: IPoolManager(poolManager),
+                usdc: IERC20(c.usdc),
+                nvdax: IERC20(nvdax),
+                morpho: IMorpho(c.morpho),
+                poolManager: IPoolManager(c.poolManager),
                 poolKey: key,
                 risk: risk,
-                perpAsset: perpAsset,
-                perpDexIndex: perpDexIndex,
-                szDecimals: szDecimals
+                coreDepositWallet: c.depositWallet,
+                perpAsset: c.perpAsset,
+                perpDexIndex: c.perpDexIndex,
+                szDecimals: c.szDecimals
             })
         );
+        NaiveLiquidator naive =
+            new NaiveLiquidator(deployer, IMorpho(c.morpho), IPoolManager(c.poolManager), key, IERC20(nvdax));
+        PoolSeeder seeder = new PoolSeeder(deployer, IPoolManager(c.poolManager));
 
-        // TODO: seed deposit (inflation guard) + few USDC to Core for account activation
+        // Seed shares stay with the deployer; with the 6-decimal offset this makes share inflation pointless.
+        if (c.seed > 0) {
+            IERC20(c.usdc).approve(address(vault), c.seed);
+            vault.deposit(c.seed, deployer);
+        }
+        // New Core accounts must exist before they send actions, and funding one in the same block doesn't work.
+        if (c.activation > 0) vault.activateCore(c.activation);
         vm.stopBroadcast();
 
-        _write(network, vault);
+        _write(c.network, vault, naive, seeder);
     }
 
-    function _poolKey(address a, address b) internal pure returns (PoolKey memory) {
-        (address c0, address c1) = a < b ? (a, b) : (b, a);
-        return PoolKey(Currency.wrap(c0), Currency.wrap(c1), POOL_FEE, TICK_SPACING, IHooks(address(0)));
+    function _config() internal view returns (Config memory c) {
+        c.network = vm.envOr("NETWORK", string("testnet"));
+        c.usdc = vm.envOr("USDC_ADDRESS", HLConstants.usdc());
+        c.depositWallet = vm.envOr("CORE_DEPOSIT_WALLET", HLConstants.coreDepositWallet());
+        c.morpho = vm.envAddress("MORPHO_ADDRESS");
+        c.poolManager = vm.envAddress("POOL_MANAGER_ADDRESS");
+        c.nvdax = vm.envOr("NVDAX_ADDRESS", address(0));
+        c.perpAsset = uint32(vm.envUint("PERP_ASSET"));
+        c.perpDexIndex = uint32(vm.envUint("PERP_DEX_INDEX"));
+        c.szDecimals = uint8(vm.envUint("SZ_DECIMALS"));
+        c.seed = vm.envOr("SEED_DEPOSIT", uint256(10e6));
+        c.activation = vm.envOr("CORE_ACTIVATION", uint256(2e6));
+        require(c.activation <= c.seed, "activation comes out of the seed deposit");
     }
 
-    function _write(string memory network, AfterbellVault vault) internal {
-        (Currency c0, Currency c1, uint24 fee, int24 tickSpacing, IHooks hooks) = vault.poolKey();
-
+    function _write(string memory network, AfterbellVault vault, NaiveLiquidator naive, PoolSeeder seeder) internal {
         string memory o = "deployment";
         vm.serializeUint(o, "chainId", block.chainid);
         vm.serializeAddress(o, "usdc", address(vault.usdc()));
@@ -75,23 +105,33 @@ contract Deploy is Script {
         vm.serializeAddress(o, "nvdax", address(vault.nvdax()));
         vm.serializeAddress(o, "riskParams", address(vault.risk()));
         vm.serializeAddress(o, "vault", address(vault));
+        vm.serializeAddress(o, "coreDepositWallet", vault.coreDepositWallet());
+        vm.serializeAddress(o, "naiveLiquidator", address(naive));
+        vm.serializeAddress(o, "poolSeeder", address(seeder));
+        vm.serializeString(o, "poolKey", _poolKeyJson(vault));
+        string memory json = vm.serializeString(o, "hypercore", _hypercoreJson(vault));
 
+        string memory path = DeployHelpers.deploymentPath(vm.projectRoot(), network);
+        vm.writeJson(json, path);
+        console.log("wrote", path);
+        console.log("next: CreateMarkets.s.sol, then SeedPool.s.sol");
+    }
+
+    function _poolKeyJson(AfterbellVault vault) internal returns (string memory) {
+        (Currency c0, Currency c1, uint24 fee, int24 tickSpacing, IHooks hooks) = vault.poolKey();
         string memory k = "poolKey";
         vm.serializeAddress(k, "currency0", Currency.unwrap(c0));
         vm.serializeAddress(k, "currency1", Currency.unwrap(c1));
         vm.serializeUint(k, "fee", fee);
         vm.serializeInt(k, "tickSpacing", tickSpacing);
-        string memory keyJson = vm.serializeAddress(k, "hooks", address(hooks));
-        vm.serializeString(o, "poolKey", keyJson);
+        return vm.serializeAddress(k, "hooks", address(hooks));
+    }
 
+    function _hypercoreJson(AfterbellVault vault) internal returns (string memory) {
         string memory h = "hypercore";
         vm.serializeUint(h, "perpAsset", vault.perpAsset());
+        vm.serializeUint(h, "perpIndex", vault.perpIndex());
         vm.serializeUint(h, "perpDexIndex", vault.perpDexIndex());
-        string memory hJson = vm.serializeUint(h, "szDecimals", vault.szDecimals());
-        string memory json = vm.serializeString(o, "hypercore", hJson);
-
-        string memory path = string.concat(vm.projectRoot(), "/../deployments/", network, ".json");
-        vm.writeJson(json, path);
-        console.log("wrote", path);
+        return vm.serializeUint(h, "szDecimals", vault.szDecimals());
     }
 }
