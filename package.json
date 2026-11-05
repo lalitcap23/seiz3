@@ -8,8 +8,8 @@
   "scripts": {
     "contracts:build": "cd contracts && forge build",
     "contracts:test": "cd contracts && forge test --no-match-path 'test/{sim,fork}/*'",
-    "contracts:test:sim": "cd contracts && forge test --match-path 'test/sim/*'",
-    "contracts:test:fork": "cd contracts && forge test --match-path 'test/fork/*'",
+    "contracts:test:sim": "cd contracts && FOUNDRY_PROFILE=sim forge test --match-path 'test/sim/*'",
+    "contracts:test:fork": "cd contracts && FOUNDRY_PROFILE=sim forge test --match-path 'test/fork/*'",
     "contracts:fmt": "cd contracts && forge fmt",
     "codegen": "pnpm contracts:build && pnpm --filter @afterbell/shared codegen",
     "build": "pnpm -r build",

@@ -15,6 +15,7 @@ contracts/out/
 contracts/cache/
 contracts/broadcast/*/31337/
 contracts/broadcast/**/dry-run/
+deployments/test-local.json
 
 # generated
 packages/shared/src/generated/
