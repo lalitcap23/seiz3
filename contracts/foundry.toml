@@ -4,13 +4,15 @@ out = "out"
 libs = ["lib"]
 test = "test"
 script = "script"
-solc_version = "0.8.28"      # >= 0.8.28 for `transient` state vars
+# No global solc pin: real Morpho Blue (=0.8.19) and the v4 PoolManager (=0.8.26) are compiled
+# as test artifacts and deployed with `deployCode`. Our own sources stay on 0.8.28 (transient storage).
+compilation_restrictions = [{ paths = "src/**", version = "=0.8.28" }]
 evm_version = "cancun"
 optimizer = true
 optimizer_runs = 200
 via_ir = false
 ffi = false
-fs_permissions = [{ access = "read-write", path = "../deployments" }]
+fs_permissions = [{ access = "read-write", path = "../deployments" }, { access = "read", path = "./out" }]
 gas_limit = 30_000_000       # big-block cap; runtime calls must stay < 3M
 
 [profile.default.fuzz]
@@ -23,6 +25,15 @@ fail_on_revert = false
 
 [profile.ci.fuzz]
 runs = 2048
+
+[profile.ci.invariant]
+runs = 64
+depth = 500
+
+# Ring 2/3: hyper-evm-lib's simulator embeds HyperCore (~56 KB) in the test contract, which can't deploy under
+# the 30M big-block cap above. Only the simulator needs this; runtime calls are still sized for 3M.
+[profile.sim]
+gas_limit = 9223372036854775807
 
 [rpc_endpoints]
 hyperevm = "${HYPEREVM_RPC_URL}"
