@@ -1,0 +1,259 @@
+/**
+ * Frozen type surface for the Afterbell keeper.
+ *
+ * All on-chain numbers are bigint. Never Number, never floating point.
+ *
+ * Units:
+ * - USDC amounts: 6 decimals.
+ * - NVDAx inventory: 18 decimals.
+ * - confirmedShort: Core size units, negative = short.
+ * - Morpho price: 1e36-scaled oracle price. `collateral * price / 1e36` yields
+ *   borrow-asset units (USDC 6 dec) for an 18-dec collateral / 6-dec loan market.
+ * - LLTV: 1e18 WAD (0.8e18 = 80%).
+ */
+
+export type Address = `0x${string}`;
+export type Hex = `0x${string}`;
+
+/** Mirrors IAfterbellVault.Pending. */
+export interface PendingHedge {
+  readonly delta: bigint;
+  readonly sentBlock: bigint;
+  readonly sentAt: bigint;
+  readonly tries: bigint;
+}
+
+/** Mirrors IAfterbellVault.Risk. */
+export interface Risk {
+  readonly maxLiquidation: bigint;
+  readonly hedgeLeverage: bigint;
+  readonly marginBufferBps: bigint;
+  readonly maxUnhedgedBps: bigint;
+  readonly maxSlippageBps: bigint;
+  readonly oracleBandBps: bigint;
+  readonly maxTries: bigint;
+  readonly orderDelaySec: bigint;
+  readonly unwindCooldownSec: bigint;
+}
+
+export interface BorrowerState {
+  readonly address: Address;
+  readonly collateral: bigint;
+  readonly borrowAssets: bigint;
+}
+
+export interface MarketState {
+  readonly id: Hex;
+  readonly price: bigint;
+  readonly lltv: bigint;
+}
+
+export interface VaultState {
+  readonly blockNumber: bigint;
+  readonly vault: Address;
+  readonly pendingHedge: PendingHedge;
+  readonly inventory: bigint;
+  readonly confirmedShort: bigint;
+  readonly paused: boolean;
+  readonly lastUnwindAt: bigint;
+  readonly idleUsdc: bigint;
+  readonly coreUsdc: bigint;
+  readonly marginRatioBps: bigint;
+  readonly marketOpen: boolean;
+  readonly poolPriceInBand: boolean;
+  readonly risk: Risk;
+  readonly market: MarketState;
+  readonly borrowers: readonly BorrowerState[];
+}
+
+/** Computed rows the keeper always logs before asking the risk engine. */
+export interface BorrowerReport {
+  readonly address: Address;
+  readonly collateral: bigint;
+  readonly borrowAssets: bigint;
+  readonly lltv: bigint;
+  readonly lltvBps: bigint;
+  readonly collateralValueUsdc: bigint;
+  readonly ltvBps: bigint;
+  readonly liquidatable: boolean;
+  readonly maxSeizedAssets: bigint;
+  readonly label?: string;
+}
+
+export interface ScanReport {
+  readonly ts: bigint;
+  readonly blockNumber: bigint;
+  readonly morpho: Address;
+  readonly marketId: Hex;
+  readonly price: bigint;
+  readonly lltv: bigint;
+  readonly borrowers: readonly BorrowerReport[];
+  readonly liquidatableCount: number;
+}
+
+export type Action =
+  | { readonly kind: "syncHedge" }
+  | { readonly kind: "topUpMargin"; readonly amount: bigint }
+  | {
+      readonly kind: "liquidate";
+      readonly marketId: Hex;
+      readonly borrower: Address;
+      readonly seizedAssets: bigint;
+    }
+  | { readonly kind: "unwindStep" }
+  | { readonly kind: "withdrawMargin"; readonly amount: bigint };
+
+export type ActionKind = Action["kind"];
+
+export interface DeploymentBorrower {
+  readonly address: Address;
+  readonly collateral: bigint;
+  readonly borrowAssets: bigint;
+  readonly label?: string;
+}
+
+/** Parsed /shared/deployments.json. */
+export interface DeploymentInfo {
+  readonly chainId: bigint;
+  readonly vault: Address;
+  readonly morpho: Address;
+  readonly marketId: Hex;
+  readonly lltv: bigint;
+  readonly price: bigint;
+  readonly szDecimals: bigint;
+  readonly orderDelaySec: bigint;
+  readonly unwindCooldownOpenSec: bigint;
+  readonly keeperAddress?: Address;
+  readonly borrowers: readonly DeploymentBorrower[];
+}
+
+export interface Config {
+  // chain / identity
+  readonly rpcUrl: string;
+  readonly chainId: bigint;
+  readonly vault: Address;
+  readonly morpho: Address;
+  readonly deploymentsPath: string;
+  readonly keeperPrivateKey: Hex;
+  readonly deployments: DeploymentInfo;
+
+  // risk engine (keeper does not make risk decisions itself)
+  readonly riskEngineUrl: string;
+  readonly riskEngineTimeoutMs: number;
+  readonly riskEngineRetries: number;
+
+  // loop
+  readonly tickMs: number;
+  readonly txTimeoutMs: number;
+  readonly healthPort: number;
+  readonly dryRun: boolean;
+  readonly killSwitchFile: string;
+  readonly killSwitchEnv: boolean;
+
+  // money buffers, 6 dec
+  readonly idleReserveUsdc: bigint;
+  readonly coreReserveUsdc: bigint;
+  readonly topUpUsdc: bigint;
+
+  // safety
+  readonly maxActionsPerMinute: number;
+  readonly maxConsecutiveReverts: number;
+  readonly minSignerBalanceWei: bigint;
+  readonly gasLimitCap: bigint;
+  readonly gasLimitMarginBps: bigint;
+
+  // unwind
+  readonly unwindCooldownOpenSec: bigint;
+}
+
+export type PolicyConfig = Pick<
+  Config,
+  "idleReserveUsdc" | "coreReserveUsdc" | "topUpUsdc" | "unwindCooldownOpenSec"
+>;
+
+/** What the keeper sends to the risk engine. BigInt-safe on the wire. */
+export interface RiskRequest {
+  readonly ts: bigint;
+  readonly chainId: bigint;
+  readonly blockNumber: bigint;
+  readonly vault: Address;
+  readonly morpho: Address;
+  readonly state: {
+    readonly pendingHedge: PendingHedge;
+    readonly inventory: bigint;
+    readonly confirmedShort: bigint;
+    readonly paused: boolean;
+    readonly lastUnwindAt: bigint;
+    readonly idleUsdc: bigint;
+    readonly coreUsdc: bigint;
+    readonly marginRatioBps: bigint;
+    readonly marketOpen: boolean;
+    readonly poolPriceInBand: boolean;
+    readonly risk: Risk;
+    readonly market: MarketState;
+    readonly borrowers: readonly BorrowerReport[];
+  };
+  readonly keeper: {
+    readonly idleReserveUsdc: bigint;
+    readonly coreReserveUsdc: bigint;
+    readonly topUpUsdc: bigint;
+    readonly unwindCooldownOpenSec: bigint;
+    readonly now: bigint;
+  };
+}
+
+/** What the risk engine returns. `confidenceBps` is the engine's own score. */
+export interface RiskDecision {
+  readonly action: Action | null;
+  readonly reason: string;
+  readonly confidenceBps?: bigint;
+  readonly engineVersion?: string;
+}
+
+export type DecisionReason =
+  | "sync-ready"
+  | "wait-same-block"
+  | "wait-order-delay"
+  | "paused"
+  | "topup-ready"
+  | "margin-healthy"
+  | "liquidate-ready"
+  | "no-liquidatable-borrower"
+  | "unwind-ready"
+  | "unwind-cooldown"
+  | "pool-out-of-band"
+  | "withdraw-ready"
+  | "position-open"
+  | "core-at-reserve"
+  | "idle";
+
+export interface Decision {
+  readonly action: Action | null;
+  readonly reason: DecisionReason;
+}
+
+export type GuardReason =
+  | "ok"
+  | "vault-paused"
+  | "hedge-pending"
+  | "no-pending-hedge"
+  | "same-block"
+  | "order-delay"
+  | "margin-above-buffer"
+  | "amount-zero"
+  | "insufficient-idle"
+  | "market-mismatch"
+  | "unknown-borrower"
+  | "borrower-healthy"
+  | "zero-size"
+  | "size-exceeds-collateral"
+  | "size-exceeds-max-liquidation"
+  | "no-inventory"
+  | "pool-out-of-band"
+  | "cooldown-active"
+  | "position-open"
+  | "insufficient-core";
+
+export type GuardResult =
+  | { readonly ok: true; readonly reason: "ok" }
+  | { readonly ok: false; readonly reason: GuardReason };

@@ -6,6 +6,8 @@
     "node": ">=22"
   },
   "scripts": {
+    "test": "pnpm --filter @afterbell/keeper test",
+    "test:scenarios": "pnpm --filter @afterbell/keeper test:scenarios",
     "contracts:build": "cd contracts && forge build",
     "contracts:test": "cd contracts && forge test --no-match-path 'test/{sim,fork}/*'",
     "contracts:test:sim": "cd contracts && forge test --match-path 'test/sim/*'",

@@ -1,0 +1,118 @@
+import { vaultAbi } from "./abi.js";
+import type { KeeperClients } from "./clients.js";
+import { describeError } from "./riskEngine.js";
+import type { Config } from "./types.js";
+
+export interface StartupCheck {
+  readonly name: string;
+  readonly ok: boolean;
+  readonly detail: string;
+}
+
+export interface StartupReport {
+  readonly checks: readonly StartupCheck[];
+}
+
+export class StartupError extends Error {
+  readonly checks: readonly StartupCheck[];
+
+  constructor(checks: readonly StartupCheck[]) {
+    const failed = checks.filter((c) => !c.ok).map((c) => `${c.name}: ${c.detail}`);
+    super(`startup checks failed: ${failed.join("; ")}`);
+    this.name = "StartupError";
+    this.checks = checks;
+  }
+}
+
+export function validateConfig(cfg: Config): string[] {
+  const errors: string[] = [];
+  if (cfg.tickMs < 100 || cfg.tickMs > 60_000) errors.push("tickMs must be between 100 and 60000");
+  if (cfg.maxConsecutiveReverts < 1) errors.push("maxConsecutiveReverts must be >= 1");
+  if (cfg.maxActionsPerMinute < 1) errors.push("maxActionsPerMinute must be >= 1");
+  if (cfg.riskEngineTimeoutMs < 100) errors.push("riskEngineTimeoutMs must be >= 100");
+  if (cfg.riskEngineRetries < 0 || cfg.riskEngineRetries > 10) {
+    errors.push("riskEngineRetries must be between 0 and 10");
+  }
+  if (cfg.gasLimitCap <= 0n || cfg.gasLimitCap > 3_000_000n) {
+    errors.push("gasLimitCap must be between 1 and 3,000,000");
+  }
+  if (cfg.gasLimitMarginBps < 0n || cfg.gasLimitMarginBps > 10_000n) {
+    errors.push("gasLimitMarginBps must be between 0 and 10000");
+  }
+  if (cfg.idleReserveUsdc < 0n || cfg.coreReserveUsdc < 0n || cfg.topUpUsdc < 0n) {
+    errors.push("USDC reserves and topUpUsdc must be >= 0");
+  }
+  if (cfg.unwindCooldownOpenSec < 0n) errors.push("unwindCooldownOpenSec must be >= 0");
+  if (cfg.chainId <= 0n) errors.push("chainId must be > 0");
+  if (cfg.healthPort < 1 || cfg.healthPort > 65_535) errors.push("healthPort is invalid");
+  if (cfg.riskEngineUrl.trim() === "") errors.push("riskEngineUrl is required");
+  if (cfg.vault.toLowerCase() === cfg.morpho.toLowerCase()) {
+    errors.push("vault and morpho must be different addresses");
+  }
+  return errors;
+}
+
+export async function runStartup(
+  cfg: Config,
+  clients: KeeperClients,
+  onCheck: (check: StartupCheck) => void = () => undefined,
+): Promise<StartupReport> {
+  const checks: StartupCheck[] = [];
+  const add = (name: string, ok: boolean, detail: string) => {
+    const check = { name, ok, detail };
+    checks.push(check);
+    onCheck(check);
+  };
+
+  const configErrors = validateConfig(cfg);
+  add("config", configErrors.length === 0, configErrors.length === 0 ? "valid" : configErrors.join("; "));
+  if (configErrors.length > 0) throw new StartupError(checks);
+
+  try {
+    const chainId = await clients.publicClient.getChainId();
+    add(
+      "rpc",
+      chainId === Number(cfg.chainId),
+      `rpc chainId ${chainId}, expected ${cfg.chainId.toString()}`,
+    );
+  } catch (error) {
+    add("rpc", false, describeError(error));
+    throw new StartupError(checks);
+  }
+
+  try {
+    const [vaultCode, morphoCode] = await Promise.all([
+      clients.publicClient.getBytecode({ address: cfg.vault }),
+      clients.publicClient.getBytecode({ address: cfg.morpho }),
+    ]);
+    add("vault-code", vaultCode !== undefined && vaultCode !== "0x", cfg.vault);
+    add("morpho-code", morphoCode !== undefined && morphoCode !== "0x", cfg.morpho);
+  } catch (error) {
+    add("contract-code", false, describeError(error));
+  }
+
+  try {
+    const paused = await clients.publicClient.readContract({
+      address: cfg.vault,
+      abi: vaultAbi,
+      functionName: "paused",
+    });
+    add("abi-probe", typeof paused === "boolean", `vault.paused() -> ${String(paused)}`);
+  } catch (error) {
+    add("abi-probe", false, describeError(error));
+  }
+
+  try {
+    const balance = await clients.publicClient.getBalance({ address: clients.account.address });
+    add(
+      "signer-gas",
+      balance >= cfg.minSignerBalanceWei,
+      `${balance.toString()} wei (min ${cfg.minSignerBalanceWei.toString()})`,
+    );
+  } catch (error) {
+    add("signer-gas", false, describeError(error));
+  }
+
+  if (checks.some((c) => !c.ok)) throw new StartupError(checks);
+  return { checks };
+}

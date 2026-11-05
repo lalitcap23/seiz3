@@ -19,3 +19,9 @@ contracts/broadcast/**/dry-run/
 # generated
 packages/shared/src/generated/
 docs/
+# mock foundry project
+mocks/out/
+mocks/cache/
+mocks/broadcast/
+mocks/shared/
+context.md
