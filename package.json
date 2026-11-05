@@ -1,0 +1,29 @@
+{
+  "name": "afterbell",
+  "private": true,
+  "packageManager": "pnpm@11.17.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "contracts:build": "cd contracts && forge build",
+    "contracts:test": "cd contracts && forge test --no-match-path 'test/{sim,fork}/*'",
+    "contracts:test:sim": "cd contracts && forge test --match-path 'test/sim/*'",
+    "contracts:test:fork": "cd contracts && forge test --match-path 'test/fork/*'",
+    "contracts:fmt": "cd contracts && forge fmt",
+    "codegen": "pnpm contracts:build && pnpm --filter @afterbell/shared codegen",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "format": "prettier --write .",
+    "dev": "pnpm --parallel --filter @afterbell/api --filter @afterbell/web dev",
+    "keeper": "pnpm --filter @afterbell/keeper start",
+    "keeper:replay": "pnpm --filter @afterbell/keeper start --replay",
+    "api": "pnpm --filter @afterbell/api dev",
+    "web": "pnpm --filter @afterbell/web dev",
+    "replay": "pnpm --filter @afterbell/replay start"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.10"
+  }
+}

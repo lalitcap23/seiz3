@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+.env
+.env.*.local
+.env.local
+.DS_Store
+coverage/
+
+# foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/*/31337/
+contracts/broadcast/**/dry-run/
+
+# generated
+packages/shared/src/generated/
+docs/

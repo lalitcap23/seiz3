@@ -1,0 +1,8 @@
+packages:
+  - "packages/*"
+
+# pnpm 11 blocks dependency build scripts unless allowlisted
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true

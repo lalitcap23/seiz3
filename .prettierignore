@@ -1,0 +1,4 @@
+contracts/
+deployments/
+pnpm-lock.yaml
+packages/shared/src/generated/

@@ -1,0 +1,94 @@
+{
+  "updatedAt": 1792400000000,
+  "blockNumber": "1234567",
+  "markets": [
+    {
+      "name": "A_naive",
+      "lltv": 0.77,
+      "totalBorrow": "138600000000",
+      "totalCollateral": "1000000000000000000000",
+      "borrower": {
+        "address": "0x000000000000000000000000000000000000000a",
+        "debt": "138600000000",
+        "collateral": "1000000000000000000000",
+        "ltv": 0.825,
+        "healthy": false
+      },
+      "badDebt": "21400000000",
+      "oraclePrice": 168
+    },
+    {
+      "name": "B_conservative",
+      "lltv": 0.385,
+      "totalBorrow": "69300000000",
+      "totalCollateral": "1000000000000000000000",
+      "borrower": {
+        "address": "0x000000000000000000000000000000000000000b",
+        "debt": "69300000000",
+        "collateral": "1000000000000000000000",
+        "ltv": 0.4125,
+        "healthy": false
+      },
+      "badDebt": "0",
+      "oraclePrice": 168
+    },
+    {
+      "name": "C_afterbell",
+      "lltv": 0.77,
+      "totalBorrow": "0",
+      "totalCollateral": "0",
+      "borrower": {
+        "address": "0x000000000000000000000000000000000000000c",
+        "debt": "0",
+        "collateral": "0",
+        "ltv": 0,
+        "healthy": true
+      },
+      "badDebt": "0",
+      "oraclePrice": 168
+    }
+  ],
+  "vault": {
+    "address": "0x00000000000000000000000000000000000000ab",
+    "inventory": "1000000000000000000000",
+    "confirmedShort": "-1000000",
+    "pendingHedge": { "delta": "0", "sentBlock": "0", "sentAt": 0, "tries": 0 },
+    "hedgeState": "Idle",
+    "hedgeRatio": 1,
+    "paused": false,
+    "totalAssets": "1012400000000",
+    "totalSupply": "1000000000000000000",
+    "sharePrice": 1.0124,
+    "marginFloat": "60000000000"
+  },
+  "hyperliquid": {
+    "coin": "xyz:NVDA",
+    "size": -1000,
+    "entryPx": 168.1,
+    "unrealizedPnl": 120.5,
+    "marginUsed": 56000,
+    "accountValue": 60120.5,
+    "markPx": 167.98,
+    "oraclePx": 168,
+    "explorerUrl": "https://app.hyperliquid.xyz/explorer/address/0x00000000000000000000000000000000000000ab"
+  },
+  "pool": { "price": 151.2, "sqrtPriceX96": "0", "liquidity": "0" },
+  "marketOpen": false,
+  "activity": [
+    {
+      "type": "LiquidationTaken",
+      "txHash": "0x01",
+      "blockNumber": "1234500",
+      "timestamp": 1792399990000,
+      "cloid": "0xabc",
+      "args": { "seized": "1000000000000000000000", "repaid": "138600000000" }
+    },
+    {
+      "type": "HedgeConfirmed",
+      "txHash": "0x02",
+      "blockNumber": "1234506",
+      "timestamp": 1792399996000,
+      "args": { "actual": "-1000000", "target": "-1000000" }
+    }
+  ]
+}
