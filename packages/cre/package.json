@@ -5,10 +5,13 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "compile": "cre-compile market-feed/main.ts dist/market-feed.wasm",
+    "simulate": "cre workflow simulate market-feed --target staging-settings --non-interactive --trigger-index 0"
   },
   "dependencies": {
     "@chainlink/cre-sdk": "~1.6.0",
+    "@noble/hashes": "1.8.0",
     "viem": "^2.57.7",
     "zod": "3.25.76"
   },

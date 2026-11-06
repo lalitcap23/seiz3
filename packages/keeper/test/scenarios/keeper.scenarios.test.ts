@@ -13,7 +13,15 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { createTestClient, createWalletClient, http, type Abi, type Address, type Hex } from "viem";
+import {
+  createTestClient,
+  createWalletClient,
+  encodeAbiParameters,
+  http,
+  type Abi,
+  type Address,
+  type Hex,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { demoOracleAbi, riskParamsAbi } from "@afterbell/shared/abis";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -106,6 +114,23 @@ async function setRisk(patch: Partial<{ leverage: number; maxLiquidation: bigint
       abi: riskParamsAbi,
       functionName: "setParams",
       args: [{ ...current, ...patch }],
+    }),
+  );
+}
+
+/** A Chainlink CRE market report. On anvil the deployer stands in for the forwarder (DeployHelpers.creForwarder). */
+async function creReport(open: boolean, hedgeCapacity: bigint): Promise<void> {
+  const { timestamp } = await keeper.publicClient.getBlock();
+  const report = encodeAbiParameters(
+    [{ type: "bool" }, { type: "uint256" }, { type: "uint64" }],
+    [open, hedgeCapacity, timestamp],
+  );
+  await mined(
+    await admin.writeContract({
+      address: deployment.riskParams,
+      abi: riskParamsAbi,
+      functionName: "onReport",
+      args: ["0x", report],
     }),
   );
 }
@@ -369,4 +394,28 @@ describe("keeper scenarios on the real contracts", () => {
 
     expect(decision).toEqual({ action: null, reason: "forced-idle" });
   }, 30_000);
+
+  // last: these move anvil's clock
+
+  it("sizes the liquidation to the Chainlink CRE hedge capacity", async () => {
+    await creReport(false, 2_000_000000n); // HyperCore's book takes $2,000 inside the hedge band
+    await setPrice(DROP_USD6);
+
+    const taken = await step("liquidate");
+    expect((taken.inventory * DROP_USD6) / NVDAX).toBeLessThanOrEqual(2_000_000000n);
+    expect(taken.inventory).toBeGreaterThan(9n * NVDAX); // the debt alone would take > 80 NVDAx
+    expect(taken.pendingHedge.delta).toBe(-coreUnits(taken.inventory));
+  }, 60_000);
+
+  it("stops liquidating once the CRE report is stale", async () => {
+    await creReport(true, 50_000_000000n);
+    await setPrice(DROP_USD6);
+    await anvil.increaseTime({ seconds: 301 }); // RiskParams.maxReportAge is 300
+    await anvil.mine({ blocks: 1 });
+
+    const { state, decision } = await decide();
+    expect(state.risk.maxLiquidation).toBe(0n);
+    expect(state.marketOpen).toBe(false);
+    expect(decision.action?.kind).not.toBe("liquidate");
+  }, 60_000);
 });

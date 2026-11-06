@@ -1,5 +1,5 @@
 import { Runner } from "@chainlink/cre-sdk";
-import { configSchema, initWorkflow } from "./workflow";
+import { configSchema, initWorkflow } from "../src/workflow";
 
 export async function main() {
   const runner = await Runner.newRunner({ configSchema });

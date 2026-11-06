@@ -1,156 +1,99 @@
-# Afterbell × Chainlink Runtime Environment (CRE)
+# Afterbell market feed (Chainlink CRE)
 
-The keeper's decision loop, expressed as a CRE workflow — the **Chainlink "Best workflow with CRE"** track entry.
+The vault needs two facts it can't read on-chain:
+
+1. **Is the US stock market open?** Chainlink Data Streams' `marketStatus` for NVDA.
+2. **How much can the xyz:NVDA book absorb?** HyperCore's precompiles give the oracle, not the book depth, and a partial hedge fill on a thin weekend book is Afterbell's main failure mode.
+
+The contract has to trust both, so they come from a CRE workflow: every node fetches them on its own, and the DON signs only what the nodes agree on.
 
 ```
-cron ──► read Morpho position + market (EVM) ──► read Hyperliquid perp price (HTTP, DON consensus)
-      ──► risk checks (Morpho health, oracle band, size cap, core lot)
-      ──► DON-signed report ──► CreKeeperGateway.onReport ──► AfterbellVault.liquidate
+cron (1 min)
+  ─► RiskParams.params()                     EVM read: hedgeCapBps, the band the vault's IOC hedge sells into
+  ─► Data Streams /api/v1/reports/latest     node mode, HMAC-signed; v8 or v11 report → marketStatus
+  ─► Hyperliquid l2Book + metaAndAssetCtxs   node mode; bids within hedgeCapBps of the oracle × oracle
+  ─► consensus: identical status, median capacity
+  ─► DON-signed report ─► forwarder ─► RiskParams.onReport(open, hedgeCapacity, observedAt)
 ```
 
-Why CRE fits: Afterbell runs on HyperEVM, which CCIP has no lane to — but CRE is chain-agnostic
-orchestration: it connects the on-chain lending market to the **off-chain, always-open Hyperliquid
-market** through plain RPC + HTTP. The vault remains the final authority; CRE is the data-connected,
-auditable brain. The qualification rule says *"simulation is enough"* — that is what `pnpm test` produces.
+What reads it:
 
-## Do you need any keys?
+| Consumer | Reads | Effect |
+| --- | --- | --- |
+| `AfterbellVault.liquidate` | `risk.get().maxLiquidation` | capped at the hedge capacity: the vault never buys more stock than HyperCore's book can hedge |
+| `AfterbellHook` | `risk.marketOpen()` | 0.3% fee / 0.1% spread while open, 1% / 1% after the bell |
+| `AfterbellVault.unwindStep` | `risk.cooldown()` | 10 s between unwind chunks while open, 300 s closed |
+| keeper | `risk.get()`, `marketOpen()` | sizes liquidations to the same cap |
 
-**No keys for the simulation.**
+`RiskParams` ([contracts/src/RiskParams.sol](../../contracts/src/RiskParams.sol)) is the receiver, built on Chainlink's `ReceiverTemplate`:
 
-| Path | Needs |
-|---|---|
-| `pnpm --filter @afterbell/cre test` (offline simulation) | **nothing** — SDK test runtime + stubbed HTTP, no network, no keys |
-| CRE CLI dry-run vs a chain (`cre workflow simulate …`) | public RPC only (HyperEVM testnet's is public) |
-| `--broadcast` (real on-chain write) | a funded keeper wallet + a deployed `CreKeeperGateway` + the chain's Keystone Forwarder address |
-| (optional, not wired) LLM news-check step | an LLM API key in `secrets.yaml` |
+- The report takes over from the owner's values at the first one.
+- A report older than `maxReportAge` (300 s, five cron runs) fails closed: `maxLiquidation` 0 and after-hours pricing.
+- Reports must arrive in observation order, and no more than 60 s ahead of the block.
+- `setMaxReportAge(0)` turns the feed off; the owner's `setMarketOpen` and caps apply again.
+- The forwarder is pinned. `setExpectedWorkflowId` / `setExpectedAuthor` pin the workflow too.
 
-The Hyperliquid info API is public — the HTTP step needs no key. `secrets.yaml` at the repo root is a
-placeholder for optional keys and is gitignored.
+No vault bytecode changed: it already loads both values through `risk.get()` and `risk.marketOpen()`.
 
-## Run the simulation (the prize deliverable)
-
-```bash
-pnpm install
-pnpm --filter @afterbell/cre test
-```
-
-**12 scenarios, all offline:**
-
-| # | Scenario |
-|---|---|
-| 1 | healthy borrower → skip |
-| 2 | underwater borrower → liquidate |
-| 3 | lending/Core oracle gap beyond band → skip |
-| 4 | no collateral → skip |
-| 5 | seized notional capped at `maxSeizedUsdc` |
-| 6 | sizing uses Morpho's LIF, not naive `debt / LLTV` |
-| 7 | sub-one-core-lot size → skip (vault would revert `ZeroSize`) |
-| 8 | failed DON write throws |
-| 9 | external Hyperliquid price feeds the decision |
-| 10 | report payload is raw `abi.encode`, not `onReport` calldata |
-| 11 | LIF formula matches Morpho (`1.0741…` at 77% LLTV) |
-| 12 | borrow shares → assets matches Morpho's virtual shares |
-| 13 | HyperEVM testnet resolves in the CRE chain registry |
-
-Expected: `13 passed`. Typecheck: `pnpm --filter @afterbell/cre typecheck`.
-
-The Solidity receiver has its own on-chain proof:
-
-```bash
-cd contracts && forge test --match-contract CreKeeperGatewayTest
-```
-
-3 tests: the raw `abi.encode` report reaches `vault.liquidate`, a non-forwarder is rejected, and
-the 62-byte metadata + workflow-id pinning behave correctly.
-
-## Run the workflow with the CRE CLI
-
-```bash
-cd packages/cre
-cre workflow simulate my-workflow --target staging-settings               # dry run
-cre workflow simulate my-workflow --target staging-settings --broadcast   # real tx (wallet + gateway)
-```
-
-✅ **Chain support confirmed in the SDK:** `@chainlink/cre-sdk` 1.6.0's registry lists
-`hyperliquid-testnet` (selector `4286062357653186312n`) and `hyperliquid-mainnet`
-(`2442541497099098535n`), so `getNetwork({ chainSelectorName: "hyperliquid-testnet" })` resolves.
-
-## Deep check — what was broken and what is now fixed
-
-This package was reviewed against the actual SDK 1.6.0 source and Morpho's contracts. Six real
-issues were found and fixed:
-
-1. **Report payload was wrong (would always revert).** `writeReport` delivers the signed payload to
-   `gateway.onReport(metadata, report)`; `metadata` is injected by the forwarder. The payload must be
-   raw `abi.encode(marketId, borrower, seized)` — not `encodeFunctionData(onReport, …)`. The old code
-   nested the call and the gateway's `abi.decode` would fail.
-2. **Metadata length check was wrong.** CRE metadata is `abi.encodePacked(bytes32 workflowId,
-   bytes10 name, address owner)` = **62 bytes**. The hand-rolled receiver required 86, and would have
-   silently decoded `bytes32(0)` for every valid report. Replaced with Chainlink's official
-   `ReceiverTemplate` (forwarder allow-list + optional author/name/workflow-id pinning).
-3. **HTTP price was single-node.** The plain `sendRequest(runtime, request)` overload executes once,
-   with no DON agreement. A liquidation price must be consensus-agreed: now uses the
-   `sendRequest(runtime, fn, consensusMedianAggregation())` overload, where every node fetches and
-   the DON takes the median.
-4. **Seize size was ~21% too large.** Morpho's bonus is
-   `min(1.15, 1/(1 − 0.3×(1 − LLTV)))` ≈ **1.0741** at 77% LLTV, not `1/LLTV` ≈ 1.2987. Over-sizing
-   makes Morpho revert on repayment. `risk.ts` now reproduces Morpho's exact formula.
-5. **Borrow shares were treated as assets.** Morpho stores debt as shares and converts with virtual
-   shares/assets (`toAssetsUp`). The workflow now reads `market(id)` totals and converts exactly.
-6. **Health used the wrong oracle.** Liquidatability is determined by Morpho's own oracle; using the
-   Hyperliquid price could flag a healthy position and revert `HEALTHY_POSITION`. Health now uses the
-   lending oracle; the Core price is used for the band check and the vault's notional cap. A
-   sub-one-core-lot guard was also added (`ZeroSize` revert).
-
-Also fixed: `gasLimit` was `"1_500_000"` (invalid uint64 string — now `"1500000"`), and the gateway
-was moved into `contracts/src/cre/` where Foundry can actually compile it (`forge build` ✅).
-
-### Honest limits
-
-- **Not broadcast.** `--broadcast` needs the gateway deployed and the workflow registered on CRE; the
-  hackathon entry is the simulation. The gateway compiles but is not deployed.
-- **Bindings tests use test doubles** for the on-chain reads/writes (so the suite is network-free).
-  The SDK read/write path is typechecked and the report encoding is asserted byte-for-byte, but the
-  live RPC round-trip is not exercised here.
-- **`AfterbellVault.liquidate` is permissionless** (no caller allow-list). The gateway is the
-  *attested orchestration path*, not the only path; the vault still enforces market allow-list,
-  oracle band, notional cap, and margin on every call.
-- The `DemoOracle` price conversion assumes the 6/18-dec USDC/NVDAx pair (`USD × 1e24`). A market
-  with different token decimals needs the scale adjusted.
-- **One borrower per workflow config.** Production would loop a watchlist; the CRE cron would scan
-  each borrower in the same run.
-- **No report deadline/nonce yet.** The gateway authenticates the DON signature but does not reject a
-  stale report; Morpho still re-checks health at execution, but production should add
-  `(deadline, nonce)` to the report and reject expired/replayed ones.
-- Cron granularity is one minute (`0 */1 * * * *`), matching the official CRE templates.
-
-## Layout
+## Files
 
 ```
 packages/cre/
-├─ src/workflow.ts       cron → reads → checks → DON-signed write
-├─ src/bindings.ts       Morpho/DemoOracle reads + raw report write to the gateway
-├─ src/hyperliquid.ts    HTTP step with DON median consensus: xyz:NVDA 5m close → USDC
-├─ src/risk.ts           Morpho-exact health, LIF sizing, caps, core-lot guard
-├─ src/main.ts           Runner entry for the CRE CLI
-├─ config.staging.json   real HyperEVM testnet addresses (deployments/testnet.json)
-├─ config.production.json
-└─ test/workflow.test.ts the 12 offline simulations
-
-contracts/src/cre/
-├─ CreKeeperGateway.sol  authenticates a DON report → vault.liquidate
-├─ ReceiverTemplate.sol  Chainlink official reference receiver (MIT)
-├─ IReceiver.sol / IERC165.sol
-└─ (test) contracts/test/unit/CreKeeperGateway.t.sol — report decoding + auth, 3 forge tests
+├─ project.yaml              RPCs per target (hyperliquid-testnet / hyperliquid-mainnet)
+├─ secrets.yaml              DATA_STREAMS_API_KEY / DATA_STREAMS_API_SECRET → env vars
+├─ .env.example              copy to .env for the CLI (gitignored)
+├─ market-feed/              the workflow: workflow.yaml, main.ts, config.{staging,production}.json
+├─ src/workflow.ts           cron handler: read → two consensus rounds → one signed write
+├─ src/datastreams.ts        HMAC auth, v8/v11 report decoding
+├─ src/hyperliquid.ts        l2Book + oracle per node
+├─ src/book.ts               capacity math, bigint only
+├─ src/riskParams.ts         RiskParams read + report encoding/write
+└─ test/workflow.test.ts     19 tests on the SDK's test runtime
 ```
 
-## How it plugs into the rest of Afterbell
+## Run it
 
-The keeper bot (`packages/keeper`) already liquidates; this workflow is the **orchestration-layer
-version of the same rules** — same checks (`oracleBandBps`, health, caps), different brain. In the
-pitch it is the institutional angle: *the liquidation decision runs as an attested, versioned CRE
-workflow connecting Morpho to Hyperliquid, replayed here as a simulation.*
+Offline, no keys. The tests run the real handler through the SDK test runtime: secrets, node-mode consensus, the HTTP and EVM capabilities and `writeReport`, with only the far ends mocked.
 
-**One-liner for judges:** *"The keeper is a CRE workflow executed by a Chainlink DON — independent
-nodes read Morpho and Hyperliquid, agree the position is underwater, and co-sign the liquidation.
-Auditable, tamper-resistant, always open."*
+```bash
+pnpm --filter @afterbell/cre test        # 19 tests
+pnpm --filter @afterbell/cre typecheck
+pnpm --filter @afterbell/cre compile     # the CLI's own build: cre-compile → dist/market-feed.wasm
+```
+
+With the CRE CLI against HyperEVM testnet, from the repo root (Data Streams credentials from `.env.local`: `DATA_STREAM_USERNAME`, `HMAC_SECRET`; the deployer pays for `--broadcast`):
+
+```bash
+scripts/testnet-stack.sh cre                 # dry run
+scripts/testnet-stack.sh cre --broadcast     # the report lands in RiskParams
+```
+
+Or by hand:
+
+```bash
+curl -sSL https://app.chain.link/cre/install.sh | bash   # once
+cre login                                                # once, opens the browser
+cd packages/cre && cp .env.example .env                  # Data Streams key + secret; CRE_ETH_PRIVATE_KEY for --broadcast
+cre workflow simulate market-feed --target staging-settings                 # dry run: the write is prepared, not sent
+cre workflow simulate market-feed --target staging-settings --broadcast     # sends the report through the forwarder
+```
+
+`config.staging.json` points at the testnet RiskParams (`deployments/testnet.json`). On HyperEVM testnet that RiskParams trusts the **simulation** forwarder `0xB27fA1c28288c50542527F64BCda22C9FbAc24CB`, which is what `--broadcast` writes through. The production forwarders are `0x76c9cf54…` (testnet) and `0x9eF6468C…` (mainnet), for a workflow deployed to the DON; `DeployHelpers.creForwarder` picks mainnet's on chain 999.
+
+Then check what landed:
+
+```bash
+cast call <riskParams> 'lastReport()(bool,uint64,uint128)' --rpc-url https://rpc.hyperliquid-testnet.xyz/evm
+cast call <riskParams> 'get()((uint256,uint64,uint16,uint16,uint16,uint16,uint16,uint16,uint8,uint32,uint32,uint32,uint256,uint16,uint8))' --rpc-url …
+```
+
+## Things to know
+
+- **A simulated feed goes stale.** On testnet, nothing reruns the workflow every minute the way a DON would, so `maxReportAge` passes and liquidations stop (by design). Rerun the simulation before a demo, or `setMaxReportAge(0)` to go back to the owner's values.
+- **Anyone can call the simulation forwarder.** It doesn't check DON signatures. After the first `--broadcast`, pin the workflow with `setExpectedWorkflowId`, or `setExpectedAuthor` plus `setExpectedWorkflowName`. Production uses the real forwarder, which checks the DON's signatures.
+- **The status must match on every node.** A run that lands on an open/close boundary can see nodes disagree; it fails, and the next minute's run reports.
+- **Capacity is the visible book.** `l2Book` returns 20 levels a side. A band deeper than that is undercounted, which errs safe. `bookShareBps` (production 50%) leaves room for everyone else trading into the same bids.
+- **`observedAt` is the older of the two reads**, so a fresh book can't make an old market status look fresh.
+- **Data Streams is mainnet-only for these credentials**, whatever chain the report goes to: staging reads `api.dataengine.chain.link`. The key must be authorized for the feed (`GET /api/v1/feeds` lists what it can read); otherwise every run stops at `HTTP 401 feeds not authorized`.
+- **The API sits behind Cloudflare**, which rejects some clients' default User-Agent (error 1010), so the request sends its own.
+- **No `z.string().url()` in the config schema**: it needs the `URL` global, which the CRE runtime doesn't have, and every URL fails validation.

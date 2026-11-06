@@ -1,75 +1,67 @@
-// External data step: Hyperliquid's public info API — the perp oracle the vault hedges against.
-// This is the "connect a blockchain to an external API" leg of the CRE qualification: the
-// workflow reads on-chain state (Morpho/DemoOracle) and the off-chain Hyperliquid market in the
-// same run.
-//
-// IMPORTANT: this uses the *consensus* overload of sendRequest. Every DON node performs the
-// fetch independently and the results are aggregated (median here); a single node's response
-// can never decide a liquidation. The plain sendRequest(runtime, request) overload executes
-// once, without DON agreement — not acceptable for a price that authorizes a write.
+// Hyperliquid's info API, read by every node in node mode: xyz:NVDA's order book (`l2Book`) and its oracle price
+// (`metaAndAssetCtxs` on the xyz dex). The HyperCore precompiles give the vault the oracle, but not the book.
 
-import {
-  consensusMedianAggregation,
-  cre,
-  ok,
-  text,
-  type HTTPSendRequester,
-  type Runtime,
-} from "@chainlink/cre-sdk";
+import { cre, ok, text, type NodeRuntime } from "@chainlink/cre-sdk";
+
+import { hedgeCapacityUsd6, parseDecimal, type Level } from "./book";
 
 export interface HyperliquidConfig {
   readonly apiUrl: string;
-  readonly coin: string; // e.g. "xyz:NVDA" — the HIP-3 perp the vault shorts
+  readonly dex: string; // HIP-3 dex the perp lives on, e.g. "xyz"
+  readonly coin: string; // e.g. "xyz:NVDA", the perp the vault shorts
 }
 
-interface CandleResponse {
-  readonly t: number;
-  readonly o: string;
-  readonly h: string;
-  readonly l: string;
-  readonly c: string;
-  readonly v: string;
+/** One node's view of the book; the DON takes the median of each field. */
+export interface BookRead {
+  readonly capacityUsd6: bigint;
+  readonly observedAt: number; // unix seconds of the book snapshot
 }
 
-const USDC = 1_000_000n;
+interface L2Book {
+  readonly coin: string;
+  readonly time: number; // ms
+  readonly levels: readonly [readonly Level[], readonly Level[]]; // [bids, asks], best first
+}
 
-/**
- * Last 5m-candle close of `coin`, scaled to USDC (6 decimals) per unit.
- * Fetched by every node; the DON agrees on the median before the value is used.
- */
-export function readPerpPriceUsd6(runtime: Runtime<unknown>, config: HyperliquidConfig): bigint {
-  const http = new cre.capabilities.HTTPClient();
+type MetaAndAssetCtxs = readonly [
+  { readonly universe: readonly { readonly name: string }[] },
+  readonly { readonly oraclePx: string }[],
+];
 
-  const fetchClose = (requester: HTTPSendRequester, cfg: HyperliquidConfig): bigint => {
-    const response = requester
-      .sendRequest({
-        url: cfg.apiUrl,
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          type: "candleSnapshot",
-          req: {
-            coin: cfg.coin,
-            interval: "5m",
-            startTime: Date.now() - 15 * 60_000,
-            endTime: Date.now(),
-          },
-        }),
-      })
-      .result();
-
-    if (!ok(response)) throw new Error(`hyperliquid HTTP ${response.statusCode}`);
-    const candles = JSON.parse(text(response)) as CandleResponse[];
-    const last = candles[candles.length - 1];
-    if (!last) throw new Error("hyperliquid: no candles returned");
-
-    const usd6 = BigInt(Math.round(Number(last.c) * Number(USDC)));
-    if (usd6 <= 0n) throw new Error("hyperliquid price non-positive");
-    return usd6;
-  };
-
-  return http
-    .sendRequest(runtime, fetchClose, consensusMedianAggregation<bigint>())
-    (config)
+function post<T>(nodeRuntime: NodeRuntime<unknown>, url: string, body: object): T {
+  const response = new cre.capabilities.HTTPClient()
+    .sendRequest(nodeRuntime, {
+      url,
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: Buffer.from(JSON.stringify(body)).toString("base64"),
+    })
     .result();
+  if (!ok(response)) throw new Error(`hyperliquid ${JSON.stringify(body)}: HTTP ${response.statusCode}`);
+  return JSON.parse(text(response)) as T;
+}
+
+export function oracleUsd6(ctxs: MetaAndAssetCtxs, coin: string): bigint {
+  const [meta, assets] = ctxs;
+  const i = meta.universe.findIndex((a) => a.name === coin);
+  const px = i < 0 ? undefined : assets[i]?.oraclePx;
+  if (px === undefined) throw new Error(`hyperliquid: no oracle price for ${coin}`);
+  return parseDecimal(px, 6);
+}
+
+/** What one hedge can sell into on `coin`'s book right now, and when the book was read. */
+export function readHedgeCapacity(
+  nodeRuntime: NodeRuntime<unknown>,
+  cfg: HyperliquidConfig,
+  hedgeCapBps: bigint,
+  bookShareBps: bigint,
+): BookRead {
+  const book = post<L2Book>(nodeRuntime, cfg.apiUrl, { type: "l2Book", coin: cfg.coin });
+  if (book.coin !== cfg.coin) throw new Error(`hyperliquid: asked for ${cfg.coin}, got ${book.coin}`);
+  const oracle = oracleUsd6(post<MetaAndAssetCtxs>(nodeRuntime, cfg.apiUrl, { type: "metaAndAssetCtxs", dex: cfg.dex }), cfg.coin);
+  if (oracle === 0n) throw new Error(`hyperliquid: zero oracle price for ${cfg.coin}`);
+  return {
+    capacityUsd6: hedgeCapacityUsd6(book.levels[0], oracle, hedgeCapBps, bookShareBps),
+    observedAt: Math.floor(book.time / 1000),
+  };
 }

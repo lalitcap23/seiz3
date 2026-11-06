@@ -1,12 +1,14 @@
-// ==========================================================================
-// CRE PROJECT SETTINGS FILE — Afterbell
-// ==========================================================================
+# CRE project settings: the RPC each target reads and writes through. chain-name must be the CRE chain selector name.
 staging-settings:
+  cre-cli:
+    don-family: "zone-a"
   rpcs:
-    - chain-name: hyperevm-testnet
+    - chain-name: hyperliquid-testnet
       url: https://rpc.hyperliquid-testnet.xyz/evm
 
 production-settings:
+  cre-cli:
+    don-family: "zone-a"
   rpcs:
-    - chain-name: hyperevm-testnet
-      url: https://rpc.hyperliquid-testnet.xyz/evm
+    - chain-name: hyperliquid-mainnet
+      url: https://rpc.hyperliquid.xyz/evm

@@ -1,0 +1,19 @@
+{
+  "schedule": "0 */1 * * * *",
+  "evm": {
+    "chainSelectorName": "hyperliquid-mainnet",
+    "isTestnet": false,
+    "riskParams": "0x0000000000000000000000000000000000000000",
+    "gasLimit": "300000"
+  },
+  "dataStreams": {
+    "apiUrl": "https://api.dataengine.chain.link",
+    "feedId": "0x0008adc184847ba8d17f0030c15e78f61b83eda2e190f30346c4ea3babed647d"
+  },
+  "hyperliquid": {
+    "apiUrl": "https://api.hyperliquid.xyz/info",
+    "dex": "xyz",
+    "coin": "xyz:NVDA"
+  },
+  "bookShareBps": 5000
+}

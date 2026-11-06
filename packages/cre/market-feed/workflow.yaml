@@ -1,0 +1,17 @@
+# CRE workflow settings for the Afterbell market feed. Paths are relative to this folder.
+#   cre workflow simulate market-feed --target staging-settings              (from packages/cre)
+staging-settings:
+  user-workflow:
+    workflow-name: "afterbell-market-feed-staging"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.staging.json"
+    secrets-path: "../secrets.yaml"
+
+production-settings:
+  user-workflow:
+    workflow-name: "afterbell-market-feed"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.production.json"
+    secrets-path: "../secrets.yaml"

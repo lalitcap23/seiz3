@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "tsx --env-file-if-exists=../../.env src/index.ts",
+    "hl-admin": "tsx src/hlAdmin.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
