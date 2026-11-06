@@ -22,7 +22,13 @@
 #   pnpm --filter @afterbell/keeper risk-engine:stub   # its own terminal
 #   scripts/testnet-stack.sh keeper                    # its own terminal
 #   scripts/testnet-stack.sh crash           # market C oracle 1.4% under HyperCore's: the keeper liquidates and hedges
-#   scripts/testnet-stack.sh cre [--broadcast]   # the Chainlink CRE market feed → RiskParams (needs `cre login`)
+#   scripts/testnet-stack.sh release         # after the liquidation: the bots move market C back to HyperCore's price
+#   scripts/testnet-stack.sh borrow <nvdax>  # the next round's borrower, just under the LLTV; then crash again
+#   scripts/testnet-stack.sh hook-fill <usdc> # a buyer filled by the v4 hook from the vault's hedged stock
+#   scripts/testnet-stack.sh cre [--broadcast]   # one run of the Chainlink CRE market feed → RiskParams (`cre login` once)
+#   scripts/testnet-stack.sh cre-loop            # a report every minute, as a DON would: keep it running for the demo
+#   scripts/testnet-stack.sh cre-status          # the last report, its age, and what the vault reads from it
+#   scripts/testnet-stack.sh cre-off | cre-on    # ignore the feed (the owner's values) | use it again
 #
 # Public testers (after step 3, same vault):
 #   scripts/testnet-stack.sh extras                 # Faucet, swap router, NaiveLiquidator on its own thin pool
@@ -50,7 +56,7 @@ RPC=${RPC_URL:-https://rpc.hyperliquid-testnet.xyz/evm}
 API=${HL_INFO_API_URL:-https://api.hyperliquid-testnet.xyz/info}
 INFRA_JSON=$ROOT/deployments/testnet-infra.json
 DEP_JSON=$ROOT/deployments/testnet.json
-HOLD_FILE=$ROOT/deployments/BOTS_HOLD # while it exists the oracle and pool bots stand still
+HOLD_FILE=$ROOT/deployments/BOTS_HOLD # while it exists the market oracle follower stands still (the pool bot doesn't)
 DEPLOYER=$(cast wallet address "$DEPLOYER_PRIVATE_KEY")
 # xyz:NVDA on testnet (info API `perpDexs` / `meta`): mainnet is dex 1, asset 110002
 PERP_DEX_INDEX=65
@@ -199,11 +205,157 @@ fund_faucet() {
   echo "faucet $faucet funded: +$nvdax NVDAx, +$usdc USDC, +$hype HYPE"
 }
 
+# faucet-cooldown <seconds>: how often one address may drip (the drip sizes stay as they are)
+faucet_cooldown() {
+  local cooldown=${1:?usage: faucet-cooldown <seconds>} faucet nvdax usdc native
+  faucet=$(json "$DEP_JSON" faucet)
+  nvdax=$(call "$faucet" "nvdaxDrip()(uint256)")
+  usdc=$(call "$faucet" "usdcDrip()(uint256)")
+  native=$(call "$faucet" "nativeDrip()(uint256)")
+  send "$faucet" "setDrips(uint256,uint256,uint256,uint64)" "$nvdax" "$usdc" "$native" "$cooldown"
+  echo "faucet: $(cast format-units "$nvdax" 18) NVDAx + $(cast format-units "$usdc" 6) USDC + HYPE up to" \
+    "$(cast format-units "$native" 18), once per $(call "$faucet" "cooldown()(uint64)") s per address"
+}
+
+# RiskParams.Params, in declaration order (contracts/src/RiskParams.sol)
+RISK_FIELDS="maxLiquidation maxUnhedged leverage marginBufferBps minDiscountBps oracleBandBps hedgeCapBps maxSlippageBps maxTries orderDelaySec cooldownOpenSec cooldownClosedSec withdrawReserve maxImpactBps transitBlocks"
+RISK_TUPLE="(uint256,uint64,uint16,uint16,uint16,uint16,uint16,uint16,uint8,uint32,uint32,uint32,uint256,uint16,uint8)"
+
+# risk-set <field> <value> [<field> <value> …]: change the owner's caps by name; every other field stays as it is
+risk_set() {
+  [[ $# -ge 2 && $(($# % 2)) == 0 ]] || { echo "usage: risk-set <field> <value> [...] (fields: $RISK_FIELDS)" >&2; exit 1; }
+  local rp current next
+  rp=$(json "$DEP_JSON" riskParams)
+  current=$(cast call "$rp" "params()($RISK_TUPLE)" --rpc-url "$RPC") # one tuple: "(a [1e…], b, …)"
+  next=$(node -e '
+    const [raw, names, ...pairs] = process.argv.slice(1);
+    const fields = names.split(" ");
+    const values = raw.replace(/^\(|\)$/g, "").split(", ").map((v) => v.replace(/ \[.*\]$/, ""));
+    for (let i = 0; i < pairs.length; i += 2) {
+      const at = fields.indexOf(pairs[i]);
+      if (at < 0) { console.error(`no RiskParams field ${pairs[i]}`); process.exit(1); }
+      console.error(`${pairs[i]}: ${values[at]} → ${pairs[i + 1]}`);
+      values[at] = pairs[i + 1];
+    }
+    console.log(`(${values.join(",")})`);
+  ' "$current" "$RISK_FIELDS" "$@")
+  send "$rp" "setParams($RISK_TUPLE)" "$next"
+}
+
 fund_naive() {
   local naive
   naive=$(json "$DEP_JSON" naiveLiquidator)
   send "$(json "$DEP_JSON" usdc)" "transfer(address,uint256)" "$naive" "$((${1:?usage: fund-naive <usdc>} * 1000000))"
   echo "NaiveLiquidator $naive funded"
+}
+
+# borrow <nvdax>: a fresh market C borrower for the next demo round (TestnetActors only runs before the vault's first
+# Core deposit). The deployer adds <nvdax> of collateral and borrows up to LTV_BPS of all its market C collateral at
+# HyperCore's live price, where the bots hold market C's oracle, so `crash` makes it liquidatable. Bounded by what
+# the market can lend; records the borrow price for crash.
+borrow() {
+  local amount=${1:?usage: borrow <nvdax>} px oracle_px morpho id params nvdax wei pos mkt amt
+  [[ -f $HOLD_FILE ]] && { echo "market C's oracle is on hold (after a crash): scripts/testnet-stack.sh release first" >&2; exit 1; }
+  px=$(oracle_usd6)
+  oracle_px=$(call "$(json "$DEP_JSON" markets.C_afterbell.oracle)" "price()(uint256)")
+  # DemoOracle price = usd6 × 1e18: wait for the oracle follower if market C isn't at HyperCore's price yet
+  if [[ $oracle_px != "${px}000000000000000000" ]]; then
+    echo "market C's oracle isn't at HyperCore's \$$(cast format-units "$px" 6) yet (the bots' oracle follower moves it)" >&2
+    exit 1
+  fi
+  morpho=$(json "$DEP_JSON" morpho)
+  id=$(json "$DEP_JSON" markets.C_afterbell.id)
+  params="($(cast call "$morpho" "idToMarketParams(bytes32)(address,address,address,address,uint256)" "$id" \
+    --rpc-url "$RPC" | awk '{print $1}' | paste -sd, -))"
+  nvdax=$(json "$DEP_JSON" nvdax)
+  wei=$(cast to-wei "$amount")
+  send "$nvdax" "mint(address,uint256)" "$DEPLOYER" "$wei"
+  send "$nvdax" "approve(address,uint256)" "$morpho" "$wei"
+  send "$morpho" "supplyCollateral((address,address,address,address,uint256),uint256,address,bytes)" "$params" "$wei" \
+    "$DEPLOYER" 0x
+  pos=$(cast call "$morpho" "position(bytes32,address)(uint256,uint128,uint128)" "$id" "$DEPLOYER" --rpc-url "$RPC" |
+    awk '{print $1}' | paste -sd' ' -)
+  mkt=$(cast call "$morpho" "market(bytes32)(uint128,uint128,uint128,uint128,uint128,uint128)" "$id" --rpc-url "$RPC" |
+    awk '{print $1}' | paste -sd' ' -)
+  # LTV_BPS of the collateral's value, less the debt already owed, capped by the market's idle supply
+  amt=$(node -e '
+    const [, borrowShares, collateral] = process.argv[1].split(" ").map(BigInt);
+    const [supply, , borrowed, totalShares] = process.argv[2].split(" ").map(BigInt);
+    const [px, ltv] = [BigInt(process.argv[3]), BigInt(process.argv[4])];
+    const debt = totalShares === 0n ? 0n : (borrowShares * borrowed + totalShares - 1n) / totalShares;
+    const want = (collateral * px) / 10n ** 18n * ltv / 10_000n - debt;
+    const room = supply - borrowed;
+    console.log(String(want < 0n ? 0n : want < room ? want : room));
+  ' "$pos" "$mkt" "$px" "$LTV_BPS")
+  [[ $amt == 0 ]] && { echo "nothing to borrow: the position is already at ${LTV_BPS} bps or the market has no idle USDC" >&2; exit 1; }
+  send "$morpho" "borrow((address,address,address,address,uint256),uint256,uint256,address,address)" "$params" "$amt" 0 \
+    "$DEPLOYER" "$DEPLOYER"
+  node -e '
+    const fs = require("fs");
+    const [path, px] = process.argv.slice(1);
+    const dep = JSON.parse(fs.readFileSync(path, "utf8"));
+    dep.demo = { ...dep.demo, borrowPriceUsd6: px };
+    fs.writeFileSync(path, JSON.stringify(dep, null, 2) + "\n");
+  ' "$DEP_JSON" "$px"
+  echo "borrowed \$$(cast format-units "$amt" 6) against $(cast format-units "$(cut -d' ' -f3 <<<"$pos")" 18) NVDAx at" \
+    "\$$(cast format-units "$px" 6) (${LTV_BPS} bps): next, crash"
+}
+
+# sqrt_limit <usdc-per-nvdax usd6> <nvdax is currency0>: the pool's sqrtPriceX96 at that price
+sqrt_limit() {
+  node -e '
+    const [px, nvdaxIs0] = [BigInt(process.argv[1]), process.argv[2] === "true"];
+    const sqrt = (n) => { let x = n, y = (x + 1n) / 2n; while (y < x) { x = y; y = (x + n / x) / 2n; } return x; };
+    const Q192 = 1n << 192n;
+    // token1 per token0 in raw units: NVDAx (18 dec) per USDC (6 dec), or the inverse
+    console.log(String(nvdaxIs0 ? sqrt((px * Q192) / 10n ** 18n) : sqrt((10n ** 18n * Q192) / px)));
+  ' "$1" "$2"
+}
+
+# hook-fill <usdc> [push-max-usdc]: the hook selling the vault's hedged stock to a buyer. The hook only sells while the
+# pool trades at or above its ask (oracle + spread), and the pool bot holds the pool on the oracle, so two buys go out
+# back to back from the deployer: the first moves the curve just past the ask (a price-limited buy, spending at most
+# push-max-usdc, default 100), the second (<usdc>) is filled from the vault at the ask. Then the keeper buys back.
+hook_fill() {
+  local usdc=$((${1:?usage: hook-fill <usdc> [push-max-usdc]} * 1000000)) push=$((${2:-100} * 1000000))
+  local hook router usdc_addr c0 key q cap ask fee open nvdax_is0 zfo lim_push lim_fill nonce tx1 tx2 fill
+  hook=$(json "$DEP_JSON" hook)
+  router=$(json "$DEP_JSON" swapRouter)
+  usdc_addr=$(json "$DEP_JSON" usdc)
+  c0=$(json "$DEP_JSON" poolKey.currency0)
+  key="($c0,$(json "$DEP_JSON" poolKey.currency1),$(json "$DEP_JSON" poolKey.fee),$(json "$DEP_JSON" poolKey.tickSpacing),$hook)"
+  read -r cap ask fee open <<<"$(cast call "$hook" "quote()(uint256,uint256,uint24,bool)" --rpc-url "$RPC" |
+    awk '{print $1}' | paste -sd' ' -)"
+  echo "hook quote: ask \$$(cast format-units "$ask" 6), fee $((fee / 100)) bps, market open $open, vault can sell $(cast format-units "$cap" 18) NVDAx now"
+  [[ $(call "$(json "$DEP_JSON" vault)" "inventory()(uint256)") == 0 ]] && { echo "the vault holds no stock to sell" >&2; exit 1; }
+  # buying NVDAx with USDC: zeroForOne when USDC is currency0
+  if [[ $(tr '[:upper:]' '[:lower:]' <<<"$c0") == $(tr '[:upper:]' '[:lower:]' <<<"$usdc_addr") ]]; then
+    nvdax_is0=false zfo=true
+  else
+    nvdax_is0=true zfo=false
+  fi
+  lim_push=$(sqrt_limit $((ask * 10005 / 10000)) $nvdax_is0) # just past the ask
+  lim_fill=$(sqrt_limit $((ask * 10050 / 10000)) $nvdax_is0) # what the curve may charge for anything the hook can't fill
+  send "$usdc_addr" "approve(address,uint256)" "$router" $((push + usdc))
+  nonce=$(cast nonce "$DEPLOYER" --rpc-url "$RPC")
+  # explicit gas: each is estimated against today's pool, before the other lands (a fill costs more than a curve swap)
+  tx1=$(cast send --async --nonce "$nonce" --gas-limit 900000 "$router" \
+    "swap((address,address,uint24,int24,address),(bool,int256,uint160),(bool,bool),bytes)" "$key" "($zfo,-$push,$lim_push)" \
+    "(false,false)" 0x --private-key "$DEPLOYER_PRIVATE_KEY" --rpc-url "$RPC")
+  tx2=$(cast send --async --nonce $((nonce + 1)) --gas-limit 1500000 "$router" \
+    "swap((address,address,uint24,int24,address),(bool,int256,uint160),(bool,bool),bytes)" "$key" "($zfo,-$usdc,$lim_fill)" \
+    "(false,false)" 0x --private-key "$DEPLOYER_PRIVATE_KEY" --rpc-url "$RPC")
+  echo "push to the ask: $tx1 → $(cast receipt "$tx1" status --rpc-url "$RPC")"
+  echo "buy:             $tx2 → $(cast receipt "$tx2" status --rpc-url "$RPC")"
+  fill=$(cast receipt "$tx2" --json --rpc-url "$RPC" | node -e '
+    const r = JSON.parse(require("fs").readFileSync(0, "utf8"));
+    const topic = process.argv[1].toLowerCase(), hook = process.argv[2].toLowerCase();
+    const log = r.logs.find((l) => l.address.toLowerCase() === hook && l.topics[0].toLowerCase() === topic);
+    if (!log) { console.log("none"); process.exit(0); }
+    const w = log.data.slice(2).match(/.{64}/g).map((h) => BigInt("0x" + h));
+    console.log(`${Number(w[0]) / 1e18} NVDAx for ${Number(w[1]) / 1e6} USDC at $${Number(w[2]) / 1e6}`);
+  ' "$(cast keccak "InventoryFill(address,uint256,uint256,uint256,bool)")" "$hook")
+  echo "hook fill from the vault: $fill (the keeper's syncHedge buys back the matching short next)"
 }
 
 crash() {
@@ -385,18 +537,58 @@ reclaim() {
     "$(cast balance "$DEPLOYER" --ether --rpc-url "$RPC") HYPE"
 }
 
-# One run of the CRE market feed through the CLI's simulator. Data Streams credentials come from .env.local
-# (DATA_STREAM_USERNAME / HMAC_SECRET); --broadcast sends the report through the simulation forwarder, paid by the
-# deployer. The workflow reads RiskParams from packages/cre/market-feed/config.staging.json.
+# One run of the CRE market feed through the CLI's simulator. The workflow reads its config from
+# packages/cre/market-feed/config.staging.json: market status from US market hours (marketStatus "marketHours") until
+# the Data Streams key is authorized for the NVDA feed, then "dataStreams" with DATA_STREAM_USERNAME / HMAC_SECRET from
+# .env.local. --broadcast sends the report through the simulation forwarder, paid by CRE_PRIVATE_KEY (falls back to
+# the deployer, which the bots also send from).
 cre_feed() {
-  : "${DATA_STREAM_USERNAME:?set DATA_STREAM_USERNAME (Data Streams API key) in .env.local}"
-  : "${HMAC_SECRET:?set HMAC_SECRET (Data Streams HMAC secret) in .env.local}"
   local cli
   cli=$(command -v cre || echo "$HOME/.cre/bin/cre")
-  cd "$ROOT/packages/cre"
-  DATA_STREAMS_API_KEY=$DATA_STREAM_USERNAME DATA_STREAMS_API_SECRET=$HMAC_SECRET \
-    CRE_ETH_PRIVATE_KEY=$DEPLOYER_PRIVATE_KEY \
-    "$cli" workflow simulate market-feed --target staging-settings --non-interactive --trigger-index 0 "$@"
+  (cd "$ROOT/packages/cre" &&
+    DATA_STREAMS_API_KEY=${DATA_STREAM_USERNAME:-} DATA_STREAMS_API_SECRET=${HMAC_SECRET:-} \
+      CRE_ETH_PRIVATE_KEY=${CRE_PRIVATE_KEY:-$DEPLOYER_PRIVATE_KEY} \
+      "$cli" workflow simulate market-feed --target staging-settings --non-interactive --trigger-index 0 "$@")
+}
+
+# What a DON would do: run the feed every CRE_INTERVAL_SEC (60) with --broadcast, forever. RiskParams treats a report
+# older than maxReportAge (300 s) as stale and stops liquidations, so keep this running for the whole demo; a failed
+# run is logged and the next one tries again. Stop it with Ctrl-C (then `cre-off` if nothing will report).
+cre_loop() {
+  local interval=${CRE_INTERVAL_SEC:-60} out line
+  echo "CRE market feed every ${interval}s → RiskParams $(json "$DEP_JSON" riskParams)"
+  # nothing in a run may end the loop: no -e here (a summary grep that matches nothing exits 1 under pipefail)
+  set +e
+  while true; do
+    out=$(cre_feed --broadcast 2>&1)
+    line=$(grep -E "Afterbell market feed:|workflow execution failed" <<<"$out" | tail -1 | sed -E 's/^.*\] //')
+    echo "$(date -u +%H:%M:%S) ${line:-no result: $(grep -v '^[[:space:]]*$' <<<"$out" | tail -1 | cut -c1-200)}"
+    sleep "$interval"
+  done
+}
+
+# RiskParams' view of the feed: the last report, its age, and what the vault and hook read from it
+cre_status() {
+  local rp open observed capacity now
+  rp=$(json "$DEP_JSON" riskParams)
+  read -r open observed capacity <<<"$(cast call "$rp" "lastReport()(bool,uint64,uint128)" --rpc-url "$RPC" |
+    awk '{print $1}' | paste -sd' ' -)"
+  now=$(cast block latest -f timestamp --rpc-url "$RPC")
+  echo "RiskParams   $rp  maxReportAge=$(call "$rp" "maxReportAge()(uint32)")s"
+  if [[ $observed == 0 ]]; then
+    echo "CRE report   none yet: the owner's values apply"
+  else
+    echo "CRE report   open=$open  hedgeCapacity=\$$(cast format-units "$capacity" 6)  age=$((now - observed))s"
+  fi
+  echo "vault reads  marketOpen=$(call "$rp" "marketOpen()(bool)")  maxLiquidation=\$$(cast format-units "$(cast call "$rp" \
+    "get()((uint256,uint64,uint16,uint16,uint16,uint16,uint16,uint16,uint8,uint32,uint32,uint32,uint256,uint16,uint8))" \
+    --rpc-url "$RPC" | tr -d '()' | cut -d, -f1 | awk '{print $1}')" 6)"
+}
+
+# cre-off: RiskParams ignores the feed and the owner's values apply again; cre-on [age]: back on (default 300 s)
+cre_age() {
+  send "$(json "$DEP_JSON" riskParams)" "setMaxReportAge(uint32)" "$1"
+  cre_status
 }
 
 keeper() {
@@ -421,6 +613,14 @@ case "${1:-}" in
   sweep) sweep ;;
   crash) crash ;;
   cre) shift; cre_feed "$@" ;;
+  borrow) borrow "${2:-}" ;;
+  risk-set) shift; risk_set "$@" ;;
+  faucet-cooldown) faucet_cooldown "${2:-}" ;;
+  hook-fill) hook_fill "${2:-}" "${3:-}" ;;
+  cre-loop) cre_loop ;;
+  cre-status) cre_status ;;
+  cre-off) cre_age 0 ;;
+  cre-on) cre_age "${2:-300}" ;;
   status) status ;;
   keeper) keeper ;;
   extras) extras ;;
@@ -433,7 +633,7 @@ case "${1:-}" in
   reclaim) reclaim ;;
   *)
     echo "usage: scripts/testnet-stack.sh big-blocks on|off | infra | deploy | markets | actors | fund-core [usdc] | sweep | status |" \
-      "keeper | crash | cre [--broadcast] | extras | seed deep|thin <usdc> | fund-vault <usdc> |" \
+      "keeper | borrow <nvdax> | hook-fill <usdc> | risk-set <field> <value>… | faucet-cooldown <sec> | crash | cre [--broadcast] | cre-loop | cre-status | cre-off | cre-on [age] | extras | seed deep|thin <usdc> | fund-vault <usdc> |" \
       "fund-faucet <nvdax> <usdc> <hype> | fund-naive <usdc> | bots | release | reclaim" >&2
     exit 1
     ;;

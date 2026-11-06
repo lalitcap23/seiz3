@@ -2,19 +2,25 @@
 
 The vault needs two facts it can't read on-chain:
 
-1. **Is the US stock market open?** Chainlink Data Streams' `marketStatus` for NVDA.
+1. **Is the US stock market open?** Chainlink Data Streams' `marketStatus` for NVDA, or the exchange's regular hours (see below).
 2. **How much can the xyz:NVDA book absorb?** HyperCore's precompiles give the oracle, not the book depth, and a partial hedge fill on a thin weekend book is Afterbell's main failure mode.
 
 The contract has to trust both, so they come from a CRE workflow: every node fetches them on its own, and the DON signs only what the nodes agree on.
 
 ```
 cron (1 min)
-  ─► RiskParams.params()                     EVM read: hedgeCapBps, the band the vault's IOC hedge sells into
-  ─► Data Streams /api/v1/reports/latest     node mode, HMAC-signed; v8 or v11 report → marketStatus
-  ─► Hyperliquid l2Book + metaAndAssetCtxs   node mode; bids within hedgeCapBps of the oracle × oracle
-  ─► consensus: identical status, median capacity
+  ─► RiskParams.params()                     EVM read (HyperEVM): hedgeCapBps and oracleBandBps
+  ─► Hyperliquid l2Book + metaAndAssetCtxs   node mode; bids within hedgeCapBps of the oracle × oracle; median
+  ─► market status, by config `marketStatus`:
+       "dataStreams"  Data Streams /api/v1/reports/latest, node mode, HMAC-signed; v8/v11 marketStatus, identical
+       "marketHours"  the exchange's regular session at the DON's clock; times and holidays from the config
+  ─► Chainlink Data Feed NVDA/USD            EVM read (Ethereum), optional: gap to HyperCore's oracle
   ─► DON-signed report ─► forwarder ─► RiskParams.onReport(open, hedgeCapacity, observedAt)
 ```
+
+**Market hours (the testnet setting).** Our Data Streams key is authenticated but not yet authorized for the NVDA feed (`GET /api/v1/feeds` lists none), so `config.staging.json` sets `marketStatus: "marketHours"`: 09:30–16:00 New York time on weekdays, 13:00 on early-close days, closed on the listed NYSE holidays. New York's daylight-saving rule is in code (the runtime has no time-zone data); everything else is config. Switch back with `"marketStatus": "dataStreams"` once the feed is authorized.
+
+**The Data Feed check.** Chainlink's free `NVDA-USD (24/5)` feed on Ethereum (`dataFeed.proxy`) is compared with HyperCore's oracle. If they differ by more than the vault's own `oracleBandBps` while the feed is fresh (`maxAgeSec`), and `enforce` is on, the report carries zero hedge capacity and the vault stops buying. A feed older than `maxAgeSec` (weekends) isn't compared. `enforce` is off on testnet: HyperCore's testnet oracle isn't the real NVDA price.
 
 What reads it:
 
@@ -43,12 +49,14 @@ packages/cre/
 ├─ secrets.yaml              DATA_STREAMS_API_KEY / DATA_STREAMS_API_SECRET → env vars
 ├─ .env.example              copy to .env for the CLI (gitignored)
 ├─ market-feed/              the workflow: workflow.yaml, main.ts, config.{staging,production}.json
-├─ src/workflow.ts           cron handler: read → two consensus rounds → one signed write
+├─ src/workflow.ts           cron handler: reads → consensus → one signed write
 ├─ src/datastreams.ts        HMAC auth, v8/v11 report decoding
+├─ src/marketHours.ts        regular session from the config's times and calendar
+├─ src/dataFeed.ts           Chainlink Data Feed read + price check
 ├─ src/hyperliquid.ts        l2Book + oracle per node
 ├─ src/book.ts               capacity math, bigint only
 ├─ src/riskParams.ts         RiskParams read + report encoding/write
-└─ test/workflow.test.ts     19 tests on the SDK's test runtime
+└─ test/workflow.test.ts     31 tests on the SDK's test runtime
 ```
 
 ## Run it
@@ -56,17 +64,22 @@ packages/cre/
 Offline, no keys. The tests run the real handler through the SDK test runtime: secrets, node-mode consensus, the HTTP and EVM capabilities and `writeReport`, with only the far ends mocked.
 
 ```bash
-pnpm --filter @afterbell/cre test        # 19 tests
+pnpm --filter @afterbell/cre test        # 31 tests
 pnpm --filter @afterbell/cre typecheck
 pnpm --filter @afterbell/cre compile     # the CLI's own build: cre-compile → dist/market-feed.wasm
 ```
 
-With the CRE CLI against HyperEVM testnet, from the repo root (Data Streams credentials from `.env.local`: `DATA_STREAM_USERNAME`, `HMAC_SECRET`; the deployer pays for `--broadcast`):
+With the CRE CLI against HyperEVM testnet, from the repo root. `CRE_PRIVATE_KEY` in `.env.local` pays for `--broadcast` (its own key, so it never races the bots for the deployer's nonce); Data Streams credentials (`DATA_STREAM_USERNAME`, `HMAC_SECRET`) only matter with `marketStatus: "dataStreams"`:
 
 ```bash
 scripts/testnet-stack.sh cre                 # dry run
 scripts/testnet-stack.sh cre --broadcast     # the report lands in RiskParams
+scripts/testnet-stack.sh cre-loop            # a report every minute, as a DON would: keep it running for a demo
+scripts/testnet-stack.sh cre-status          # the last report, its age, and what the vault reads from it
+scripts/testnet-stack.sh cre-off             # nothing will report: the owner's values apply again (cre-on to undo)
 ```
+
+First report: [`0xdc8546e8…c5a2cd`](https://app.hyperliquid-testnet.xyz/explorer/tx/0xdc8546e8c5a86200bed442f594a1473aeb3e4cc771e682bedb4501544cd5c2cd), which lowered the vault's liquidation cap from the owner's $50,000 to the book's $265.24.
 
 Or by hand:
 
@@ -89,7 +102,9 @@ cast call <riskParams> 'get()((uint256,uint64,uint16,uint16,uint16,uint16,uint16
 
 ## Things to know
 
-- **A simulated feed goes stale.** On testnet, nothing reruns the workflow every minute the way a DON would, so `maxReportAge` passes and liquidations stop (by design). Rerun the simulation before a demo, or `setMaxReportAge(0)` to go back to the owner's values.
+- **A simulated feed goes stale.** On testnet, nothing reruns the workflow every minute the way a DON would, so once `cre-loop` stops, `maxReportAge` passes and liquidations stop (by design). Keep `cre-loop` running, or `cre-off` to go back to the owner's values.
+- **The entry calls `main()` bare.** `cre-compile` appends its own `main().catch(…)` unless it finds `main()` or `await main()`; `void main()` isn't recognised, so the handler ran twice and the second run failed the simulation.
+- **A mined forwarder tx isn't a landed report.** The forwarder catches the receiver's revert (e.g. a report out of order), so the workflow also checks `receiverContractExecutionStatus`.
 - **Anyone can call the simulation forwarder.** It doesn't check DON signatures. After the first `--broadcast`, pin the workflow with `setExpectedWorkflowId`, or `setExpectedAuthor` plus `setExpectedWorkflowName`. Production uses the real forwarder, which checks the DON's signatures.
 - **The status must match on every node.** A run that lands on an open/close boundary can see nodes disagree; it fails, and the next minute's run reports.
 - **Capacity is the visible book.** `l2Book` returns 20 levels a side. A band deeper than that is undercounted, which errs safe. `bookShareBps` (production 50%) leaves room for everyone else trading into the same bids.

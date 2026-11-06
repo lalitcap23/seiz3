@@ -3,7 +3,7 @@ import { ExchangeClient, HttpTransport, InfoClient } from "@nktkas/hyperliquid";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Hex } from "viem";
 import { PERP_COIN, PERP_DEX } from "@afterbell/shared";
-import { afterbellVaultAbi } from "@afterbell/shared/abis";
+import { afterbellVaultAbi, riskParamsAbi } from "@afterbell/shared/abis";
 import { dep, log, read } from "./chain.js";
 import { env } from "./env.js";
 
@@ -15,10 +15,13 @@ const MIN_ORDER_USD = 10;
  * the oracle and its unwind buys back at most 1% over. Testnet's own book sits ~7% away, so without these the short
  * only half fills and the unwind can't fill at all.
  *
- * The bid rests all the time: a liquidation's hedge goes out in the liquidation tx itself. The ask only goes up when
- * the vault is about to buy: the keeper's liquidity gate asks for one before an unwind (ASK_REQUEST_FILE), or a buy is
- * pending. A testnet bot lifts any resting ask near the oracle every few seconds, which would otherwise run this
- * account short with nothing left for the vault.
+ * The bid rests all the time at its full size, refilled after any fill: a liquidation's hedge goes out in the
+ * liquidation tx itself, with no time to re-quote. The ask rests while the vault has something to buy back: the
+ * keeper's standing request while it holds stock and its liquidity gate before each unwind (ASK_REQUEST_FILE), or a
+ * pending buy. An ask that still covers the vault's next buy is kept, never churned, and a replacement goes up before
+ * the order it replaces is cancelled: each cancel-then-place left a moment with no ask, and an IOC buy-back landing in
+ * it was rejected (`iocCancelRejected`). MM_VAULT_MAX_SHORT caps how short the asks can run this account, in case a
+ * testnet bot starts lifting them.
  */
 export class MarketMaker {
   private readonly info: InfoClient;
@@ -36,16 +39,22 @@ export class MarketMaker {
   }
 
   async tick(): Promise<void> {
-    const [[meta, ctxs], open, { szi, free, liqPx }, pending] = await Promise.all([
+    const [[meta, ctxs], open, { szi, free, liqPx }, pending, inventory, risk] = await Promise.all([
       this.info.metaAndAssetCtxs({ dex: PERP_DEX }),
       this.info.openOrders({ user: this.user, dex: PERP_DEX }),
       this.account(),
       read<readonly [bigint, bigint, bigint, number]>(dep.vault, afterbellVaultAbi, "pendingHedge"),
+      read<bigint>(dep.vault, afterbellVaultAbi, "inventory"),
+      read<{ maxUnhedged: bigint }>(dep.riskParams, riskParamsAbi, "get"),
     ]);
     // > 0: the vault wants to buy back that many Core size units, now (pending) or in its next unwind (the request)
     const pendingBuy = pending[0] > 0n ? Number(pending[0]) / 10 ** this.szDecimals : 0;
     const requested = askRequest(env.ASK_REQUEST_FILE);
-    const vaultBuys = Math.max(pendingBuy, requested);
+    // while the vault holds stock, any moment can bring a buy-back: a hook fill inside someone's swap sends one with no
+    // warning, up to min(stock, maxUnhedged). Read from the chain, so a lapsed keeper request never pulls the ask.
+    const stockUnits = inventory / 10n ** BigInt(18 - this.szDecimals);
+    const standing = Number(stockUnits < risk.maxUnhedged ? stockUnits : risk.maxUnhedged) / 10 ** this.szDecimals;
+    const vaultBuys = Math.max(pendingBuy, requested, standing);
     const askSize = vaultBuys > 0 ? vaultBuys + env.MM_ASK_BUFFER : 0;
     const i = meta.universe.findIndex((u) => u.name === PERP_COIN);
     const oracle = Number(ctxs[i]?.oraclePx);
@@ -69,30 +78,35 @@ export class MarketMaker {
       }
       const quotable = size * oracle >= MIN_ORDER_USD;
       const orders = mine.filter((o) => o.side === side);
+      const unit = 0.5 / f;
       const keep = quotable
         ? orders.find(
             (o) =>
               Math.abs(Number(o.limitPx) - target) / target <= env.MM_REQUOTE_BPS / 10_000 &&
-              // an ask the bot has bitten into is replaced only once it can no longer cover the vault
-              Number(o.sz) >= (isBuy ? size / 2 : vaultBuys) &&
-              Number(o.sz) <= size,
+              (isBuy
+                ? // the bid at its full size: refilled after the vault's hedge takes part of it
+                  Math.abs(Number(o.sz) - size) < unit
+                : // the ask while it covers the vault's next buy and stays inside the room
+                  Number(o.sz) + unit >= vaultBuys && Number(o.sz) <= askRoom + unit),
           )
         : undefined;
       const stale = orders.filter((o) => o !== keep);
+      if (keep === undefined && quotable) {
+        // the replacement first, then the cancel: never a moment with nothing on this side of the book.
+        // Gtc, not Alo: crossing a stray order on the other side just fills it at its (better) price
+        const res = await this.exchange.order({
+          orders: [
+            { a: this.asset, b: isBuy, p: String(target), s: size.toFixed(this.szDecimals), r: false, t: { limit: { tif: "Gtc" } } },
+          ],
+          grouping: "na",
+        });
+        log("mm", `${isBuy ? "bid" : "ask"} ${size} @ ${target} (oracle ${oracle}, position ${szi})`, {
+          status: res.response.data.statuses[0],
+        });
+      }
       if (stale.length > 0) {
         await this.exchange.cancel({ cancels: stale.map((o) => ({ a: this.asset, o: o.oid })) });
       }
-      if (keep !== undefined || !quotable) continue;
-      // Gtc, not Alo: crossing a stray order on the other side just fills it at its (better) price
-      const res = await this.exchange.order({
-        orders: [
-          { a: this.asset, b: isBuy, p: String(target), s: size.toFixed(this.szDecimals), r: false, t: { limit: { tif: "Gtc" } } },
-        ],
-        grouping: "na",
-      });
-      log("mm", `${isBuy ? "bid" : "ask"} ${size} @ ${target} (oracle ${oracle}, position ${szi})`, {
-        status: res.response.data.statuses[0],
-      });
     }
   }
 

@@ -1,6 +1,10 @@
 packages:
   - "packages/*"
 
+# slow networks (venue Wi-Fi, Docker builds): large tarballs such as @next/swc and viem outlast the 60 s default
+fetchTimeout: 600000
+fetchRetries: 5
+
 # pnpm 11 blocks dependency build scripts unless allowlisted
 allowBuilds:
   esbuild: true

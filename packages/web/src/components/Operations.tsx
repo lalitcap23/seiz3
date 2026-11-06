@@ -1,5 +1,5 @@
 import type { Operation } from "@afterbell/shared";
-import { LANES, OperationCard } from "./OperationCard";
+import { LANES, OperationCard, SoldToTag } from "./OperationCard";
 import { Panel } from "./ui";
 
 const SHOWN = 12;
@@ -31,6 +31,15 @@ export function Operations({
             <span className={`font-semibold ${l.tone}`}>{l.lane}</span> {l.text}
           </span>
         ))}
+      </div>
+      {/* the two ways an unwind's stock leaves the vault */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line px-3 py-1.5 font-mono text-[10px] text-faint">
+        <span className="inline-flex items-center gap-1.5">
+          <SoldToTag to="pool" /> keeper sold into the curve
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <SoldToTag to="buyer" /> the hook sold to a buyer, off the curve
+        </span>
       </div>
       {latest.length === 0 && !zero && <p className="px-3 py-6 text-center font-mono text-[12px] text-faint">Nothing yet</p>}
       <div className="flex flex-col divide-y divide-line overflow-y-auto lg:max-h-[620px]">

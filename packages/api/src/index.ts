@@ -40,7 +40,8 @@ const watchlist = new Watchlist(env.WATCH_FILE ?? `${DEPLOYMENTS_DIR}watch.json`
 const collector = new Collector(client, dep, {
   hlInfoUrl: remote ? (env.HL_INFO_API_URL ?? HL_INFO_API[remote]) : null,
   explorerUrl: EXPLORER[env.NETWORK] && `${EXPLORER[env.NETWORK]}${dep.vault}`,
-  fromBlock: env.FROM_BLOCK ?? (remote ? null : 0n),
+  // where the deployment's markets were created: nothing of ours exists before it
+  fromBlock: env.FROM_BLOCK ?? (dep.startBlock !== undefined ? BigInt(dep.startBlock) : remote ? null : 0n),
   logs: {
     ...(env.LOGS_RPC_URL
       ? {

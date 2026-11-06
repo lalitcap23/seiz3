@@ -30,12 +30,22 @@ interface TxViewData {
   hypercoreTxExplorer: string | null;
 }
 
-const VAULT_EVENTS = new Set(["LiquidationTaken", "HedgeSent", "HedgeConfirmed", "HedgeStuck", "Unwound", "MarginMoved"]);
+const VAULT_EVENTS = new Set([
+  "LiquidationTaken",
+  "HedgeSent",
+  "HedgeConfirmed",
+  "HedgeStuck",
+  "Unwound",
+  "MarginMoved",
+  "InventoryFill",
+]);
 const DECIMALS: Record<string, number> = { USDC: 6, NVDAx: 18 };
 
-/** One event in words where we know it, the raw fields otherwise. */
-function line(e: TxViewData["events"][number]): string {
-  if (VAULT_EVENTS.has(e.name)) return describe({ type: e.name as never, args: e.args }, dep.hypercore.szDecimals).text;
+/** One event in words where we know it, the raw fields otherwise. `hookFill`: the tx holds the hook's InventoryFill. */
+function line(e: TxViewData["events"][number], hookFill: boolean): string {
+  if (VAULT_EVENTS.has(e.name)) {
+    return describe({ type: e.name as never, args: e.args }, dep.hypercore.szDecimals, hookFill ? "buyer" : "pool").text;
+  }
   const a = e.args;
   const amount = (v: unknown, dec: number) => (Number(v) / 10 ** dec).toLocaleString("en-US", { maximumFractionDigits: 6 });
   const who = (v: unknown) => short(String(v));
@@ -123,7 +133,7 @@ export function TxView() {
               <span className="font-mono text-[11px] text-faint">
                 {e.contract ?? short(e.address)} · <span className="text-muted">{e.name}</span>
               </span>
-              <span className="text-[12px]">{line(e)}</span>
+              <span className="text-[12px]">{line(e, data.events.some((x) => x.name === "InventoryFill"))}</span>
             </li>
           ))}
         </ol>

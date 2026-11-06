@@ -44,6 +44,15 @@ export const env = z
     MM_REQUOTE_BPS: z.coerce.number().int().min(1).default(15),
     MM_INTERVAL_MS: z.coerce.number().int().min(1000).default(3000), // under the info API's 1200 weight a minute
 
+    // buyer (BOTS=…,buyer): a demo buyer that, while the vault unwinds, buys NVDAx through the hook every
+    // BUYER_INTERVAL_MS. ≥ 12 USDC so the vault's buy-back of what it sells clears HyperCore's $10 order minimum.
+    BUYER_USDC: z.coerce.number().min(12).default(20),
+    BUYER_INTERVAL_MS: z.coerce.number().int().min(10_000).default(90_000),
+    BUYER_PUSH_BPS: z.coerce.number().int().min(1).max(100).default(5), // bid the curve this far past the hook's ask
+    // buy only while the vault's unwind cooldown has this long left, so the keeper's next sale can't land between the
+    // buyer's two transactions (a sale sets a pending buy-back, and the hook sells nothing until it's confirmed)
+    BUYER_MIN_WINDOW_SEC: z.coerce.number().int().min(1).default(10),
+
     // alerts: what only a person can refill on testnet (Discord or Slack incoming webhook; unset → log only)
     ALERT_WEBHOOK_URL: z.string().url().optional(),
     ALERT_INTERVAL_MS: z.coerce.number().int().min(10_000).default(60_000),

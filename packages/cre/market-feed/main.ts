@@ -6,4 +6,4 @@ export async function main() {
   await runner.run(initWorkflow);
 }
 
-void main();
+main(); // a bare call: cre-compile only spots `main()` / `await main()` and otherwise appends a second one

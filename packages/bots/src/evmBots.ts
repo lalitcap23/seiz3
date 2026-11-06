@@ -1,7 +1,15 @@
-import { erc20Abi, maxUint256, type Address } from "viem";
-import { afterbellVaultAbi, demoOracleAbi, mockNvdAxAbi, poolSeederAbi } from "@afterbell/shared/abis";
+import { erc20Abi, maxUint256, parseEventLogs, type Address } from "viem";
+import {
+  afterbellHookAbi,
+  afterbellVaultAbi,
+  demoOracleAbi,
+  mockNvdAxAbi,
+  poolSeederAbi,
+  poolSwapTestAbi,
+  riskParamsAbi,
+} from "@afterbell/shared/abis";
 import { nvdaxIsCurrency0, sqrtPriceAt, usdcPerNvdaxAt, type MarketName } from "@afterbell/shared";
-import { coreOracleUsd6, dep, diffBps, log, owner, poolState, read, send, usd } from "./chain.js";
+import { client, coreOracleUsd6, dep, diffBps, log, owner, poolState, read, send, usd } from "./chain.js";
 import { env } from "./env.js";
 
 const MARKETS: readonly MarketName[] = ["A_naive", "B_conservative", "C_afterbell"];
@@ -76,6 +84,84 @@ async function recycleFromVault(me: Address, usdc: bigint): Promise<void> {
   }
   await send(dep.vault, afterbellVaultAbi, "requestWithdraw", [shares]);
   log("pool", `deployer ${usd(usdc)} → redeemed ${usd(want)} of its vault shares for rebalancing`);
+}
+
+const BPS = 10_000n;
+let lastBuyAt = 0;
+const allowed = new Set<string>();
+
+async function approveOnce(token: Address, spender: Address): Promise<void> {
+  const key = `${token}:${spender}`;
+  if (allowed.has(key)) return;
+  if ((await read<bigint>(token, erc20Abi, "allowance", [owner!.address, spender])) < maxUint256 / 2n) {
+    await send(token, erc20Abi, "approve", [spender, maxUint256]);
+  }
+  allowed.add(key);
+}
+
+/**
+ * A demo buyer on the vault's pool, so a round shows both ways the vault sells: the keeper's unwindStep pushes stock
+ * into the Uniswap curve, and a buyer is filled straight from the vault by AfterbellHook (InventoryFill), at HyperCore's
+ * oracle plus the spread. While the vault holds stock and no buy-back is in flight, every BUYER_INTERVAL_MS it buys
+ * BUYER_USDC of NVDAx. The hook only sells while the pool trades at or above its ask, and the pool bot holds the pool
+ * on the oracle, so the buyer first bids the curve just past the ask (buy pressure, through PoolSeeder), then buys
+ * through the public swap router. The pool bot sells the curve back to the oracle on its next round.
+ */
+export async function buyFromVault(): Promise<void> {
+  if (Date.now() - lastBuyAt < env.BUYER_INTERVAL_MS) return;
+  const hook = dep.hook;
+  const router = dep.swapRouter;
+  if (hook === undefined || router === undefined) return;
+  const [inventory, pending, paused, lastUnwindAt, cooldown, block] = await Promise.all([
+    read<bigint>(dep.vault, afterbellVaultAbi, "inventory"),
+    read<readonly [bigint, bigint, bigint, number]>(dep.vault, afterbellVaultAbi, "pendingHedge"),
+    read<boolean>(dep.vault, afterbellVaultAbi, "paused"),
+    read<bigint>(dep.vault, afterbellVaultAbi, "lastUnwindAt"),
+    read<number>(dep.riskParams, riskParamsAbi, "cooldown"),
+    client.getBlock(),
+  ]);
+  // nothing to sell, or a buy-back still in flight: the hook wouldn't sell either
+  if (inventory === 0n || pending[0] !== 0n || paused) return;
+  // the keeper's next sale is due soon: wait for the window after it (checked again next round, a few seconds on)
+  if (Number(lastUnwindAt) + Number(cooldown) - Number(block.timestamp) < env.BUYER_MIN_WINDOW_SEC) return;
+
+  const amountIn = BigInt(Math.round(env.BUYER_USDC * 1e6));
+  const me = owner!.address;
+  if ((await read<bigint>(dep.usdc, erc20Abi, "balanceOf", [me])) < amountIn * 2n) {
+    log("buyer", `deployer holds under ${usd(amountIn * 2n)} USDC: skipping (the pool bot recycles vault shares into USDC)`);
+    lastBuyAt = Date.now();
+    return;
+  }
+  const nvdax0 = nvdaxIsCurrency0(dep.poolKey, dep.nvdax);
+  const [, ask] = await read<readonly [bigint, bigint, number, boolean]>(hook, afterbellHookAbi, "quote");
+  await approveOnce(dep.usdc, dep.poolSeeder as Address);
+  await approveOnce(dep.usdc, router);
+
+  // 1. buy pressure: the curve just past the hook's ask
+  await send(dep.poolSeeder as Address, poolSeederAbi, "swapToPrice", [
+    dep.poolKey,
+    sqrtPriceAt((ask * (BPS + BigInt(env.BUYER_PUSH_BPS))) / BPS, nvdax0),
+  ]);
+  const [capacity] = await read<readonly [bigint, bigint, number, boolean]>(hook, afterbellHookAbi, "quote");
+  lastBuyAt = Date.now();
+  if (capacity === 0n) {
+    log("buyer", "the hook has nothing to sell right now (a keeper unwind landed first): next round");
+    return;
+  }
+  // 2. the buy: exact USDC in, filled from the vault's stock at the ask; anything over goes to the curve, capped 0.5% up
+  const hash = await send(router, poolSwapTestAbi, "swap", [
+    dep.poolKey,
+    { zeroForOne: !nvdax0, amountSpecified: -amountIn, sqrtPriceLimitX96: sqrtPriceAt((ask * (BPS + 50n)) / BPS, nvdax0) },
+    { takeClaims: false, settleUsingBurn: false },
+    "0x",
+  ]);
+  const receipt = await client.getTransactionReceipt({ hash });
+  const [fill] = parseEventLogs({ abi: afterbellHookAbi, eventName: "InventoryFill", logs: receipt.logs });
+  if (fill === undefined) {
+    log("buyer", `bought on the curve, not from the vault (${hash})`);
+    return;
+  }
+  log("buyer", `bought ${(Number(fill.args.nvdaxOut) / 1e18).toFixed(3)} NVDAx straight from the vault for ${usd(fill.args.usdcIn)} at the ${usd(fill.args.ask)} ask`, { tx: hash });
 }
 
 export { coreOracleUsd6 };

@@ -32,6 +32,30 @@ describe("breaker: consecutive reverts", () => {
     expect(breaker.isOpen()).toBe(false);
   });
 
+  it("without a cooldown an open breaker stays open", () => {
+    const breaker = new Breaker(cfg);
+    const t = 1_000_000;
+    for (let i = 0; i < 3; i++) breaker.recordFailure(t);
+    expect(breaker.canSend(t + 86_400_000)).toEqual({ ok: false, reason: "breaker-open" });
+  });
+
+  it("with a cooldown it lets one send through, closes on success, re-opens on failure", () => {
+    const breaker = new Breaker({ ...cfg, breakerCooldownMs: 60_000 });
+    const t = 1_000_000;
+    for (let i = 0; i < 3; i++) breaker.recordFailure(t);
+
+    expect(breaker.canSend(t + 59_999)).toEqual({ ok: false, reason: "breaker-open" });
+    expect(breaker.canSend(t + 60_000).ok).toBe(true); // half-open
+
+    breaker.recordFailure(t + 60_000); // the trial failed: another full cooldown
+    expect(breaker.canSend(t + 60_001)).toEqual({ ok: false, reason: "breaker-open" });
+    expect(breaker.canSend(t + 120_000).ok).toBe(true);
+
+    breaker.recordSuccess(); // the trial worked: closed
+    expect(breaker.isOpen()).toBe(false);
+    expect(breaker.canSend(t + 120_001).ok).toBe(true);
+  });
+
   it("snapshot exposes the failure count and limits", () => {
     const breaker = new Breaker(cfg);
     breaker.recordFailure(5_000);

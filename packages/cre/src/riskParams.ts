@@ -58,7 +58,13 @@ export function encodeMarketReport(r: MarketReport): Hex {
   );
 }
 
-export function readHedgeCapBps(runtime: Runtime<unknown>, evm: EVMClient, riskParams: Address): bigint {
+/** The two bands the workflow works within, from the contract that enforces them. */
+export interface RiskBands {
+  readonly hedgeCapBps: bigint; // the vault's IOC hedge sells down to oracle × (1 − hedgeCapBps)
+  readonly oracleBandBps: bigint; // the gap the vault tolerates between its prices and HyperCore's oracle
+}
+
+export function readRiskBands(runtime: Runtime<unknown>, evm: EVMClient, riskParams: Address): RiskBands {
   const reply = evm
     .callContract(runtime, {
       call: encodeCallMsg({
@@ -70,7 +76,7 @@ export function readHedgeCapBps(runtime: Runtime<unknown>, evm: EVMClient, riskP
     })
     .result();
   const p = decodeFunctionResult({ abi: RISK_PARAMS_ABI, functionName: "params", data: bytesToHex(reply.data) });
-  return BigInt(p.hedgeCapBps);
+  return { hedgeCapBps: BigInt(p.hedgeCapBps), oracleBandBps: BigInt(p.oracleBandBps) };
 }
 
 export function writeMarketReport(

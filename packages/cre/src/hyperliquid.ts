@@ -14,6 +14,7 @@ export interface HyperliquidConfig {
 /** One node's view of the book; the DON takes the median of each field. */
 export interface BookRead {
   readonly capacityUsd6: bigint;
+  readonly oracleUsd6: bigint; // HyperCore's oracle, the price the capacity is valued at
   readonly observedAt: number; // unix seconds of the book snapshot
 }
 
@@ -62,6 +63,7 @@ export function readHedgeCapacity(
   if (oracle === 0n) throw new Error(`hyperliquid: zero oracle price for ${cfg.coin}`);
   return {
     capacityUsd6: hedgeCapacityUsd6(book.levels[0], oracle, hedgeCapBps, bookShareBps),
+    oracleUsd6: oracle,
     observedAt: Math.floor(book.time / 1000),
   };
 }

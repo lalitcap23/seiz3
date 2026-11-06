@@ -197,6 +197,8 @@ export interface Config {
   // safety
   readonly maxActionsPerMinute: number;
   readonly maxConsecutiveReverts: number;
+  /** After this long since the last failure an open breaker lets one send through; 0 never. */
+  readonly breakerCooldownMs: number;
   readonly minSignerBalanceWei: bigint;
   readonly gasLimitCap: bigint;
   readonly gasLimitMarginBps: bigint;

@@ -10,6 +10,7 @@ import {
   type PublicClient,
 } from "viem";
 import {
+  afterbellHookAbi,
   afterbellVaultAbi,
   demoOracleAbi,
   faucetAbi,
@@ -60,6 +61,7 @@ const morphoEventsAbi = parseAbi([
 
 const ABIS: Abi[] = [
   afterbellVaultAbi,
+  afterbellHookAbi,
   morphoEventsAbi,
   iMorphoAbi,
   naiveLiquidatorAbi,
@@ -76,6 +78,7 @@ function names(dep: DeploymentFile): Map<string, { name: string; abi: Abi }> {
   const m = new Map<string, { name: string; abi: Abi }>();
   const add = (a: string | undefined, name: string, abi: Abi) => a && m.set(a.toLowerCase(), { name, abi });
   add(dep.vault, "Afterbell vault", afterbellVaultAbi);
+  add(dep.hook, "AfterbellHook (v4 hook)", afterbellHookAbi);
   add(dep.morpho, "Morpho Blue", [...iMorphoAbi, ...morphoEventsAbi]);
   add(dep.naiveLiquidator, "NaiveLiquidator (market A)", naiveLiquidatorAbi);
   add(dep.faucet, "Faucet", faucetAbi);

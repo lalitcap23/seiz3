@@ -56,6 +56,12 @@ services:
       RISK_ENGINE_URL: http://risk-engine:8081
       MORPHO_API_ENABLED: "0" # Morpho's API doesn't index our own Morpho copy
       IDLE_RESERVE_USDC: "1000000000" # never top up: testnet's CoreDepositWallet loses the deposit
+      # never withdraw margin either: on testnet withdrawMargin only reaches the vault's HyperCore spot balance (the
+      # bridge back to HyperEVM doesn't credit), which takes it out of the xyz margin the next short needs
+      CORE_RESERVE_USDC: "1000000000"
+      # three failed sends in a row open the breaker; RPC timeouts count, so retry one send a minute after the last
+      # failure instead of waiting for a restart
+      BREAKER_COOLDOWN_MS: "60000"
       TICK_MS: "2000"
       LOGS_RPC_URL: *logs-rpc
       # /try and the faucet also put testers on deployments/watch.json, read every tick
@@ -63,9 +69,9 @@ services:
       BORROWER_SCAN_INTERVAL_MS: "4000"
       # buy-back liquidity gate: no unwind until HyperCore has an ask for the buy-back (the bots post it on request)
       HL_INFO_API_URL: https://api.hyperliquid-testnet.xyz/info
-      # 2026-10-29 session start: thirdweb serves 1000 blocks a call and rate-limits, so a backfill from the vault's
-      # deploy (68013191) took 20+ min. Testers who connect on /try are watched through watch.json regardless.
-      BORROWER_SCAN_FROM_BLOCK: "68197000"
+      # the borrower scan starts at deployments/testnet.json `startBlock` (where the markets were created). thirdweb
+      # rate-limits (viem reports it as "Request exceeds defined limit"): the scan retries on the next poll, and
+      # testers who connect on /try are watched through watch.json regardless.
 
   api:
     <<: *service
@@ -73,7 +79,7 @@ services:
     ports: ["8787:8787"]
     environment:
       NETWORK: testnet
-      FROM_BLOCK: "68197000" # activity feed from the 2026-10-29 session (the vault's deploy, 68013191, is 185k blocks back)
+      # the activity feed starts at deployments/testnet.json `startBlock` (FROM_BLOCK overrides)
       LOGS_RPC_URL: *logs-rpc # history only; new blocks come from RPC_URL
       LOG_PAGE: "1000" # thirdweb's cap
       LOG_SCAN_MS: "1000" # between history calls; a rate limit backs off up to 30 s
@@ -89,7 +95,10 @@ services:
     command: ["pnpm", "--filter", "@afterbell/bots", "start"]
     environment:
       NETWORK: testnet
-      BOTS: oracle,pool,mm,alerts
+      # buyer: a demo buyer filled from the vault by the hook while the keeper unwinds into the curve (both ways shown)
+      BOTS: oracle,pool,mm,alerts,buyer
+      BUYER_USDC: "20" # per buy; ≥ 12 so the vault's buy-back clears HyperCore's $10 minimum
+      BUYER_INTERVAL_MS: "90000"
       HOLD_FILE: /app/deployments/BOTS_HOLD
       # the rebalancer recycles the deployer's own LP shares (it owns the vault); keep ~3 tester liquidations of cash
       VAULT_FLOOR_USDC: "60"
@@ -97,6 +106,8 @@ services:
       # the market maker's account holds ~$236 against a ~2 NVDA short (liq. ~$330), so the default 8% distance holds;
       # 6 NVDA of short covers 5–10 back-to-back tester unwinds before its own bids buy it back
       MM_VAULT_MAX_SHORT: "6"
+      # the resting bid is what a liquidation's hedge sells into, so it sets the CRE hedge capacity (~1 NVDA ≈ $213)
+      MM_SIZE: "1"
 
   web:
     build:

@@ -54,6 +54,7 @@ const envSchema = z.object({
   CORE_RESERVE_USDC: z.string().default("10"),
   MAX_ACTIONS_PER_MINUTE: z.coerce.number().int().positive().default(6),
   MAX_CONSECUTIVE_REVERTS: z.coerce.number().int().positive().default(3),
+  BREAKER_COOLDOWN_MS: z.coerce.number().int().min(0).default(0), // 0: an open breaker waits for a restart
   MIN_SIGNER_BALANCE_WEI: z.string().default("1000000000000000"),
   GAS_LIMIT_CAP: z.coerce.number().int().positive().default(3_000_000),
   GAS_LIMIT_MARGIN_BPS: z.coerce.number().int().min(0).max(10_000).default(2500),
@@ -241,6 +242,7 @@ export function loadConfig(
     coreReserveUsdc: checkUsdc("CORE_RESERVE_USDC", e.CORE_RESERVE_USDC),
     maxActionsPerMinute: e.MAX_ACTIONS_PER_MINUTE,
     maxConsecutiveReverts: e.MAX_CONSECUTIVE_REVERTS,
+    breakerCooldownMs: e.BREAKER_COOLDOWN_MS,
     minSignerBalanceWei: minBalance,
     gasLimitCap,
     gasLimitMarginBps: BigInt(e.GAS_LIMIT_MARGIN_BPS),

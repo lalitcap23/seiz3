@@ -11,6 +11,21 @@ export function OpBadge({ id }: { id: string }) {
   return <Tag tone={id.startsWith("LIQ") ? "evm" : "core"}>{id}</Tag>;
 }
 
+export type SoldTo = "buyer" | "pool";
+
+/** Where an unwind's stock went: into the Uniswap v4 curve (the keeper's push), or straight to a buyer (the hook). */
+export function SoldToTag({ to }: { to: SoldTo }) {
+  return to === "buyer" ? (
+    <Tag tone="up" title="AfterbellHook sold the vault's stock to a buyer at HyperCore's oracle + spread, off the curve">
+      → user · hook
+    </Tag>
+  ) : (
+    <Tag tone="evm" title="The keeper's unwindStep sold the vault's stock into the Uniswap v4 pool's curve">
+      → AMM
+    </Tag>
+  );
+}
+
 /** The lanes an operation runs through, for the legend above the list. */
 export const LANES = [
   { lane: "EVM", tone: "text-evm", text: "HyperEVM tx" },
@@ -85,6 +100,7 @@ export function OperationCard({ op, szDecimals, me }: { op: Operation; szDecimal
       <header className="mb-1.5 flex flex-wrap items-center gap-2">
         <OpBadge id={op.id} />
         <span className="text-[12px] font-medium">{liq ? "Liquidation" : "Unwind"}</span>
+        {!liq && op.soldTo && <SoldToTag to={op.soldTo} />}
         {liq && op.borrower && (
           <span className="font-mono text-[11px] text-muted">
             {mine ? "your loan" : short(op.borrower)} · Market C
@@ -108,8 +124,8 @@ export function OperationCard({ op, szDecimals, me }: { op: Operation; szDecimal
             {liq
               ? `Bought ${nvda(op.nvdax)} NVDAx of collateral from Morpho, repaying ${usd(op.usdc, 2)} of debt`
               : op.soldTo === "buyer"
-                ? `A buyer took ${nvda(op.nvdax)} NVDAx from the vault through the v4 hook for ${usd(op.usdc, 2)}`
-                : `Sold ${nvda(op.nvdax)} NVDAx into Uniswap v4 for ${usd(op.usdc, 2)}`}
+                ? `A buyer took ${nvda(op.nvdax)} NVDAx straight from the vault through the v4 hook for ${usd(op.usdc, 2)}`
+                : `Sold ${nvda(op.nvdax)} NVDAx into the Uniswap v4 pool (AMM curve) for ${usd(op.usdc, 2)}`}
           </Step>
         )}
         {op.orders.map((o) => (
