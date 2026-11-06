@@ -46,7 +46,8 @@ const rpcUrl =
 const transport = http(rpcUrl);
 
 export const owner = privateKeyToAccount(pk);
-export const client = createPublicClient({ chain, transport }) as PublicClient;
+// viem's default 4 s receipt polling would add ~4 s per transaction to every click; HyperEVM and anvil make 1 s blocks
+export const client = createPublicClient({ chain, transport, pollingInterval: 250 }) as PublicClient;
 const wallet = createWalletClient({ account: owner, chain, transport });
 
 let deployment: DeploymentFile | undefined;

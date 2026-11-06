@@ -26,6 +26,7 @@ export const vaultSnapshotSchema = z.object({
   address: z.string(),
   inventory: bigintString,
   confirmedShort: bigintString, // signed Core size units
+  szDecimals: z.number(), // Core size units per NVDA: confirmedShort and the hedge events' sizes are 10^-szDecimals
   pendingHedge: z.object({
     delta: bigintString,
     sentBlock: bigintString,

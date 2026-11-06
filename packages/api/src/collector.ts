@@ -133,6 +133,7 @@ export class Collector {
         address: this.dep.vault,
         inventory: vault.inventory.toString(),
         confirmedShort: vault.confirmedShort.toString(),
+        szDecimals: this.dep.hypercore.szDecimals,
         pendingHedge: {
           delta: vault.pendingHedge.delta.toString(),
           sentBlock: vault.pendingHedge.sentBlock.toString(),

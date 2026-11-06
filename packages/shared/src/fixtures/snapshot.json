@@ -52,6 +52,7 @@
     "address": "0x00000000000000000000000000000000000000ab",
     "inventory": "1000000000000000000000",
     "confirmedShort": "-1000000",
+    "szDecimals": 3,
     "pendingHedge": { "delta": "0", "sentBlock": "0", "sentAt": 0, "tries": 0 },
     "hedgeState": "Idle",
     "hedgeRatio": 1,
