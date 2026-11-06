@@ -63,6 +63,7 @@ export const baseConfig: Config = {
   morpho: MORPHO,
   deploymentsPath: "/shared/deployments.json",
   keeperPrivateKey: DUMMY_KEY,
+  keeperId: "0x0000000000000000000000000000000000000001",
   deployments: {
     chainId: 31337n,
     vault: VAULT,

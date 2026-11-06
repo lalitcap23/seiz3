@@ -149,6 +149,8 @@ export interface Config {
   readonly morpho: Address;
   readonly deploymentsPath: string;
   readonly keeperPrivateKey: Hex;
+  /** Leader-election identity: two keepers share a risk engine; only the leader acts. */
+  readonly keeperId: string;
   readonly deployments: DeploymentInfo;
 
   // risk engine (keeper does not make risk decisions itself)

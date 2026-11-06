@@ -9,8 +9,11 @@ services:
     command: ["pnpm", "--filter", "@afterbell/keeper", "risk-engine:stub"]
     environment:
       RISK_ENGINE_PORT: "8081"
+      # A keeper that hasn't hit /decide for this long loses leadership to the backup
+      LEADER_LEASE_MS: ${LEADER_LEASE_MS:-3000}
     ports:
       - "8081:8081"
+    restart: unless-stopped
     healthcheck:
       test:
         - CMD
@@ -30,6 +33,7 @@ services:
     environment:
       RPC_URL: ${RPC_URL:?set RPC_URL to an external node}
       KEEPER_PK: ${KEEPER_PK:-0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d}
+      KEEPER_ID: ${KEEPER_ID:-keeper-a}
       DEPLOYMENTS_PATH: /shared/${NETWORK:-testnet}.json
       RISK_ENGINE_URL: http://risk-engine:8081
       TICK_MS: "500"
@@ -45,6 +49,40 @@ services:
         - node
         - -e
         - "fetch('http://127.0.0.1:9090/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+    restart: unless-stopped
+
+  # Redundant keeper: same code, same risk engine, different id and signer. Only one of keeper /
+  # keeper-b acts at a time — the risk engine elects the lowest-id keeper it has heard from within
+  # LEADER_LEASE_MS. Kill one live during the demo: the other takes over within ~3 s.
+  keeper-b:
+    image: afterbell-keeper:local
+    profiles: ["demo"]
+    depends_on:
+      risk-engine:
+        condition: service_healthy
+    environment:
+      RPC_URL: ${RPC_URL:?set RPC_URL to an external node}
+      KEEPER_PK: ${KEEPER_B_PK:-0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e}
+      KEEPER_ID: ${KEEPER_B_ID:-keeper-b}
+      DEPLOYMENTS_PATH: /shared/${NETWORK:-testnet}.json
+      RISK_ENGINE_URL: http://risk-engine:8081
+      TICK_MS: "1000"
+      HEALTH_PORT: "9091"
+      DRY_RUN: "false"
+    volumes:
+      - ./deployments:/shared:ro
+    ports:
+      - "9091:9091"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:9091/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
       interval: 5s
       timeout: 3s
       retries: 20

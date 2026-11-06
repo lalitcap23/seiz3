@@ -105,13 +105,15 @@ export interface HealthStatus {
   readonly breaker: BreakerSnapshot;
   readonly riskEngine: RiskEngineStatus;
   readonly tickMs: number;
+  /** Leader-election identity; "standby" in lastReason means another keeper is the leader. */
+  readonly keeperId: string;
 }
 
 export interface HealthDeps {
   readonly breaker: () => BreakerSnapshot;
   readonly riskEngine: () => RiskEngineStatus;
   readonly killSwitch: () => boolean;
-  readonly cfg: Pick<Config, "dryRun" | "tickMs" | "healthPort">;
+  readonly cfg: Pick<Config, "dryRun" | "tickMs" | "healthPort" | "keeperId">;
 }
 
 export class Telemetry {
@@ -169,6 +171,7 @@ export class Telemetry {
       breaker,
       riskEngine: deps.riskEngine(),
       tickMs: deps.cfg.tickMs,
+      keeperId: deps.cfg.keeperId,
     };
   }
 
