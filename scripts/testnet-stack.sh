@@ -32,6 +32,10 @@
 #   scripts/testnet-stack.sh bots                   # oracle follower + pool rebalancer (+ HyperCore market maker
 #                                                   #   with HL_MM_PRIVATE_KEY in .env.local), its own terminal
 #   scripts/testnet-stack.sh release                # after a crash: the oracles follow HyperCore again
+#
+# Before a fresh deploy (pnpm testnet:down first, or the bots put money back):
+#   scripts/testnet-stack.sh reclaim                # every USDC we put in → the deployer; rerun once the vault's
+#                                                   #   HyperCore margin has landed back on HyperEVM
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -249,6 +253,129 @@ status() {
   '
 }
 
+# first word of a cast call: drops the "[1.2e8]" suffix
+call() {
+  cast call "$@" --rpc-url "$RPC" | head -1 | awk '{print $1}'
+}
+
+# liquidity <poolManager> <owner> <poolKey tuple> <lower> <upper> <salt>: a v4 position's liquidity (StateLibrary's slots)
+liquidity() {
+  local pm=$1 owner=$2 key=$3 lower=$4 upper=$5 salt=$6 id state pk raw
+  id=$(cast keccak "$(cast abi-encode "f((address,address,uint24,int24,address))" "$key")")
+  state=$(cast keccak "$(cast concat-hex "$id" "$(cast to-uint256 6)")")
+  pk=$(cast keccak "$(cast abi-encode --packed "f(address,int24,int24,bytes32)" "$owner" "$lower" "$upper" "$salt")")
+  raw=$(cast call "$pm" "extsload(bytes32)(bytes32)" "$(cast keccak "$(cast concat-hex "$pk" \
+    "$(node -e 'console.log("0x" + (BigInt(process.argv[1]) + 6n).toString(16).padStart(64, "0"))' "$state")")")" \
+    --rpc-url "$RPC")
+  node -e 'console.log((BigInt(process.argv[1]) & ((1n << 128n) - 1n)).toString())' "$raw"
+}
+
+reclaim() {
+  local usdc vault morpho pm bal hype
+  if docker compose -f "$ROOT/docker-compose.testnet.yml" ps -q 2>/dev/null | grep -q .; then
+    echo "the testnet stack is running: pnpm testnet:down first" >&2
+    exit 1
+  fi
+  usdc=$(json "$DEP_JSON" usdc)
+  vault=$(json "$DEP_JSON" vault)
+  morpho=$(json "$DEP_JSON" morpho)
+  pm=$(json "$DEP_JSON" poolManager)
+  usd() { cast format-units "$1" 6; }
+
+  local holder
+  for holder in faucet naiveLiquidator; do
+    local addr
+    addr=$(json "$DEP_JSON" "$holder")
+    bal=$(call "$usdc" "balanceOf(address)(uint256)" "$addr")
+    if [[ $bal != 0 ]]; then
+      send "$addr" "withdraw(address,address,uint256)" "$usdc" "$DEPLOYER" "$bal"
+      echo "$holder: $(usd "$bal") USDC"
+    fi
+  done
+  hype=$(cast balance "$(json "$DEP_JSON" faucet)" --rpc-url "$RPC")
+  if [[ $hype != 0 ]]; then
+    send "$(json "$DEP_JSON" faucet)" "withdraw(address,address,uint256)" 0x0000000000000000000000000000000000000000 \
+      "$DEPLOYER" "$hype"
+    echo "faucet: $(cast from-wei "$hype") HYPE"
+  fi
+
+  # every position SeedPool ever added, through whichever PoolSeeder it used; pulled whole, paid to the deployer
+  local pos seeder key lower upper salt liq
+  while read -r seeder key lower upper salt; do
+    [[ -z $seeder ]] && continue
+    liq=$(liquidity "$pm" "$seeder" "$key" "$lower" "$upper" "$salt")
+    [[ $liq == 0 ]] && continue
+    before=$(call "$usdc" "balanceOf(address)(uint256)" "$DEPLOYER")
+    send "$seeder" "modifyLiquidity((address,address,uint24,int24,address),int24,int24,int256,bytes32)" \
+      "$key" "$lower" "$upper" "-$liq" "$salt"
+    echo "pool position $lower..$upper (salt ${salt: -1}): $(usd $(($(call "$usdc" "balanceOf(address)(uint256)" \
+      "$DEPLOYER") - before))) USDC"
+  done < <(node -e '
+    const fs = require("fs"), dir = process.argv[1], seen = new Set();
+    if (!fs.existsSync(dir)) process.exit(0);
+    for (const f of fs.readdirSync(dir).filter((f) => /^run-\d+\.json$/.test(f)))
+      for (const t of JSON.parse(fs.readFileSync(`${dir}/${f}`, "utf8")).transactions)
+        if (t.function?.startsWith("modifyLiquidity(") && !t.arguments[3].startsWith("-")) {
+          const [key, lower, upper, , salt] = t.arguments;
+          const row = [t.contractAddress, key.replace(/\s/g, ""), lower, upper, salt].join(" ");
+          if (!seen.has(row)) seen.add(row), console.log(row);
+        }
+  ' "$ROOT/contracts/broadcast/SeedPool.s.sol/998")
+
+  # Morpho: repay the deployer's own loans, then take back whatever supply isn't lent out
+  local name id params shares borrowShares supply borrow free
+  for name in A_naive B_conservative C_afterbell; do
+    id=$(json "$DEP_JSON" "markets.$name.id")
+    params="($(cast call "$morpho" "idToMarketParams(bytes32)(address,address,address,address,uint256)" "$id" \
+      --rpc-url "$RPC" | awk '{print $1}' | paste -sd, -))"
+    read -r shares borrowShares _ < <(cast call "$morpho" "position(bytes32,address)(uint256,uint128,uint128)" \
+      "$id" "$DEPLOYER" --rpc-url "$RPC" | awk '{print $1}' | paste -sd' ' -)
+    if [[ $borrowShares != 0 ]]; then
+      send "$usdc" "approve(address,uint256)" "$morpho" 1000000000
+      send "$morpho" "repay((address,address,address,address,uint256),uint256,uint256,address,bytes)" \
+        "$params" 0 "$borrowShares" "$DEPLOYER" 0x
+      send "$usdc" "approve(address,uint256)" "$morpho" 0
+      echo "market $name: deployer's loan repaid"
+    fi
+    [[ $shares == 0 ]] && continue
+    read -r supply _ borrow _ < <(cast call "$morpho" \
+      "market(bytes32)(uint128,uint128,uint128,uint128,uint128,uint128)" "$id" --rpc-url "$RPC" |
+      awk '{print $1}' | paste -sd' ' -)
+    if [[ $borrow == 0 ]]; then
+      before=$(call "$usdc" "balanceOf(address)(uint256)" "$DEPLOYER")
+      send "$morpho" "withdraw((address,address,address,address,uint256),uint256,uint256,address,address)" \
+        "$params" 0 "$shares" "$DEPLOYER" "$DEPLOYER"
+      echo "market $name: $(usd $(($(call "$usdc" "balanceOf(address)(uint256)" "$DEPLOYER") - before))) USDC supply"
+    else
+      free=$((supply - borrow))
+      ((free > 0)) && send "$morpho" "withdraw((address,address,address,address,uint256),uint256,uint256,address,address)" \
+        "$params" "$free" 0 "$DEPLOYER" "$DEPLOYER"
+      echo "market $name: $(usd "$free") USDC back, $(usd "$borrow") still lent out to testers (rerun once repaid)"
+    fi
+  done
+
+  # the vault's HyperCore margin → its HyperEVM idle (only when flat; it lands a few blocks later), then redeem
+  local value
+  value=$(precompile 0x000000000000000000000000000000000000080F "uint32,address" "int64,uint64,uint64,int64" \
+    "$PERP_DEX_INDEX" "$vault")
+  if ((value > 0)); then
+    if send "$vault" "withdrawMargin(uint256)" "$value" 2>/dev/null; then
+      echo "vault: $(usd "$value") USDC margin sent HyperCore → HyperEVM; rerun reclaim in a minute to redeem it"
+    else
+      echo "vault: $(usd "$value") USDC margin stays on HyperCore (not flat: stock or short still open)"
+    fi
+  fi
+  shares=$(call "$vault" "maxRedeem(address)(uint256)" "$DEPLOYER")
+  if [[ $shares != 0 ]]; then
+    before=$(call "$usdc" "balanceOf(address)(uint256)" "$DEPLOYER")
+    send "$vault" "requestWithdraw(uint256)" "$shares"
+    echo "vault: $(usd $(($(call "$usdc" "balanceOf(address)(uint256)" "$DEPLOYER") - before))) USDC redeemed"
+  fi
+
+  echo "deployer now $(usd "$(call "$usdc" "balanceOf(address)(uint256)" "$DEPLOYER")") USDC," \
+    "$(cast balance "$DEPLOYER" --ether --rpc-url "$RPC") HYPE"
+}
+
 keeper() {
   : "${KEEPER_PRIVATE_KEY:?set KEEPER_PRIVATE_KEY in .env.local}"
   cd "$ROOT"
@@ -276,10 +403,11 @@ case "${1:-}" in
   fund-naive) fund_naive "${2:-}" ;;
   bots) bots ;;
   release) release ;;
+  reclaim) reclaim ;;
   *)
     echo "usage: scripts/testnet-stack.sh big-blocks on|off | infra | deploy | markets | actors | sweep | status |" \
       "keeper | crash | extras | seed deep|thin <usdc> | fund-vault <usdc> |" \
-      "fund-faucet <nvdax> <usdc> <hype> | fund-naive <usdc> | bots | release" >&2
+      "fund-faucet <nvdax> <usdc> <hype> | fund-naive <usdc> | bots | release | reclaim" >&2
     exit 1
     ;;
 esac

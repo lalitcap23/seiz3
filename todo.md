@@ -162,6 +162,31 @@ All through `scripts/testnet-stack.sh` (README, "Testnet end to end"). Scaled to
 
 ### 7. Full demo on testnet
 
+Built (no redeploy of the vault `0x6c64…`):
+
+- [x] Contracts: `Faucet` (operator drips NVDAx, USDC, HYPE once a day), `PoolSwapTest` as public swap router, `NaiveLiquidator` on its own thin 0.05% pool (`TestnetExtras.s.sol`). `SeedPool` seeds the thin pool with `THIN=true`.
+- [x] Keeper: finds borrowers from Morpho `Borrow` events (from `startBlock`), and counts interest Morpho hasn't booked yet, so a "borrow max" loan is liquidated on its own.
+- [x] `packages/bots`: oracle follower, pool rebalancer, HyperCore market maker, alerts. They hold while `deployments/BOTS_HOLD` exists (crash / replay scene).
+- [x] API: `POST /faucet` (operator key, one per IP per hour), thin pool in the snapshot, replay refuses `REPLAY_TOKEN=change-me` off local.
+- [x] Replay on testnet: `setup` in viem (oracles on HyperCore, lenders topped up, fresh borrowers), `monday` resets the thin pool and releases the bots.
+- [x] Web: `/try` page: wallet connect (chain 998), faucet, borrow with Max, LP deposit/withdraw/claim, swap, my position.
+- [x] Hosting files: `docker/services.Dockerfile`, `docker-compose.testnet.yml` (not built yet: no Docker on this laptop).
+
+To do, in order:
+
+- [x] `extras` (deployer, small blocks are enough). Faucet `0xb249…80c6`, router `0xcD79…4fac`, NaiveLiquidator `0x8726…A84F`.
+- [x] Market maker: API wallet `0x567e…` for your main account `0xa0bb…` (unified account, ~$30 free margin, long ~0.9 NVDA). Quotes 0.5 NVDA ±0.4%, capped at 1.5 NVDA either way. One tick tested: book now 210.65 / 212.35 around a 211.50 oracle.
+- [ ] **You:** `0xa0bb…`'s 0.319 HYPE → Transfer to EVM → send ~0.25 to the faucet on HyperEVM (testers' gas; the faucet has 0.02). An API wallet can't send to other addresses.
+- [x] Deep pool 150 USDC ±5%, thin pool 20 USDC, vault +100 (idle 146), faucet 40 USDC + 5 NVDAx + 0.02 HYPE (drip 0.1 NVDAx / 5 USDC / 0.002 HYPE), NaiveLiquidator 30, deployer keeps ~83. Faucet operator `0x5bd5…` allowed, 0.01 HYPE.
+- [x] Everything runs in Docker: `pnpm testnet:up` / `testnet:logs` / `testnet:down` (keeper, risk engine, API, bots, web on :3000).
+- [x] Unwinds while the stock market is closed, only when every rule passes: pool within 1.5% of HyperCore, ≤ 0.5% impact, ≤ 1% slippage (vault), and an ask on HyperCore for the buy-back (keeper's liquidity gate, market maker posts it on request, and only while its own liquidation price stays ≥ 8% away). Otherwise it waits. `cooldownClosedSec` = 30 s.
+- [x] Explorer: our own `/tx/<hash>` page (HyperEVM testnet has no working public explorer): decoded call, events, and the vault's HyperCore fills. Every tx on the dashboard and /try links to it.
+- [x] /try "What happened to your loan": liquidation → short on HyperCore → confirmed → unwinds, each with its tx.
+- [x] A tester run through `/try`: faucet → collateral → Max borrow → liquidated and hedged within ~1 min (0x4d21…, tx 0x4988…).
+- [ ] Second tester run end to end with the new timeline and tx pages (faucet cooldown is 10 min for now).
+- [ ] Private RPC, server (`docker-compose.testnet.yml`), web on Vercel, real `REPLAY_TOKEN`, `ALERT_WEBHOOK_URL`.
+- [ ] Full presenter run on testnet: `setup` → `scene` → `marketA` → `marketB` → `marketC` → `monday`.
+
 - ✅ **Done when:** it behaves the same as the local run.
 
 ### 8. Tiny mainnet test

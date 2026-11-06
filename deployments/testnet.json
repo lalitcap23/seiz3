@@ -1,6 +1,16 @@
 {
+  "borrowers": [
+    {
+      "address": "0x7Ea067328338D368038Fc677A7Fb17C9770D3F54",
+      "label": "C_afterbell"
+    }
+  ],
   "chainId": 998,
   "coreDepositWallet": "0x0B80659a4076E9E93C7DbE0f10675A16a3e5C206",
+  "demo": {
+    "borrowPriceUsd6": "216710000"
+  },
+  "faucet": "0x33777735E5593840215351AC1c2A766452fa214e",
   "hypercore": {
     "perpAsset": 750002,
     "perpDexIndex": 65,
@@ -9,43 +19,43 @@
   },
   "markets": {
     "A_naive": {
-      "id": "0x4fd9fd57c70b8ce4f570ee55745205d5e9d892051fb0bfc8a7c664710b12aef6",
+      "id": "0x5e265632b86860c8c3033030bf71e53c774e40c92008d90a0544786cab298ffb",
       "lltv": "770000000000000000",
-      "oracle": "0x8c7640c402bF467148a273d498AbD2ae0ead2e83"
+      "oracle": "0x2A235a5cBBF6E83eD5b72b2045fb4A1cC36264da"
     },
     "B_conservative": {
-      "id": "0xed66abe23351f5584a227d950ae050e1ce36367a3bddd604264c400b232ad407",
+      "id": "0xf02613a1c6a303a19370556734e04cd2e49272160b9f65e791fa9b997bcf85f2",
       "lltv": "385000000000000000",
-      "oracle": "0xe10583a50704f6B536305B948264Cc7DfC96Ec06"
+      "oracle": "0x937088717bd23887D02308ed6BC87BB1b0e7848E"
     },
     "C_afterbell": {
-      "id": "0xd88d29a5a9d3dafa56d2594f3798659ce1113c265fcb3a8677965e4c480a5014",
+      "id": "0x6812cb8d824ef23d481b1bd4d829492495acc67304d16a6ae6942d3c0b3b21b2",
       "lltv": "770000000000000000",
-      "oracle": "0x00c87446f85d3D27889B9378b7B6D9B30Cc4Acc1"
+      "oracle": "0xCe0A8975F6C6122b7771B358526BE941db100B93"
     }
   },
-  "morpho": "0xbE54b050F303Aa1a4CD1d354c20b341071632AB0",
-  "naiveLiquidator": "0x4efaf9213f10a54792c498c0330385d8ebc16939",
-  "nvdax": "0xdD5e0E5f23bD7Ca0a0933E11B253Ad1A3A5eE8a6",
+  "morpho": "0x63c539784853717B1b879F7baC1cb16b8148B3CE",
+  "naiveLiquidator": "0x957Ed6E154063Bc7d8dC816841934d01a0Fb985c",
+  "nvdax": "0xa1e0804D9C3dcD45495A11f1B71A6C1abD8D42CB",
   "poolKey": {
     "currency0": "0x2B3370eE501B4a559b57D449569354196457D8Ab",
-    "currency1": "0xdD5e0E5f23bD7Ca0a0933E11B253Ad1A3A5eE8a6",
+    "currency1": "0xa1e0804D9C3dcD45495A11f1B71A6C1abD8D42CB",
     "fee": 3000,
     "hooks": "0x0000000000000000000000000000000000000000",
     "tickSpacing": 60
   },
-  "poolManager": "0xce19e7C888D3b4c3a6E2e55e2C516b1A8e2d0990",
-  "poolSeeder": "0x0c272737539225309688ada1eDd19891Dc504f61",
-  "riskParams": "0x9557cd78f2332fb661eBd0017eE057cD4A086c20",
+  "poolManager": "0xc93b2C018ee1fb223810cb2eDEF52C9D1056B21d",
+  "poolSeeder": "0x07c38971c3f5DFa818a3506Ee8DE31e34d715F02",
+  "riskParams": "0x4bee195a0259618AA3d97F9fdE8Ea880527F203A",
+  "swapRouter": "0x37421eb32D304D9B8dcBe00A10c7150EFC76817D",
+  "thinPoolKey": {
+    "currency0": "0x2B3370eE501B4a559b57D449569354196457D8Ab",
+    "currency1": "0xa1e0804D9C3dcD45495A11f1B71A6C1abD8D42CB",
+    "fee": 500,
+    "hooks": "0x0000000000000000000000000000000000000000",
+    "tickSpacing": 10
+  },
   "usdc": "0x2B3370eE501B4a559b57D449569354196457D8Ab",
-  "vault": "0x6c6496fB365AAC734F55F99aAE51357906d73D9C",
-  "borrowers": [
-    {
-      "address": "0x7Ea067328338D368038Fc677A7Fb17C9770D3F54",
-      "label": "C_afterbell"
-    }
-  ],
-  "demo": {
-    "borrowPriceUsd6": "212030000"
-  }
+  "vault": "0x8F34B29480a469CCeba15314975ceE97370feA2f",
+  "startBlock": 68013191
 }
