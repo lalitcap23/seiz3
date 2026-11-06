@@ -14,6 +14,11 @@ const address = z
 const deploymentFileSchema = deploymentSchema.extend({
   naiveLiquidator: address.optional(),
   poolSeeder: address.optional(),
+  // testnet extras (TestnetExtras.s.sol): public testers' faucet and swap router, market A's own thin pool
+  faucet: address.optional(),
+  swapRouter: address.optional(),
+  thinPoolKey: deploymentSchema.shape.poolKey.optional(),
+  startBlock: z.number().int().nonnegative().optional(), // where the markets were created: log scans start here
   markets: deploymentSchema.shape.markets.unwrap(),
   borrowers: z.array(z.object({ address, label: z.string().optional() })).default([]),
 });

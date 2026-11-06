@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  accruedBorrowAssets,
   borrowAssetsOf,
   borrowerReport,
   buildReports,
@@ -45,6 +46,24 @@ describe("borrowers: Morpho math", () => {
     expect(borrowAssetsOf(900n * 10n ** 12n, 0n, 0n)).toBe(USDC(900));
     expect(borrowAssetsOf(1n, USDC(900), 900n * 10n ** 12n)).toBe(1n);
     expect(borrowAssetsOf(0n, USDC(900), 900n * 10n ** 12n)).toBe(0n);
+  });
+
+  it("accrues interest Morpho hasn't booked yet, as _accrueInterest does", () => {
+    const year = 365n * 24n * 3600n;
+    const tenPctApr = 10n ** 17n / year; // IrmMock at 10% utilization
+    // e^0.1 − 1 to three Taylor terms: 0.1 + 0.005 + 0.000167 → 110.516 USDC (rate rounding costs a few units)
+    const after = accruedBorrowAssets(USDC(100), tenPctApr, year);
+    expect(after).toBeGreaterThan(110_516_000n);
+    expect(after).toBeLessThan(110_517_000n);
+    expect(accruedBorrowAssets(USDC(100), tenPctApr, 0n)).toBe(USDC(100));
+    expect(accruedBorrowAssets(USDC(100), 0n, year)).toBe(USDC(100));
+  });
+
+  it("tips a loan opened 1 unit under the limit over it within a minute", () => {
+    const year = 365n * 24n * 3600n;
+    const rate = (9n * 10n ** 17n) / year; // 90% utilization
+    // a ~$16 loan gains ~0.45 units a second
+    expect(accruedBorrowAssets(USDC(16), rate, 60n) - USDC(16)).toBeGreaterThan(1n);
   });
 
   it("matches Morpho's liquidation incentive", () => {

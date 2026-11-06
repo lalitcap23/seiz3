@@ -115,6 +115,23 @@ export function collateralValueUsdc(collateral: bigint, price: bigint): bigint {
   return (collateral * price) / MORPHO_PRICE_SCALE;
 }
 
+/** Morpho MathLib `wTaylorCompounded`: e^(rate × elapsed) − 1 to three terms, WAD. */
+export function wTaylorCompounded(rate: bigint, elapsed: bigint): bigint {
+  const first = rate * elapsed;
+  const second = (first * first) / (2n * WAD);
+  const third = (second * first) / (3n * WAD);
+  return first + second + third;
+}
+
+/**
+ * Morpho `_accrueInterest` on totalBorrowAssets: the debt the next liquidation will see. The stored total only moves
+ * when someone touches the market, so a loan opened just under the LLTV crosses it without any transaction.
+ */
+export function accruedBorrowAssets(totalBorrowAssets: bigint, borrowRate: bigint, elapsed: bigint): bigint {
+  if (borrowRate <= 0n || elapsed <= 0n) return totalBorrowAssets;
+  return totalBorrowAssets + (totalBorrowAssets * wTaylorCompounded(borrowRate, elapsed)) / WAD;
+}
+
 /** Morpho `toAssetsUp`: what `shares` of debt are worth, rounded against the borrower. */
 export function borrowAssetsOf(
   shares: bigint,

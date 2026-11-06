@@ -3,13 +3,15 @@ import {
   afterbellVaultAbi,
   demoOracleAbi,
   iMorphoAbi,
+  mockNvdAxAbi,
   naiveLiquidatorAbi,
   poolSeederAbi,
   riskParamsAbi,
 } from "@afterbell/shared/abis";
-import type { MarketName } from "@afterbell/shared";
+import { sqrtPriceAt, type MarketName } from "@afterbell/shared";
 import {
   borrowerOf,
+  bots,
   coreOracleUsd6,
   dep,
   env,
@@ -20,15 +22,18 @@ import {
   nvda,
   read,
   run,
+  owner,
   send,
   sleep,
   usd,
+  writeDeployment,
 } from "./context.js";
 
 const MARKETS: readonly MarketName[] = ["A_naive", "B_conservative", "C_afterbell"];
+/** Testnet setup's borrowers: A and C just under the 77% LLTV (the scene's 1.4% drop tips them over), B safe. */
+const SHOW_LTV_BPS: Record<MarketName, bigint> = { A_naive: 7680n, B_conservative: 3000n, C_afterbell: 7680n };
 const WAD = 10n ** 18n;
 const ORACLE_SCALE = 10n ** 36n;
-const Q192 = 1n << 192n;
 const mockCoreAbi = parseAbi(["function setPx(uint64 px)"]);
 
 // Morpho Blue's liquidation maths, as in packages/keeper/src/riskCalc.ts
@@ -44,19 +49,6 @@ function liquidationIncentiveFactor(lltv: bigint): bigint {
 function seizableFor(repayable: bigint, price: bigint, lltv: bigint): bigint {
   if (repayable <= 0n || price <= 0n) return 0n;
   return (((repayable * liquidationIncentiveFactor(lltv)) / WAD) * ORACLE_SCALE) / price;
-}
-
-function sqrt(n: bigint): bigint {
-  if (n < 2n) return n;
-  let x = n;
-  let y = (x + 1n) / 2n;
-  while (y < x) [x, y] = [y, (y + n / y) / 2n];
-  return x;
-}
-
-/** USDC (6 dec) per NVDAx → v4 sqrtPriceX96, as UnwindLib.sqrtPriceAt. */
-function sqrtPriceAt(usd6: bigint, nvdaxIsCurrency0: boolean): bigint {
-  return sqrt(nvdaxIsCurrency0 ? (usd6 * Q192) / WAD : (WAD * Q192) / usd6);
 }
 
 /** A market's demo borrower as Morpho sees it, or null where the deployment has none (testnet's A and B). */
@@ -113,10 +105,36 @@ function localOnly(step: string) {
 
 /** Each step is one presenter click. Same order every run so the 3-minute demo is deterministic. */
 export const STEPS = {
-  /** Run once before judging (local): chain, vault, markets, lenders, borrowers, thin pool, anvil snapshot. */
+  /**
+   * Run once before judging. Local: chain, vault, markets, lenders, borrowers, thin pool, anvil snapshot.
+   * Testnet (no snapshots, so once per show): oracles onto HyperCore's price, lenders topped up, the deployer opens a
+   * fresh borrower in each market, and the keeper waits for the market C click.
+   */
   setup: async () => {
-    localOnly("setup");
-    await run("scripts/local-stack.sh", ["demo"]);
+    if (local) return run("scripts/local-stack.sh", ["demo"]);
+    const d = dep();
+    const core = await coreOracleUsd6();
+    const collateral = BigInt(Math.round(env.SHOW_NVDAX * 1e6)) * 10n ** 12n;
+    keeper.hold();
+    await send(d.nvdax, mockNvdAxAbi, "mint", [owner.address, collateral * BigInt(MARKETS.length)]);
+    for (const token of [d.usdc, d.nvdax] as Address[]) await send(token, erc20Abi, "approve", [d.morpho, maxUint256]);
+    for (const m of MARKETS) {
+      const { id, oracle } = d.markets[m];
+      await send(oracle, demoOracleAbi, "setPrice", [core * 10n ** 18n]);
+      const params = await read(d.morpho, iMorphoAbi, "idToMarketParams", [id]);
+      const debt = (((collateral * core) / WAD) * SHOW_LTV_BPS[m]) / 10_000n;
+      const [supplied, , borrowed] = await read<readonly bigint[]>(d.morpho, iMorphoAbi, "market", [id]);
+      const free = (supplied ?? 0n) - (borrowed ?? 0n);
+      if (free < debt) await send(d.morpho, iMorphoAbi, "supply", [params, debt - free + 1_000_000n, 0n, owner.address, "0x"]);
+      await send(d.morpho, iMorphoAbi, "supplyCollateral", [params, collateral, owner.address, "0x"]);
+      await send(d.morpho, iMorphoAbi, "borrow", [params, debt, 0n, owner.address, owner.address]);
+    }
+    writeDeployment({
+      borrowers: MARKETS.map((label) => ({ address: owner.address, label })),
+      demo: { borrowPriceUsd6: core.toString() },
+    });
+    console.log(`borrowers open at ${usd(core)} with ${nvda(collateral)} each; keeper held until marketC`);
+    for (const m of MARKETS) await report(m);
   },
 
   /** Between runs (local): rewind anvil to the snapshot setup took, keeper held again. */
@@ -131,6 +149,7 @@ export const STEPS = {
     // On testnet HyperCore's oracle is real, and the vault only liquidates within 1.5% of it.
     const drop = local ? BigInt(Math.round(env.DROP_USD * 1e6)) : ((await coreOracleUsd6()) * 9_860n) / 10_000n;
     keeper.hold();
+    if (!local) bots.hold();
     if (local) await send(localChain().core, mockCoreAbi, "setPx", [drop / 10n ** BigInt(d.hypercore.szDecimals)]);
     for (const m of MARKETS) await send(d.markets[m].oracle, demoOracleAbi, "setPrice", [drop * 10n ** 18n]);
     console.log(`NVDA ${usd(drop)} on all three markets${local ? " and on HyperCore" : ""}`);
@@ -194,17 +213,24 @@ export const STEPS = {
     const d = dep();
     if (d.poolSeeder === undefined) throw new Error("no poolSeeder in the deployment file");
     const oracle = await coreOracleUsd6();
-    const nvdaxIsCurrency0 = d.poolKey.currency0.toLowerCase() === d.nvdax.toLowerCase();
+    const nvdaxIsCurrency0 = d.poolKey.currency0.toLowerCase() === d.nvdax.toLowerCase(); // same tokens in both pools
     for (const token of [d.usdc, d.nvdax] as Address[]) {
       await send(token, erc20Abi, "approve", [d.poolSeeder, maxUint256]);
     }
-    await send(d.poolSeeder, poolSeederAbi, "swapToPrice", [d.poolKey, sqrtPriceAt(oracle, nvdaxIsCurrency0)]);
-    console.log(`arbitrage: pool back on HyperCore's ${usd(oracle)}`);
+    // testnet: market A dumped into its own thin pool, and the bots keep the vault's deep pool on the oracle
+    const dumped = d.thinPoolKey ?? d.poolKey;
+    await send(d.poolSeeder, poolSeederAbi, "swapToPrice", [dumped, sqrtPriceAt(oracle, nvdaxIsCurrency0)]);
+    console.log(`arbitrage: ${d.thinPoolKey ? "thin " : ""}pool back on HyperCore's ${usd(oracle)}`);
 
     const depth = env.MONDAY_USDC ?? (local ? 1_000_000 : undefined);
-    if (depth === undefined) throw new Error("set MONDAY_USDC (deep liquidity to add) on testnet");
-    await forgeScript("SeedPool.s.sol", { THIN: "false", USDC_AMOUNT: String(BigInt(Math.round(depth * 1e6))) });
-    console.log(`deep liquidity: ${usd(BigInt(Math.round(depth * 1e6)))} around the oracle`);
+    if (depth !== undefined) {
+      await forgeScript("SeedPool.s.sol", { THIN: "false", USDC_AMOUNT: String(BigInt(Math.round(depth * 1e6))) });
+      console.log(`deep liquidity: ${usd(BigInt(Math.round(depth * 1e6)))} around the oracle`);
+    }
+    if (!local) {
+      bots.release();
+      console.log("bots released: the oracles follow HyperCore again, the deep pool stays on it");
+    }
 
     await send(d.riskParams, riskParamsAbi, "setMarketOpen", [true]);
     keeper.release();

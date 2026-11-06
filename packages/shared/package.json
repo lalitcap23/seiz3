@@ -8,7 +8,10 @@
     "./abis": "./src/generated/abis.ts",
     "./fixtures/snapshot.json": "./src/fixtures/snapshot.json",
     "./risk": "./src/risk.ts",
-    "./node": "./src/node.ts"
+    "./node": "./src/node.ts",
+    "./pool": "./src/pool.ts",
+    "./morpho": "./src/morpho.ts",
+    "./deployments": "./src/deployments.ts"
   },
   "scripts": {
     "codegen": "wagmi generate",

@@ -21,6 +21,8 @@ export default defineConfig({
         "DemoOracle.sol/**",
         "NaiveLiquidator.sol/**",
         "PoolSeeder.sol/**",
+        "Faucet.sol/**",
+        "PoolSwapTest.sol/**",
       ],
     }),
   ],

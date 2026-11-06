@@ -134,6 +134,10 @@ export interface DeploymentInfo {
   readonly marketId: Hex;
   /** Morpho can't enumerate a market's borrowers; setup scripts list the ones they opened. */
   readonly borrowers: readonly DeploymentBorrower[];
+  /** Block the markets were created in, if the deployment file records it. */
+  readonly startBlock?: bigint;
+  /** xyz:NVDA size decimals (deployments hypercore.szDecimals). */
+  readonly szDecimals?: number;
 }
 
 export interface Config {
@@ -157,6 +161,20 @@ export interface Config {
   readonly morphoApiTimeoutMs: number;
   readonly morphoApiIntervalMs: number;
   readonly morphoApiMaxPositions: number;
+
+  // on-chain borrower discovery: Morpho Borrow events on the market (borrowerScan.ts)
+  readonly borrowerScanFromBlock: bigint | null;
+  readonly borrowerScanPageBlocks: bigint;
+  readonly borrowerScanPagesPerTick: number;
+  readonly borrowerScanIntervalMs: number;
+  readonly logsRpcUrl: string;
+  /** Addresses to check every tick, written by the API (/try connects, faucet drips). */
+  readonly watchFile: string | null;
+  /** Buy-back liquidity gate: Hyperliquid info API (null: off), the perp, and where to ask the market maker. */
+  readonly hlInfoUrl: string | null;
+  readonly hlCoin: string;
+  readonly askRequestFile: string | null;
+  readonly unwindChunkEstimateUnits: bigint;
 
   // loop
   readonly tickMs: number;

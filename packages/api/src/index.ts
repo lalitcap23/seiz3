@@ -8,8 +8,12 @@ import { createPublicClient, http, type PublicClient } from "viem";
 import { foundry } from "viem/chains";
 import { chains, HL_INFO_API, rpcUrlFor } from "@afterbell/shared";
 import { env } from "./env.js";
-import { loadDeployment } from "@afterbell/shared/node";
+import { DEPLOYMENTS_DIR, loadDeployment } from "@afterbell/shared/node";
 import { Collector } from "./collector.js";
+import { FaucetRelay } from "./faucet.js";
+import { Watchlist } from "./watch.js";
+import { readTx } from "./tx.js";
+import { getConnInfo } from "@hono/node-server/conninfo";
 
 const EXPLORER = {
   local: "",
@@ -19,10 +23,9 @@ const EXPLORER = {
 
 const dep = loadDeployment(env.NETWORK, env.DEPLOYMENTS_PATH);
 const remote = env.NETWORK === "local" ? null : env.NETWORK; // HyperEVM + Hyperliquid's info API
-const client = createPublicClient({
-  chain: remote ? chains[remote] : foundry,
-  transport: http(env.RPC_URL ?? (remote ? rpcUrlFor(remote) : "http://127.0.0.1:8545")),
-}) as PublicClient;
+const chain = remote ? chains[remote] : foundry;
+const rpcUrl = env.RPC_URL ?? (remote ? rpcUrlFor(remote) : "http://127.0.0.1:8545");
+const client = createPublicClient({ chain, transport: http(rpcUrl) }) as PublicClient;
 
 const chainId = await client.getChainId();
 if (chainId !== dep.chainId) {
@@ -33,6 +36,10 @@ const collector = new Collector(client, dep, {
   hlInfoUrl: remote ? (env.HL_INFO_API_URL ?? HL_INFO_API[remote]) : null,
   explorerUrl: EXPLORER[env.NETWORK] && `${EXPLORER[env.NETWORK]}${dep.vault}`,
   fromBlock: env.FROM_BLOCK ?? (remote ? null : 0n),
+  ...(env.LOGS_RPC_URL
+    ? { logsClient: createPublicClient({ chain, transport: http(env.LOGS_RPC_URL) }) as PublicClient }
+    : {}),
+  logScanMs: env.LOG_SCAN_MS,
 });
 collector.start(env.POLL_MS);
 
@@ -75,6 +82,43 @@ app.get("/stream", (c) =>
   }),
 );
 
+/** The web's transaction page: decoded call, events and the vault's HyperCore orders (no public testnet explorer). */
+app.get("/tx/:hash", async (c) => {
+  const hash = c.req.param("hash");
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) return c.json({ error: "not a transaction hash" }, 400);
+  const view = await readTx(client, collector.deployment, hash as `0x${string}`, {
+    infoUrl: remote ? (env.HL_INFO_API_URL ?? HL_INFO_API[remote]) : null,
+    explorer: EXPLORER[env.NETWORK] ? `${EXPLORER[env.NETWORK]}${dep.vault}` : null,
+    txExplorer: EXPLORER[env.NETWORK] ? EXPLORER[env.NETWORK].replace("/address/", "/tx/") : null,
+  }).catch((error: unknown) => ({ error: error instanceof Error ? error.message.split("\n")[0] : String(error) }));
+  if (view === null) return c.json({ error: "transaction not found (yet)" }, 404);
+  return "error" in view ? c.json(view, 502) : c.json(view);
+});
+
+const watchlist = new Watchlist(env.WATCH_FILE ?? `${DEPLOYMENTS_DIR}watch.json`);
+
+/** /try calls this on connect: from then on the keeper checks the address every tick, with no log scan involved. */
+app.post("/watch", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { address?: string };
+  return watchlist.add(body.address ?? "") ? c.json({ ok: true, watched: watchlist.size }) : c.json({ error: "not an address" }, 400);
+});
+
+const faucet =
+  env.FAUCET_OPERATOR_PRIVATE_KEY && dep.faucet
+    ? new FaucetRelay(client, chain, rpcUrl, env.FAUCET_OPERATOR_PRIVATE_KEY as `0x${string}`, dep.faucet, env.FAUCET_IP_COOLDOWN_SEC)
+    : null;
+
+/** Testers' first step: NVDAx to borrow against, a little USDC, and HYPE for gas, sent by the operator key. */
+app.post("/faucet", async (c) => {
+  if (faucet === null) return c.json({ error: "faucet not configured on this API" }, 503);
+  const body = (await c.req.json().catch(() => ({}))) as { address?: string };
+  const forwarded = env.TRUST_PROXY === "1" ? c.req.header("x-forwarded-for")?.split(",")[0]?.trim() : undefined;
+  const ip = forwarded ?? getConnInfo(c).remote.address ?? "unknown";
+  watchlist.add(body.address ?? "");
+  const result = await faucet.drip(body.address ?? "", ip);
+  return result.ok ? c.json(result) : c.json(result, result.status);
+});
+
 const REPLAY_STEPS = ["setup", "reset", "scene", "marketA", "marketB", "marketC", "monday"];
 let replaying: string | null = null;
 
@@ -98,6 +142,8 @@ function runReplay(step: string): Promise<{ ok: boolean; output: string }> {
 
 /** The presenter's clicker: one demo step at a time, answered when it has finished. */
 app.post("/replay/:step", async (c) => {
+  // the steps move real oracles with the deployer's key: a public API never runs them on the example token
+  if (remote && env.REPLAY_TOKEN === "change-me") return c.json({ error: "set REPLAY_TOKEN to enable replay" }, 503);
   if (c.req.header("authorization") !== `Bearer ${env.REPLAY_TOKEN}`)
     return c.json({ error: "unauthorized" }, 401);
   const step = c.req.param("step");

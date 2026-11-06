@@ -36,6 +36,9 @@ export const deploymentSchema = z.object({
     szDecimals: z.number(),
   }),
   markets: z.object({ A_naive: market, B_conservative: market, C_afterbell: market }).optional(),
+  // testnet extras (TestnetExtras.s.sol): what the public tester page calls
+  faucet: address.optional(),
+  swapRouter: address.optional(),
 });
 
 export type Deployment = z.infer<typeof deploymentSchema>;

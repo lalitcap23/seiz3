@@ -30,6 +30,18 @@ const envSchema = z.object({
   MORPHO_API_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
   MORPHO_API_INTERVAL_MS: z.coerce.number().int().min(1000).default(5_000),
   MORPHO_API_MAX_POSITIONS: z.coerce.number().int().min(1).max(500).default(100),
+  BORROWER_SCAN_FROM_BLOCK: z.coerce.bigint().optional(), // default: deployments startBlock, else head − 10k
+  BORROWER_SCAN_PAGE_BLOCKS: z.coerce.number().int().min(1).max(10_000).default(500),
+  BORROWER_SCAN_PAGES_PER_TICK: z.coerce.number().int().min(1).max(100).default(2),
+  BORROWER_SCAN_INTERVAL_MS: z.coerce.number().int().min(0).default(4000), // keeps a public logs RPC under its limit
+  // eth_getLogs only; default RPC_URL. Alchemy's HyperEVM testnet has no eth_getLogs, so there it's the public RPC.
+  LOGS_RPC_URL: z.string().min(1).optional(),
+  WATCH_FILE: z.string().min(1).optional(), // default watch.json next to DEPLOYMENTS_PATH (the API writes it)
+  // buy-back liquidity gate (liquidityGate.ts): unset HL_INFO_API_URL turns it off (local MockHyperCore fills all)
+  HL_INFO_API_URL: z.string().url().optional(),
+  HL_COIN: z.string().min(1).default("xyz:NVDA"),
+  ASK_REQUEST_FILE: z.string().min(1).optional(), // default ASK_REQUEST.json next to DEPLOYMENTS_PATH (bots read it)
+  UNWIND_CHUNK_ESTIMATE_UNITS: z.coerce.bigint().default(100n), // Core size units an unwind chunk counts as at most
   TICK_MS: z.coerce.number().int().min(100).max(60_000).default(1000),
   TX_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   HEALTH_PORT: z.coerce.number().int().min(1).max(65_535).default(9090),
@@ -60,6 +72,9 @@ const deploymentSchema = z.object({
   morpho: addressSchema,
   markets: z.object({ C_afterbell: z.object({ id: hex32Schema }) }),
   borrowers: z.array(borrowerSchema).default([]),
+  /** Block the markets were created in: where borrower discovery starts. */
+  startBlock: z.union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)]).optional(),
+  hypercore: z.object({ szDecimals: z.number().int().min(0).max(6) }).optional(),
 });
 
 function toBig(value: number | string): bigint {
@@ -93,6 +108,8 @@ function parseDeploymentsJson(raw: string): DeploymentInfo {
       address: b.address as Address,
       ...(b.label === undefined ? {} : { label: b.label }),
     })),
+    ...(d.startBlock === undefined ? {} : { startBlock: toBig(d.startBlock) }),
+    ...(d.hypercore === undefined ? {} : { szDecimals: d.hypercore.szDecimals }),
   };
 }
 
@@ -196,6 +213,18 @@ export function loadConfig(
     morphoApiTimeoutMs: e.MORPHO_API_TIMEOUT_MS,
     morphoApiIntervalMs: e.MORPHO_API_INTERVAL_MS,
     morphoApiMaxPositions: e.MORPHO_API_MAX_POSITIONS,
+    borrowerScanFromBlock: e.BORROWER_SCAN_FROM_BLOCK ?? deployment.startBlock ?? null,
+    borrowerScanPageBlocks: BigInt(e.BORROWER_SCAN_PAGE_BLOCKS),
+    borrowerScanPagesPerTick: e.BORROWER_SCAN_PAGES_PER_TICK,
+    borrowerScanIntervalMs: e.BORROWER_SCAN_INTERVAL_MS,
+    logsRpcUrl: e.LOGS_RPC_URL ?? e.RPC_URL,
+    hlInfoUrl: e.HL_INFO_API_URL ?? null,
+    hlCoin: e.HL_COIN,
+    askRequestFile:
+      e.ASK_REQUEST_FILE ?? (e.DEPLOYMENTS_PATH ? `${e.DEPLOYMENTS_PATH.replace(/[^/]*$/, "")}ASK_REQUEST.json` : null),
+    unwindChunkEstimateUnits: e.UNWIND_CHUNK_ESTIMATE_UNITS,
+    watchFile:
+      e.WATCH_FILE ?? (e.DEPLOYMENTS_PATH ? `${e.DEPLOYMENTS_PATH.replace(/[^/]*$/, "")}watch.json` : null),
     tickMs: e.TICK_MS,
     txTimeoutMs: e.TX_TIMEOUT_MS,
     healthPort: e.HEALTH_PORT,

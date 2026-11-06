@@ -15,7 +15,8 @@
     "next": "16.4.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "recharts": "^3.10.1"
+    "recharts": "^3.10.1",
+    "viem": "^2.57.7"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",

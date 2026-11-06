@@ -22,7 +22,13 @@ export interface CollectorOptions {
   hlInfoUrl: string | null;
   explorerUrl: string;
   fromBlock: bigint | null;
+  /** eth_getLogs client when it isn't the main one (Alchemy's HyperEVM testnet has no eth_getLogs). */
+  logsClient?: PublicClient;
+  /** Minimum gap between log scans: a public logs RPC allows ~100 requests a minute. */
+  logScanMs?: number;
 }
+
+const LOGS_RPC_LAG = 2n;
 
 /** Polls HyperEVM (one multicall) + Hyperliquid info API every second; keeps latest snapshot in memory. */
 export class Collector {
@@ -38,13 +44,19 @@ export class Collector {
     private dep: DeploymentFile,
     private readonly opts: CollectorOptions,
   ) {
-    this.logs = new LogScanner(client, dep, opts.fromBlock);
+    this.logs = new LogScanner(opts.logsClient ?? client, dep, opts.fromBlock);
+  }
+
+  private nextLogScanAt = 0;
+
+  get deployment(): DeploymentFile {
+    return this.dep;
   }
 
   /** After the replay's setup redeploys: new addresses, so a fresh feed and history. */
   reload(dep: DeploymentFile) {
     this.dep = dep;
-    this.logs = new LogScanner(this.client, dep, this.opts.fromBlock);
+    this.logs = new LogScanner(this.opts.logsClient ?? this.client, dep, this.opts.fromBlock);
     this.history = [];
     this.latest = null;
   }
@@ -68,7 +80,8 @@ export class Collector {
     try {
       const chain = await readChain(this.client, this.dep);
       if (this.latest !== null && chain.blockNumber < BigInt(this.latest.blockNumber)) this.history = []; // anvil revert
-      await this.scanLogs(chain.blockNumber);
+      // a separate logs RPC can sit a block behind the main one, and refuses a range past its own head
+      await this.scanLogs(chain.blockNumber - LOGS_RPC_LAG);
       const snapshot = snapshotSchema.parse(this.build(chain, await this.panel(chain)));
       this.latest = snapshot;
       this.history.push({
@@ -91,6 +104,8 @@ export class Collector {
 
   /** A failed eth_getLogs (public RPCs rate-limit them) leaves the feed a poll behind instead of failing the snapshot. */
   private async scanLogs(head: bigint) {
+    if (Date.now() < this.nextLogScanAt) return;
+    this.nextLogScanAt = Date.now() + (this.opts.logScanMs ?? 0);
     try {
       await this.logs.scan(head);
       if (this.logError !== null) console.log("[api] log scan recovered");
@@ -122,8 +137,16 @@ export class Collector {
     const short = vault.confirmedShort < 0n ? -vault.confirmedShort : vault.confirmedShort;
     const totalAssets = vault.totalAssets ?? 0n;
     const shares = Number(vault.totalSupply) / 10 ** vault.decimals;
-    const price = chain.pool.sqrtPriceX96 === 0n ? 0 : (Number(chain.pool.sqrtPriceX96) / 2 ** 96) ** 2;
     const nvdaxIsCurrency0 = this.dep.poolKey.currency0.toLowerCase() === this.dep.nvdax.toLowerCase();
+    // USDC per NVDAx: the v4 price is currency1 per currency0 in raw units (NVDAx 18 dec, USDC 6)
+    const poolOut = (p: { sqrtPriceX96: bigint; liquidity: bigint }) => {
+      const raw = p.sqrtPriceX96 === 0n ? 0 : (Number(p.sqrtPriceX96) / 2 ** 96) ** 2;
+      return {
+        price: raw === 0 ? 0 : nvdaxIsCurrency0 ? raw * 1e12 : 1e12 / raw,
+        sqrtPriceX96: p.sqrtPriceX96.toString(),
+        liquidity: p.liquidity.toString(),
+      };
+    };
 
     return {
       updatedAt: Date.now(),
@@ -150,12 +173,8 @@ export class Collector {
         marginFloat: vault.marginFloat.toString(),
       },
       hyperliquid,
-      pool: {
-        // USDC per NVDAx: the v4 price is currency1 per currency0 in raw units (NVDAx 18 dec, USDC 6)
-        price: price === 0 ? 0 : nvdaxIsCurrency0 ? price * 1e12 : 1e12 / price,
-        sqrtPriceX96: chain.pool.sqrtPriceX96.toString(),
-        liquidity: chain.pool.liquidity.toString(),
-      },
+      pool: poolOut(chain.pool),
+      ...(chain.thinPool ? { thinPool: poolOut(chain.thinPool) } : {}),
       marketOpen: chain.marketOpen,
       activity: this.logs.activity,
     };

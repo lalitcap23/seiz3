@@ -1,4 +1,7 @@
+import { createPublicClient, http, type PublicClient } from "viem";
+
 import { Breaker } from "./breaker.js";
+import { BorrowerScan } from "./borrowerScan.js";
 import { makeClients } from "./clients.js";
 import { loadConfig } from "./config.js";
 import { executeAction, verifyEffect } from "./executor.js";
@@ -18,6 +21,8 @@ import {
   describeError,
 } from "./riskEngine.js";
 import { readState } from "./state.js";
+import { readWatchlist } from "./watchlist.js";
+import { buyNeeded, checkBuyLiquidity } from "./liquidityGate.js";
 import { StartupError, runStartup } from "./startup.js";
 import type { Action, Address, Config, RiskDecision, ScanReport, VaultState } from "./types.js";
 
@@ -41,6 +46,19 @@ async function main(): Promise<void> {
   const morphoApi = cfg.morphoApiEnabled ? new MorphoApiClient(cfg) : null;
   let morphoApiSnapshot: MorphoApiSnapshot | null = null;
   let morphoApiNextRefreshMs = 0;
+  const logsClient =
+    cfg.logsRpcUrl === cfg.rpcUrl
+      ? clients.publicClient
+      : (createPublicClient({ chain: clients.chain, transport: http(cfg.logsRpcUrl, { retryCount: 1, timeout: 15_000 }) }) as PublicClient);
+  let nextScanAtMs = 0;
+  const borrowerScan = new BorrowerScan(logsClient, {
+    morpho: cfg.morpho,
+    marketId: cfg.deployments.marketId,
+    fromBlock: cfg.borrowerScanFromBlock,
+    pageBlocks: cfg.borrowerScanPageBlocks,
+    maxPagesPerPoll: cfg.borrowerScanPagesPerTick,
+  });
+  let scannedBorrowers: readonly Address[] = [];
   const riskStatus: {
     url: string;
     lastOkAtMs: number | null;
@@ -131,7 +149,9 @@ async function main(): Promise<void> {
     }
 
     const apiBorrowers = await morphoApiBorrowers(nowMs);
-    const { state, scan } = await readState(clients.publicClient, cfg, apiBorrowers);
+    const watched = readWatchlist(cfg.watchFile);
+    const { state, scan } = await readState(clients.publicClient, cfg, [...watched, ...apiBorrowers, ...scannedBorrowers]);
+    await scanBorrowers(state);
     // The chain went back (an anvil revert between demo runs, or a reorg): the cached nonce is from the abandoned
     // branch, and a transaction sent with it would sit in the queue until the receipt times out.
     if (state.blockNumber < lastBlock) {
@@ -187,6 +207,22 @@ async function main(): Promise<void> {
         confidenceBps: decision.confidenceBps,
       });
       return;
+    }
+
+    // a buy-back with no ask to fill it is rejected on HyperCore, after the unwind has already sold the stock
+    const need = buyNeeded(decision.action, state, cfg.deployments.szDecimals ?? 3, cfg.unwindChunkEstimateUnits);
+    if (need > 0n) {
+      const gate = await checkBuyLiquidity(
+        { hlInfoUrl: cfg.hlInfoUrl, coin: cfg.hlCoin, requestFile: cfg.askRequestFile },
+        need,
+        cfg.deployments.szDecimals ?? 3,
+        state.risk.hedgeCapBps,
+      ).catch((error: unknown) => ({ ok: false as const, reason: `book-unreadable: ${describeError(error)}`, needNvda: 0 }));
+      if (!gate.ok) {
+        telemetry.decision(decision.action.kind, gate.reason);
+        logDecision(state, scan, decision, gate.reason, null, { needNvda: gate.needNvda });
+        return;
+      }
     }
 
     breaker.recordAction(nowMs);
@@ -277,6 +313,22 @@ async function main(): Promise<void> {
           confidenceBps: decision.confidenceBps,
         });
       }
+    }
+  }
+
+  /** Borrowers found this tick are read from the next one on. A failed scan keeps the list it had. */
+  async function scanBorrowers(state: VaultState): Promise<void> {
+    borrowerScan.prune(state.borrowers);
+    if (Date.now() < nextScanAtMs) return;
+    nextScanAtMs = Date.now() + cfg.borrowerScanIntervalMs;
+    try {
+      // the logs RPC can sit a block behind the main one, and refuses a range past its own head
+      scannedBorrowers = await borrowerScan.poll(state.blockNumber - 2n);
+      metrics.set("afterbell_keeper_scanned_borrowers", scannedBorrowers.length);
+      metrics.set("afterbell_keeper_borrower_scan_behind_blocks", Number(borrowerScan.behind(state.blockNumber)));
+    } catch (error) {
+      metrics.inc("afterbell_keeper_borrower_scan_errors_total");
+      logger.error({ event: "borrower-scan-error", error: describeError(error) });
     }
   }
 

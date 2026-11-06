@@ -30,7 +30,9 @@ export const env = z
     DEPLOYER_PRIVATE_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
     DROP_USD: z.coerce.number().positive().default(205), // the scene's weekend gap on the local stack
     MONDAY_USDC: z.coerce.number().positive().optional(), // deep liquidity monday adds (local default 1M)
+    SHOW_NVDAX: z.coerce.number().positive().default(0.5), // testnet setup: collateral per demo borrower
     KILL_SWITCH_FILE: z.string().default(`${DEPLOYMENTS_DIR}KILL`),
+    HOLD_FILE: z.string().default(`${DEPLOYMENTS_DIR}BOTS_HOLD`), // packages/bots stands still while it exists
   })
   .parse(process.env);
 
@@ -51,10 +53,18 @@ export const client = createPublicClient({ chain, transport, pollingInterval: 25
 const wallet = createWalletClient({ account: owner, chain, transport });
 
 let deployment: DeploymentFile | undefined;
+const deploymentPath = () => env.DEPLOYMENTS_PATH ?? `${DEPLOYMENTS_DIR}${env.NETWORK}.json`;
 /** Loaded on first use: setup writes the file the other steps read. */
 export function dep(): DeploymentFile {
   deployment ??= loadDeployment(env.NETWORK, env.DEPLOYMENTS_PATH);
   return deployment;
+}
+
+/** Merge `fields` into the deployment file, keeping everything the scripts wrote. */
+export function writeDeployment(fields: Record<string, unknown>): void {
+  const raw = JSON.parse(readFileSync(deploymentPath(), "utf8")) as Record<string, unknown>;
+  writeFileSync(deploymentPath(), `${JSON.stringify({ ...raw, ...fields }, null, 2)}\n`);
+  deployment = undefined;
 }
 
 /** One transaction from the owner, waited for; throws on revert. */
@@ -92,6 +102,12 @@ export const keeper = {
   hold: () => writeFileSync(env.KILL_SWITCH_FILE, "replay\n"),
   release: () => rmSync(env.KILL_SWITCH_FILE, { force: true }),
   held: () => existsSync(env.KILL_SWITCH_FILE),
+};
+
+/** The testnet bots' hold: the oracle follower would undo the scene's crash, and the rebalancer the dump. */
+export const bots = {
+  hold: () => writeFileSync(env.HOLD_FILE, "replay\n"),
+  release: () => rmSync(env.HOLD_FILE, { force: true }),
 };
 
 /** Runs a repo script (forge, local-stack.sh) with its output on ours. */

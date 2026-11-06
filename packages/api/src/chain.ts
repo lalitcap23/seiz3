@@ -3,19 +3,16 @@ import {
   decodeFunctionResult,
   encodeAbiParameters,
   encodeFunctionData,
-  encodePacked,
   hexToBigInt,
-  keccak256,
   parseAbi,
   parseAbiParameters,
-  toHex,
   type Abi,
   type Address,
   type Hex,
   type PublicClient,
 } from "viem";
 import { afterbellVaultAbi, demoOracleAbi, iMorphoAbi, riskParamsAbi } from "@afterbell/shared/abis";
-import type { MarketName } from "@afterbell/shared";
+import { extsloadAbi, poolSlots, type MarketName } from "@afterbell/shared";
 import type { DeploymentFile } from "@afterbell/shared/node";
 
 /** Canonical Multicall3: deployed on HyperEVM mainnet and testnet; scripts/local-stack.sh etches it on anvil. */
@@ -28,7 +25,6 @@ const multicall3Abi = parseAbi([
   "function getBlockNumber() view returns (uint256 blockNumber)",
   "function getCurrentBlockTimestamp() view returns (uint256 timestamp)",
 ]);
-const extsloadAbi = parseAbi(["function extsload(bytes32 slot) view returns (bytes32 value)"]);
 
 const PRECOMPILE = {
   markPx: "0x0000000000000000000000000000000000000806",
@@ -77,6 +73,8 @@ export interface ChainRead {
   };
   marketOpen: boolean;
   pool: { sqrtPriceX96: bigint; liquidity: bigint };
+  /** Market A's own weekend pool (testnet); null where it shares the vault's pool. */
+  thinPool: { sqrtPriceX96: bigint; liquidity: bigint } | null;
   core: CoreRead | null; // null without HyperCore precompiles
 }
 
@@ -104,21 +102,6 @@ function precompile(name: string, address: Address, inputs: string, outputs: str
     callData: encodeAbiParameters(parseAbiParameters(inputs), args as never),
     decode: (data) => decodeAbiParameters(parseAbiParameters(outputs), data),
   };
-}
-
-/** `pools[poolId]` in the PoolManager (v4 StateLibrary: POOLS_SLOT 6, liquidity at +3). */
-function poolSlots(key: DeploymentFile["poolKey"]): { slot0: Hex; liquidity: Hex } {
-  const id = keccak256(
-    encodeAbiParameters(parseAbiParameters("address, address, uint24, int24, address"), [
-      key.currency0,
-      key.currency1,
-      key.fee,
-      key.tickSpacing,
-      key.hooks,
-    ]),
-  );
-  const state = keccak256(encodePacked(["bytes32", "uint256"], [id, 6n]));
-  return { slot0: state, liquidity: toHex(hexToBigInt(state) + 3n, { size: 32 }) };
 }
 
 /** Everything the snapshot needs from HyperEVM and HyperCore, in one eth_call at one block. */
@@ -168,6 +151,13 @@ export async function readChain(client: PublicClient, dep: DeploymentFile): Prom
       ];
     }),
   ];
+  const thinSlots = dep.thinPoolKey ? poolSlots(dep.thinPoolKey) : null;
+  if (thinSlots) {
+    calls.push(
+      contract("thinPool.slot0", dep.poolManager, extsloadAbi, "extsload", [thinSlots.slot0]),
+      contract("thinPool.liquidity", dep.poolManager, extsloadAbi, "extsload", [thinSlots.liquidity]),
+    );
+  }
 
   const data = await client.call({
     to: MULTICALL3,
@@ -247,10 +237,18 @@ export async function readChain(client: PublicClient, dep: DeploymentFile): Prom
     };
   });
 
+  const thinPool = thinSlots
+    ? {
+        sqrtPriceX96: hexToBigInt(next() as Hex) & ((1n << 160n) - 1n),
+        liquidity: hexToBigInt(next() as Hex) & ((1n << 128n) - 1n),
+      }
+    : null;
+
   return {
     blockNumber,
     timestamp,
     markets,
+    thinPool,
     vault: {
       inventory,
       confirmedShort,

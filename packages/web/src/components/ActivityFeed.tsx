@@ -1,10 +1,11 @@
 import type { ActivityEvent } from "@afterbell/shared";
+import Link from "next/link";
 import { coreSize, nvdax, shortHash, usd } from "@/lib/format";
 
 const SHOWN = 12;
 
 /** One vault event in words: what happened, and on which side (HyperEVM or HyperCore). */
-function describe(e: ActivityEvent, szDecimals: number): { text: string; tone: string } {
+export function describe(e: Pick<ActivityEvent, "type" | "args">, szDecimals: number): { text: string; tone: string } {
   const a = e.args as Record<string, string | boolean | number>;
   const size = (v: unknown) => Math.abs(coreSize(String(v), szDecimals)).toFixed(3);
   switch (e.type) {
@@ -38,9 +39,11 @@ export function ActivityFeed({ events, szDecimals }: { events: ActivityEvent[]; 
           const d = describe(e, szDecimals);
           return (
             <li key={`${e.txHash}-${e.type}-${events.length - i}`} className="flex gap-3">
-              <span className="w-16 shrink-0 tabular-nums opacity-50">{new Date(e.timestamp).toLocaleTimeString([], { hour12: false })}</span>
+              <span className="w-16 shrink-0 tabular-nums opacity-50" suppressHydrationWarning>{new Date(e.timestamp).toLocaleTimeString([], { hour12: false })}</span>
               <span className={d.tone}>{d.text}</span>
-              <span className="ml-auto shrink-0 font-mono text-xs opacity-40">{shortHash(e.txHash)}</span>
+              <Link href={`/tx/${e.txHash}`} className="ml-auto shrink-0 font-mono text-xs underline opacity-50 hover:opacity-100">
+                {shortHash(e.txHash)}
+              </Link>
             </li>
           );
         })}

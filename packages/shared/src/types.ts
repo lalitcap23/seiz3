@@ -77,6 +77,8 @@ export const snapshotSchema = z.object({
   vault: vaultSnapshotSchema,
   hyperliquid: hyperliquidPanelSchema.nullable(), // null when info API is unreachable (stale badge)
   pool: z.object({ price: z.number(), sqrtPriceX96: bigintString, liquidity: bigintString }),
+  /** Market A's own weekend pool on testnet; absent where A dumps into the vault's pool (local). */
+  thinPool: z.object({ price: z.number(), sqrtPriceX96: bigintString, liquidity: bigintString }).optional(),
   marketOpen: z.boolean(),
   activity: z.array(activityEventSchema),
 });
