@@ -47,7 +47,7 @@ pnpm codegen                              # forge build + wagmi ABIs → package
 | `pnpm web`                                                      | Dashboard only; set `NEXT_PUBLIC_USE_FIXTURE=1` in `packages/web/.env.local` to run without the API |
 | `pnpm keeper` / `pnpm keeper:replay`                            | Keeper bot                                                                                          |
 | `pnpm test` / `pnpm test:scenarios`                             | Keeper unit tests / keeper against the real contracts on the local stack (below)                    |
-| `pnpm replay <setup\|scene\|marketA\|marketB\|marketC\|monday>` | One demo step                                                                                       |
+| `pnpm replay <setup\|reset\|scene\|marketA\|marketB\|marketC\|monday>` | One demo step (see "Demo replay")                                                     |
 
 ## Deploying
 
@@ -113,6 +113,30 @@ scripts/local-stack.sh price 217                   # "Monday": unwind in 10 NVDA
 
 Locally nothing arbitrages the pool, so after a few chunks its price sags more than `maxSlippageBps` under the Core oracle and the vault refuses further unwinds (`Slippage`); the keeper skips them and the position stays hedged. Don't run `tick` during `test:scenarios`.
 
+## Demo replay (the three-market show)
+
+`pnpm replay <step>` plays the demo one click at a time, the same way every run; the API runs the same steps for a clicker at `POST /replay/:step` (header `authorization: Bearer $REPLAY_TOKEN`).
+
+```bash
+anvil
+pnpm replay setup                                  # = scripts/local-stack.sh demo (~45 s)
+scripts/local-stack.sh tick                        # own terminals, as for the local stack
+pnpm --filter @afterbell/keeper risk-engine:stub
+scripts/local-stack.sh keeper
+NETWORK=local pnpm api
+
+pnpm replay scene      # all three oracles (and HyperCore) to $205: A and C under water, B still healthy
+pnpm replay marketA    # NaiveLiquidator dumps into the thin pool: ~$14.6k bad debt
+pnpm replay marketB    # nothing to liquidate
+pnpm replay marketC    # releases the keeper: liquidate → short → syncHedge, hedge ratio 0% → 100%
+pnpm replay monday     # arbitrage back to the oracle, deep pool, market open: the keeper unwinds to zero
+pnpm replay reset      # rewind anvil to setup's snapshot for the next run
+```
+
+On stage, run the steps from the dashboard instead: `pnpm web`, then open `http://localhost:3000/?presenter=change-me` (the API's `REPLAY_TOKEN`). The presenter bar along the bottom runs each step through `POST /replay/:step`; → or space runs the next one. Without `?presenter=` the page is the plain dashboard: weekend/Monday status and pool vs HyperCore price, the three markets, the hedge ratio with stock held / short confirmed / short on HyperCore, the Hyperliquid position and the vault's activity feed.
+
+The keeper sits out the scene and market A on its kill switch (`deployments/KILL`, created by `setup`, `reset` and `scene`, removed by `marketC`), so market C liquidates on its own click. `setup` seeds the vault with 1,000 USDC rather than 10, so the 1 USDC HyperCore activation fee doesn't show on the share price. Market A's dump empties the thin pool's range; `monday`'s `PoolSeeder.swapToPrice` puts the price back on the oracle for next to nothing, then deep liquidity goes in around it.
+
 ## Testnet end to end (keeper ↔ contracts ↔ real HyperCore)
 
 `scripts/testnet-stack.sh` runs the same flow on HyperEVM testnet, scaled to a 1 NVDAx liquidation (~650 testnet USDC in all). Keys come from `.env.local` (`DEPLOYER_PRIVATE_KEY`, `KEEPER_PRIVATE_KEY`); the big-blocks switch needs `pip install hyperliquid-python-sdk` (point `PYTHON` at that interpreter).
@@ -133,6 +157,24 @@ scripts/testnet-stack.sh status
 ```
 
 HyperCore's oracle can't be moved on testnet, so market C's price follows it and `crash` stays inside the vault's 1.5% oracle band. The keeper runs with top-ups switched off (testnet's CoreDepositWallet would lose the USDC) and without Morpho's API (it doesn't index our Morpho copy). No pool is seeded, so `unwindStep` reverts with `OracleBand` and the keeper skips it; seed one with `SeedPool.s.sol` for the unwind.
+
+## API (dashboard data)
+
+`packages/api` reads everything the dashboard shows once a second and serves it as `GET /snapshot`, `GET /stream` (SSE) and `GET /history`:
+
+- **HyperEVM, in one Multicall3 `eth_call`:** the three Morpho markets and their borrowers, the vault, RiskParams' market-open flag, the v4 pool's `slot0`, and the HyperCore precompiles (vault position, xyz margin, mark and oracle price).
+- **Hyperliquid's info API:** `clearinghouseState` (dex `xyz`) for the vault. On the local stack the panel comes from MockHyperCore's precompiles instead.
+- **Logs:** vault events for the activity feed; Morpho's `Liquidate.badDebtAssets` and NaiveLiquidator's `Shortfall` for each market's bad debt.
+
+Each market's borrower comes from the deployment file's `borrowers` (`label` = market name).
+
+```bash
+NETWORK=local pnpm api                          # after scripts/local-stack.sh up, which also puts Multicall3 on anvil
+scripts/check-api.sh deployments/local.json     # every snapshot value against cast call at the same block
+NETWORK=testnet pnpm api                        # optional: RPC_URL, FROM_BLOCK (log scan start), POLL_MS
+```
+
+`/snapshot` answers 503 until the first poll lands. The hedge ratio is the confirmed short over the vault's own target (inventory in Core size units), so it reads exactly 100% when hedged and 0% while a hedge is in flight. The public testnet RPC rate-limits `eth_getLogs` hard (999-block ranges are always refused, 500 pass), so the scan pages at 500 blocks, and a failed scan only delays the feed. Use a private RPC for the testnet and mainnet demos.
 
 ## Keeper notes
 
