@@ -2,18 +2,58 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import { serve } from "@hono/node-server";
+import { createPublicClient, http, type PublicClient } from "viem";
+import { foundry } from "viem/chains";
+import { chains, HL_INFO_API, rpcUrlFor } from "@afterbell/shared";
 import { env } from "./env.js";
+import { loadDeployment } from "./deployment.js";
 import { Collector } from "./collector.js";
 
-const collector = new Collector();
-collector.start();
+const EXPLORER = {
+  local: "",
+  testnet: "https://app.hyperliquid-testnet.xyz/explorer/address/",
+  mainnet: "https://app.hyperliquid.xyz/explorer/address/",
+} as const;
+
+const dep = loadDeployment(env.NETWORK, env.DEPLOYMENTS_PATH);
+const remote = env.NETWORK === "local" ? null : env.NETWORK; // HyperEVM + Hyperliquid's info API
+const client = createPublicClient({
+  chain: remote ? chains[remote] : foundry,
+  transport: http(env.RPC_URL ?? (remote ? rpcUrlFor(remote) : "http://127.0.0.1:8545")),
+}) as PublicClient;
+
+const chainId = await client.getChainId();
+if (chainId !== dep.chainId) {
+  throw new Error(`RPC is chain ${chainId}, but the deployment file is for chain ${dep.chainId}`);
+}
+
+const collector = new Collector(client, dep, {
+  hlInfoUrl: remote ? (env.HL_INFO_API_URL ?? HL_INFO_API[remote]) : null,
+  explorerUrl: EXPLORER[env.NETWORK] && `${EXPLORER[env.NETWORK]}${dep.vault}`,
+  fromBlock: env.FROM_BLOCK ?? (remote ? null : 0n),
+});
+collector.start(env.POLL_MS);
 
 const app = new Hono();
 app.use("*", cors());
 
-app.get("/health", (c) => c.json({ ok: true, network: env.NETWORK }));
+app.get("/health", (c) =>
+  c.json({
+    ok: collector.latest !== null && collector.lastError === null,
+    network: env.NETWORK,
+    vault: dep.vault,
+    blockNumber: collector.latest?.blockNumber ?? null,
+    updatedAt: collector.latest?.updatedAt ?? null,
+    lastError: collector.lastError,
+    logError: collector.logError, // activity feed behind while set
+  }),
+);
 
-app.get("/snapshot", (c) => c.json(collector.latest));
+app.get("/snapshot", (c) =>
+  collector.latest === null
+    ? c.json({ error: "no snapshot yet", lastError: collector.lastError }, 503)
+    : c.json(collector.latest),
+);
 
 app.get("/history", (c) => {
   const from = Number(c.req.query("from") ?? 0);
@@ -22,7 +62,9 @@ app.get("/history", (c) => {
 
 app.get("/stream", (c) =>
   streamSSE(c, async (stream) => {
-    await stream.writeSSE({ event: "snapshot", data: JSON.stringify(collector.latest) });
+    if (collector.latest !== null) {
+      await stream.writeSSE({ event: "snapshot", data: JSON.stringify(collector.latest) });
+    }
     const unsubscribe = collector.subscribe(
       (s) => void stream.writeSSE({ event: "snapshot", data: JSON.stringify(s) }),
     );
@@ -39,5 +81,5 @@ app.post("/replay/:step", (c) => {
 });
 
 serve({ fetch: app.fetch, port: env.API_PORT }, (info) =>
-  console.log(`[api] listening on http://localhost:${info.port}`),
+  console.log(`[api] ${env.NETWORK} vault ${dep.vault}, listening on http://localhost:${info.port}`),
 );
