@@ -2,7 +2,7 @@ import type { PublicClient, WalletClient } from "viem";
 import type { PrivateKeyAccount } from "viem/accounts";
 
 import { vaultAbi } from "./abi.js";
-import { guards } from "./guards.js";
+import { guards } from "./riskCalc.js";
 import { describeError } from "./riskEngine.js";
 import type { SingleNonceManager } from "./clients.js";
 import type { Action, Config, VaultState } from "./types.js";

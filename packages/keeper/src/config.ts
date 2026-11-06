@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 
 import type { Address, Config, DeploymentInfo, Hex } from "./types.js";
-import { parseUsdc } from "./units.js";
+import { parseUsdc } from "./riskCalc.js";
 
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -17,7 +17,11 @@ const hex32Schema = z.string().regex(/^0x[0-9a-fA-F]{64}$/, "must be a 32-byte h
 const envSchema = z.object({
   RPC_URL: z.string().min(1, "RPC_URL is required"),
   KEEPER_PK: z.string().regex(/^0x[0-9a-fA-F]{64}$/, "KEEPER_PK must be a 32-byte hex key"),
-  DEPLOYMENTS_PATH: z.string().min(1).default("/shared/deployments.json"),
+  DEPLOYMENTS_PATH: z.string().min(1).optional(),
+  VAULT: addressSchema.optional(),
+  MORPHO: addressSchema.optional(),
+  MARKET_ID: hex32Schema.optional(),
+  CHAIN_ID: z.coerce.number().int().positive().optional(),
   RISK_ENGINE_URL: z.string().min(1).default("http://localhost:8081"),
   RISK_ENGINE_TIMEOUT_MS: z.coerce.number().int().positive().default(2000),
   RISK_ENGINE_RETRIES: z.coerce.number().int().min(0).max(10).default(2),
@@ -68,29 +72,8 @@ function toBig(value: number | string): bigint {
   return BigInt(value);
 }
 
-function boolEnv(value: string | undefined): boolean {
-  return value === "1" || value?.toLowerCase() === "true";
-}
 
-export function loadConfig(
-  env: NodeJS.ProcessEnv = process.env,
-  readFile: (path: string, encoding: "utf8") => string = readFileSync,
-): Config {
-  const parsedEnv = envSchema.safeParse(env);
-  if (!parsedEnv.success) {
-    throw new ConfigError(
-      parsedEnv.error.issues.map((issue) => `${issue.path.join(".") || "env"}: ${issue.message}`).join("; "),
-    );
-  }
-  const e = parsedEnv.data;
-
-  let raw: string;
-  try {
-    raw = readFile(e.DEPLOYMENTS_PATH, "utf8");
-  } catch (error) {
-    throw new ConfigError(`cannot read deployments file ${e.DEPLOYMENTS_PATH}: ${String(error)}`);
-  }
-
+function parseDeploymentsJson(raw: string): DeploymentInfo {
   let json: unknown;
   try {
     json = JSON.parse(raw) as unknown;
@@ -108,7 +91,7 @@ export function loadConfig(
   }
   const d = parsed.data;
 
-  const deployment: DeploymentInfo = {
+  return {
     chainId: toBig(d.chainId),
     vault: d.vault as Address,
     morpho: d.morpho as Address,
@@ -126,6 +109,77 @@ export function loadConfig(
       ...(b.label === undefined ? {} : { label: b.label }),
     })),
   };
+}
+
+function envDeployment(e: z.infer<typeof envSchema>): DeploymentInfo {
+  if (e.VAULT === undefined || e.MORPHO === undefined) {
+    throw new ConfigError(
+      "no deployment config: set DEPLOYMENTS_PATH, or set VAULT and MORPHO (plus optional CHAIN_ID, MARKET_ID)",
+    );
+  }
+  const chainId = BigInt(e.CHAIN_ID ?? 31337);
+  return {
+    chainId,
+    vault: e.VAULT as Address,
+    morpho: e.MORPHO as Address,
+    marketId: (e.MARKET_ID ?? `0x${"0".repeat(64)}`) as Hex,
+    lltv: 0n,
+    price: 0n,
+    szDecimals: 0n,
+    orderDelaySec: 0n,
+    unwindCooldownOpenSec: BigInt(e.UNWIND_COOLDOWN_OPEN_SEC ?? "0"),
+    borrowers: [],
+  };
+}
+
+function resolveDeployment(
+  e: z.infer<typeof envSchema>,
+  readFile: (path: string, encoding: "utf8") => string,
+): DeploymentInfo {
+  const envProvided =
+    e.VAULT !== undefined ||
+    e.MORPHO !== undefined ||
+    e.MARKET_ID !== undefined ||
+    e.CHAIN_ID !== undefined;
+
+  if (e.DEPLOYMENTS_PATH === undefined) {
+    if (!envProvided) {
+      throw new ConfigError(
+        "no deployment config: set DEPLOYMENTS_PATH, or set VAULT and MORPHO (plus optional CHAIN_ID, MARKET_ID)",
+      );
+    }
+    return envDeployment(e);
+  }
+
+  let raw: string;
+  try {
+    raw = readFile(e.DEPLOYMENTS_PATH, "utf8");
+  } catch (error) {
+    if (!envProvided) {
+      throw new ConfigError(`cannot read deployments file ${e.DEPLOYMENTS_PATH}: ${String(error)}`);
+    }
+    return envDeployment(e);
+  }
+  return parseDeploymentsJson(raw);
+}
+
+function boolEnv(value: string | undefined): boolean {
+  return value === "1" || value?.toLowerCase() === "true";
+}
+
+export function loadConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  readFile: (path: string, encoding: "utf8") => string = readFileSync,
+): Config {
+  const parsedEnv = envSchema.safeParse(env);
+  if (!parsedEnv.success) {
+    throw new ConfigError(
+      parsedEnv.error.issues.map((issue) => `${issue.path.join(".") || "env"}: ${issue.message}`).join("; "),
+    );
+  }
+  const e = parsedEnv.data;
+
+  const deployment = resolveDeployment(e, readFile);
 
   const checkUsdc = (name: string, value: string): bigint => {
     try {
@@ -152,7 +206,7 @@ export function loadConfig(
     chainId: deployment.chainId,
     vault: deployment.vault,
     morpho: deployment.morpho,
-    deploymentsPath: e.DEPLOYMENTS_PATH,
+    deploymentsPath: e.DEPLOYMENTS_PATH ?? "",
     keeperPrivateKey: e.KEEPER_PK as Hex,
     deployments: deployment,
     riskEngineUrl: e.RISK_ENGINE_URL,

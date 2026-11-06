@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildReports } from "../../src/borrowers.js";
+import { buildReports } from "../../src/riskCalc.js";
 import {
   RiskEngineProtocolError,
   buildRiskRequest,

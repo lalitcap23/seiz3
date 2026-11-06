@@ -7,7 +7,7 @@ import {
   parseDecimal,
   parseNvdax,
   parseUsdc,
-} from "../../src/units.js";
+} from "../../src/riskCalc.js";
 
 describe("units: parseDecimal", () => {
   it("parses whole and fractional values", () => {

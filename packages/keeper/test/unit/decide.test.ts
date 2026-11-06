@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { decide, evaluate } from "../../src/decide.js";
+import { decide, evaluate } from "../../src/riskCalc.js";
 import type { VaultState } from "../../src/types.js";
 import {
   BORROWER_A,

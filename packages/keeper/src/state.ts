@@ -1,7 +1,7 @@
 import type { PublicClient } from "viem";
 
 import { morphoAbi, vaultAbi } from "./abi.js";
-import { buildReports, mergeCandidates } from "./borrowers.js";
+import { buildReports, mergeCandidates } from "./riskCalc.js";
 import { describeError } from "./riskEngine.js";
 import type {
   Address,

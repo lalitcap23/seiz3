@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { borrowerReport, buildReports, mergeCandidates } from "../../src/borrowers.js";
+import { borrowerReport, buildReports, mergeCandidates } from "../../src/riskCalc.js";
 import {
   BORROWER_A,
   BORROWER_B,

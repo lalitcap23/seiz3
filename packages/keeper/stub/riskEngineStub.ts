@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
-import { evaluate } from "../src/decide.js";
+import { evaluate } from "../src/riskCalc.js";
 import { serializeJson } from "../src/observe.js";
 import {
   parseRiskDecision,

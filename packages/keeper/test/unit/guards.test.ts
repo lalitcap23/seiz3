@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { guards } from "../../src/guards.js";
+import { guards } from "../../src/riskCalc.js";
 import type { Action } from "../../src/types.js";
 import {
   BORROWER_A,
