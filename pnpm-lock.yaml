@@ -4,6 +4,8 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+packageExtensionsChecksum: sha256-hiWsZwRtdZkhYFI4hk1l3a/9KMDq3eSv3Ekosos4o80=
+
 importers:
 
   .:
@@ -69,7 +71,10 @@ importers:
     dependencies:
       '@chainlink/cre-sdk':
         specifier: ~1.6.0
-        version: 1.6.0(supports-color@7.2.0)(typescript@5.9.3)
+        version: 1.6.0(supports-color@7.2.0)
+      '@noble/hashes':
+        specifier: 1.8.0
+        version: 1.8.0
       viem:
         specifier: ^2.57.7
         version: 2.57.7(typescript@5.9.3)(zod@3.25.76)
@@ -3646,18 +3651,18 @@ snapshots:
     optionalDependencies:
       zod: 3.25.76
 
-  '@chainlink/cre-sdk@1.6.0(supports-color@7.2.0)(typescript@5.9.3)':
+  '@chainlink/cre-sdk@1.6.0(supports-color@7.2.0)':
     dependencies:
       '@bufbuild/protobuf': 2.6.3
       '@bufbuild/protoc-gen-es': 2.6.3(@bufbuild/protobuf@2.6.3)(supports-color@7.2.0)
       '@chainlink/cre-sdk-javy-plugin': 1.6.0(zod@3.25.76)
       '@standard-schema/spec': 1.0.0
+      typescript: 5.9.3
       viem: 2.34.0(typescript@5.9.3)(zod@3.25.76)
       zod: 3.25.76
     transitivePeerDependencies:
       - bufferutil
       - supports-color
-      - typescript
       - utf-8-validate
 
   '@emnapi/core@1.10.0':

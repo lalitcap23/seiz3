@@ -6,3 +6,10 @@ allowBuilds:
   esbuild: true
   sharp: true
   unrs-resolver: true
+
+# @chainlink/cre-sdk's cre-compile imports the TypeScript 5 compiler API but only lists it as a devDependency;
+# without this it picks up the workspace's hoisted TypeScript 7, which has no JS API
+packageExtensions:
+  "@chainlink/cre-sdk@1":
+    dependencies:
+      typescript: "5.9.3"

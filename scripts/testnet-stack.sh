@@ -15,12 +15,14 @@
 #   scripts/testnet-stack.sh big-blocks off
 #   scripts/testnet-stack.sh markets         # 3 Morpho markets at HyperCore's price, C allow-listed
 #   scripts/testnet-stack.sh actors          # risk params, LP deposit, lender, borrower; then the coreFunded flag
-#   … by hand: Send 120 USDC (spot) to the vault on HyperCore, and post a bid ≥ 1 NVDA on xyz:NVDA near the oracle
+#   scripts/testnet-stack.sh fund-core       # HL_FUNDER_PRIVATE_KEY sends 120 USDC (spot) to the vault on HyperCore
+#   … and post a bid ≥ 1 NVDA on xyz:NVDA near the oracle (the bots' market maker does)
 #   scripts/testnet-stack.sh sweep           # the vault's spot USDC → xyz margin
 #   scripts/testnet-stack.sh status
 #   pnpm --filter @afterbell/keeper risk-engine:stub   # its own terminal
 #   scripts/testnet-stack.sh keeper                    # its own terminal
 #   scripts/testnet-stack.sh crash           # market C oracle 1.4% under HyperCore's: the keeper liquidates and hedges
+#   scripts/testnet-stack.sh cre [--broadcast]   # the Chainlink CRE market feed → RiskParams (needs `cre login`)
 #
 # Public testers (after step 3, same vault):
 #   scripts/testnet-stack.sh extras                 # Faucet, swap router, NaiveLiquidator on its own thin pool
@@ -96,7 +98,7 @@ using_big_blocks() {
 }
 
 big_blocks() {
-  "${PYTHON:-python3}" "$ROOT/scripts/big-blocks.py" "$1"
+  (cd "$ROOT" && pnpm --silent --filter @afterbell/bots hl-admin big-blocks "$1")
   echo "deployer $DEPLOYER using big blocks: $(using_big_blocks)"
 }
 
@@ -141,7 +143,14 @@ actors() {
   # deposit is never credited, so this costs 1 USDC.
   send "$vault" "activateCore(uint256)" 1000000
   echo "borrower $DEPLOYER at \$$(cast format-units "$px" 6), coreFunded $(cast call "$vault" "coreFunded()(bool)" --rpc-url "$RPC")"
-  echo "next, by hand: Send $CORE_MARGIN_USDC USDC (spot) to $vault on app.hyperliquid-testnet.xyz, then: sweep"
+  echo "next: fund-core (or Send $CORE_MARGIN_USDC USDC (spot) to $vault on app.hyperliquid-testnet.xyz), then: sweep"
+}
+
+# the vault's margin, sent on HyperCore from HL_FUNDER_PRIVATE_KEY's spot USDC (not an API wallet); also creates its HyperCore account
+fund_core() {
+  : "${HL_FUNDER_PRIVATE_KEY:=${HL_MM_PRIVATE_KEY:?set HL_FUNDER_PRIVATE_KEY (the wallet holding HyperCore USDC) in .env.local}}"
+  (cd "$ROOT" && pnpm --silent --filter @afterbell/bots hl-admin send-usdc "$(json "$DEP_JSON" vault)" \
+    "${1:-$CORE_MARGIN_USDC}")
 }
 
 sweep() {
@@ -376,12 +385,28 @@ reclaim() {
     "$(cast balance "$DEPLOYER" --ether --rpc-url "$RPC") HYPE"
 }
 
+# One run of the CRE market feed through the CLI's simulator. Data Streams credentials come from .env.local
+# (DATA_STREAM_USERNAME / HMAC_SECRET); --broadcast sends the report through the simulation forwarder, paid by the
+# deployer. The workflow reads RiskParams from packages/cre/market-feed/config.staging.json.
+cre_feed() {
+  : "${DATA_STREAM_USERNAME:?set DATA_STREAM_USERNAME (Data Streams API key) in .env.local}"
+  : "${HMAC_SECRET:?set HMAC_SECRET (Data Streams HMAC secret) in .env.local}"
+  local cli
+  cli=$(command -v cre || echo "$HOME/.cre/bin/cre")
+  cd "$ROOT/packages/cre"
+  DATA_STREAMS_API_KEY=$DATA_STREAM_USERNAME DATA_STREAMS_API_SECRET=$HMAC_SECRET \
+    CRE_ETH_PRIVATE_KEY=$DEPLOYER_PRIVATE_KEY \
+    "$cli" workflow simulate market-feed --target staging-settings --non-interactive --trigger-index 0 "$@"
+}
+
 keeper() {
   : "${KEEPER_PRIVATE_KEY:?set KEEPER_PRIVATE_KEY in .env.local}"
   cd "$ROOT"
   # IDLE_RESERVE_USDC out of reach: a top-up goes through testnet's CoreDepositWallet, which loses it.
   # MORPHO_API_ENABLED=0: Morpho's API doesn't index our own Morpho copy. TICK_MS=2000 eases the public RPC's limits.
-  RPC_URL=$RPC KEEPER_PK=$KEEPER_PRIVATE_KEY DEPLOYMENTS_PATH=$DEP_JSON KILL_SWITCH_FILE=$ROOT/deployments/KILL \
+  # LOGS_RPC_URL: the borrower scan pages eth_getLogs past what Alchemy's free tier serves (10 blocks); as docker-compose
+  RPC_URL=$RPC LOGS_RPC_URL=${LOGS_RPC_URL:-https://998.rpc.thirdweb.com} \
+    KEEPER_PK=$KEEPER_PRIVATE_KEY DEPLOYMENTS_PATH=$DEP_JSON KILL_SWITCH_FILE=$ROOT/deployments/KILL \
     MORPHO_API_ENABLED=0 IDLE_RESERVE_USDC=1000000000 TICK_MS=${TICK_MS:-2000} \
     exec pnpm --filter @afterbell/keeper start
 }
@@ -392,8 +417,10 @@ case "${1:-}" in
   deploy) deploy ;;
   markets) markets ;;
   actors) actors ;;
+  fund-core) fund_core "${2:-}" ;;
   sweep) sweep ;;
   crash) crash ;;
+  cre) shift; cre_feed "$@" ;;
   status) status ;;
   keeper) keeper ;;
   extras) extras ;;
@@ -405,8 +432,8 @@ case "${1:-}" in
   release) release ;;
   reclaim) reclaim ;;
   *)
-    echo "usage: scripts/testnet-stack.sh big-blocks on|off | infra | deploy | markets | actors | sweep | status |" \
-      "keeper | crash | extras | seed deep|thin <usdc> | fund-vault <usdc> |" \
+    echo "usage: scripts/testnet-stack.sh big-blocks on|off | infra | deploy | markets | actors | fund-core [usdc] | sweep | status |" \
+      "keeper | crash | cre [--broadcast] | extras | seed deep|thin <usdc> | fund-vault <usdc> |" \
       "fund-faucet <nvdax> <usdc> <hype> | fund-naive <usdc> | bots | release | reclaim" >&2
     exit 1
     ;;

@@ -16,7 +16,7 @@
 # market, the keeper held until the marketC click, and an anvil snapshot that `reset` rewinds to between runs.
 #
 #   scripts/local-stack.sh demo            # instead of up; then tick, risk engine and keeper as above
-#   pnpm replay scene | marketA | marketB | marketC | monday
+#   pnpm replay scene | marketA | marketB | marketC | buyers | monday
 #   scripts/local-stack.sh reset           # back to the start of the show
 set -euo pipefail
 
@@ -109,6 +109,8 @@ demo() {
   export SEED_DEPOSIT=1000000000
   base
   THIN=true forge_script SeedPool.s.sol # the weekend: market A's dump has almost nothing to sell into
+  # the vault's hooked pool at Friday's price: weekend buyers take stock from the vault through the hook
+  THIN=false USDC_AMOUNT=20000000000 forge_script SeedPool.s.sol
 
   echo "→ lenders and borrowers in markets A, B, C; NaiveLiquidator funding; LP deposit; Core margin"
   BORROWER_A_PK=$BORROWER_A_PK BORROWER_B_PK=$BORROWER_B_PK BORROWER_C_PK=$BORROWER_PK forge_script LocalDemo.s.sol

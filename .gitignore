@@ -36,4 +36,5 @@ mocks/cache/
 mocks/broadcast/
 mocks/shared/
 context.md
-deployments/
+deployments/# CRE CLI build scratch
+.cre_build_tmp.js
