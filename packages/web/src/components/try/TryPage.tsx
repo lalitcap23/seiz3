@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Snapshot } from "@afterbell/shared";
 import { API_URL, useSnapshot } from "@/lib/api";
-import { dep, GAS } from "@/lib/chain";
+import { CHAIN_LABEL, dep, GAS } from "@/lib/chain";
 import { useMe, type Me } from "@/lib/me";
 import { useWallet } from "@/lib/wallet";
 import { StatusBar } from "../StatusBar";
@@ -73,9 +73,15 @@ function Steps({ me, snapshot, address }: { me: Me | undefined; snapshot: Snapsh
 
 export function TryPage() {
   const { address } = useWallet();
-  const { data: me } = useMe(address);
+  const { data: me, isRefetchError, dataUpdatedAt } = useMe(address);
   const qc = useQueryClient();
   const { data: snapshot } = useSnapshot();
+  const lastLiquidation =
+    address === null
+      ? undefined
+      : (snapshot?.operations ?? []).findLast(
+          (o) => o.kind === "liquidation" && o.borrower?.toLowerCase() === address.toLowerCase(),
+        );
   // the API's snapshot arrives every second over SSE; when something that touches this wallet changed (a vault event,
   // the vault's stock, this address's collateral or health), re-read the wallet's balances and position right away.
   // Not debt: interest moves it every second, and the browser shares the public RPC's rate limit.
@@ -106,6 +112,13 @@ export function TryPage() {
     <div className="flex flex-col gap-2 pb-24">
       {snapshot && <StatusBar data={snapshot} />}
       <Steps me={me} snapshot={snapshot} address={address} />
+      {/* react-query keeps the last good read when a refetch fails: say so, or a stale loan looks live */}
+      {me && isRefetchError && (
+        <p className="rounded-[3px] border border-warn/40 bg-warn/5 px-3 py-2 font-mono text-[11px] text-warn">
+          {CHAIN_LABEL} RPC isn&apos;t answering (rate limit?): your balances and loan below are from{" "}
+          {new Date(dataUpdatedAt).toLocaleTimeString()}. Retrying every 5 s.
+        </p>
+      )}
       <div className="grid items-start gap-2 lg:grid-cols-12">
         <div className="flex flex-col gap-2 lg:col-span-3">
           <WalletBar me={me} />
@@ -113,7 +126,7 @@ export function TryPage() {
           <LendCard me={me} />
         </div>
         <div className="lg:col-span-5">
-          <BorrowCard me={me} />
+          <BorrowCard me={me} liquidation={lastLiquidation} />
         </div>
         <div className="flex flex-col gap-2 lg:col-span-4">
           <VaultCard me={me} />
@@ -121,7 +134,9 @@ export function TryPage() {
         </div>
       </div>
       {snapshot && address && (
-        <LoanTimeline operations={snapshot.operations ?? []} address={address} szDecimals={dep.hypercore.szDecimals} />
+        <div id="your-loan" className="scroll-mt-4">
+          <LoanTimeline operations={snapshot.operations ?? []} address={address} szDecimals={dep.hypercore.szDecimals} />
+        </div>
       )}
       <TxStatus />
     </div>

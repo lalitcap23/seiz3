@@ -26,7 +26,11 @@
     "testnet:up": "docker compose -f docker-compose.testnet.yml up -d --build",
     "testnet:logs": "docker compose -f docker-compose.testnet.yml logs -f --tail 50",
     "testnet:down": "docker compose -f docker-compose.testnet.yml down",
-    "testnet:ps": "docker compose -f docker-compose.testnet.yml ps"
+    "testnet:ps": "docker compose -f docker-compose.testnet.yml ps",
+    "base:up": "docker compose -f docker-compose.base.yml up -d --build",
+    "base:logs": "docker compose -f docker-compose.base.yml logs -f --tail 50",
+    "base:ps": "docker compose -f docker-compose.base.yml ps",
+    "base:down": "docker compose -f docker-compose.base.yml stop bots && docker compose -f docker-compose.base.yml run --rm --no-deps relayer scripts/base-stack.sh sepolia mm-cancel; docker compose -f docker-compose.base.yml down"
   },
   "devDependencies": {
     "prettier": "^3.9.10"

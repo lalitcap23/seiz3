@@ -12,6 +12,8 @@ export interface CoreFill {
 /** Below this much NVDAx a lot counts as used up (the Core size step is 1e15 at szDecimals 3). */
 const DUST = 10n ** 12n;
 
+const round = (x: number, digits: number) => Number(x.toFixed(digits));
+
 /**
  * Liquidations and unwinds, numbered and linked. Each LiquidationTaken or Unwound transaction starts an operation (an
  * Unwound with the hook's InventoryFill beside it is a buyer filled from the vault, otherwise a keeper push); the
@@ -33,7 +35,8 @@ export function buildOperations(
   }
   const order = (e: ActivityEvent): HedgeOrder => {
     const fs = (e.cloid ? fillsByCloid.get(e.cloid.toLowerCase()) : undefined) ?? [];
-    const filled = fs.reduce((s, f) => s + Number(f.sz), 0);
+    // rounded off float noise: fills of 0.806 + 0.049 would sum to 0.8550000000000001
+    const filled = round(fs.reduce((s, f) => s + Number(f.sz), 0), 8);
     return {
       txHash: e.txHash,
       cloid: e.cloid ?? "",
@@ -41,7 +44,7 @@ export function buildOperations(
       tries: Number(e.args.tries),
       limitPx: Number(e.args.limitPx) / 1e8, // CoreWriter wire price: human × 1e8
       filled,
-      avgPx: filled === 0 ? null : fs.reduce((s, f) => s + Number(f.sz) * Number(f.px), 0) / filled,
+      avgPx: filled === 0 ? null : round(fs.reduce((s, f) => s + Number(f.sz) * Number(f.px), 0) / filled, 6),
       fills: fs.map((f) => ({ sz: f.sz, px: f.px, hash: f.hash, time: f.time })),
     };
   };

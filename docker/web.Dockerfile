@@ -18,8 +18,9 @@ RUN pnpm install --frozen-lockfile --filter @afterbell/web...
 
 COPY packages/shared ./packages/shared
 COPY packages/web ./packages/web
-# shared bundles the deployment addresses into the page
-COPY deployments/testnet.json deployments/mainnet.json ./deployments/
+# shared bundles the deployment addresses into the page; next.config.ts hands base-sepolia.json (git-ignored, so
+# optional here: the [n] glob matches nothing on a checkout without it) to a NEXT_PUBLIC_NETWORK=base-sepolia build
+COPY deployments/testnet.json deployments/mainnet.json deployments/base-sepolia.jso[n] ./deployments/
 
 ARG NEXT_PUBLIC_API_URL=http://localhost:8787
 ARG NEXT_PUBLIC_NETWORK=testnet

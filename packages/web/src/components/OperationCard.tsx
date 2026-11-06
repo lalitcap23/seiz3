@@ -68,34 +68,61 @@ function coreLink(o: HedgeOrder): ReactNode {
   return <TxLink hash={o.txHash} />;
 }
 
-/** One HyperCore order of the vault, and what Hyperliquid filled (each fill opens on Hyperliquid's explorer). */
+const LIMIT_HINT =
+  "IOC limit: the worst price this order accepts, and the price Hyperliquid's explorer shows for it. It fills at the " +
+  "book's price, which can only be better: higher for a short, lower for a buy-back.";
+
+/**
+ * One HyperCore order of the vault, and what Hyperliquid filled. Its limit and its average fill price both show:
+ * the explorer leads with the limit, so a card with only the fill price looked like it disagreed with it. One order
+ * crossing several makers fills several times in one HyperCore transaction: one link per transaction.
+ */
 function OrderLine({ o, szDecimals }: { o: HedgeOrder; szDecimals: number }) {
-  const size = Math.abs(Number(o.delta)) / 10 ** szDecimals;
-  const what = Number(o.delta) < 0 ? `Short ${size.toFixed(3)} NVDA` : `Buy back ${size.toFixed(3)} NVDA of short`;
-  const full = o.filled + 1e-9 >= size;
+  const unit = 10 ** szDecimals;
+  const size = Math.abs(Number(o.delta)) / unit;
+  // summed in size units: 0.806 + 0.049 is 0.8550000000000001 in floats
+  const filled = Math.round(o.filled * unit) / unit;
+  const what = Number(o.delta) < 0 ? `Short ${size.toFixed(szDecimals)} NVDA` : `Buy back ${size.toFixed(szDecimals)} NVDA of short`;
+  const txs = [...new Set(o.fills.map((f) => f.hash))];
+  const avg = o.avgPx === null ? "" : ` @ $${o.avgPx.toFixed(2)}`;
   return (
     <Step lane="CORE" tone="text-core" link={coreLink(o)}>
       {what}
       {o.tries > 1 ? ` (retry ${o.tries})` : ""}
       {" · "}
-      {o.filled === 0 ? (
+      <span className="cursor-help text-muted underline decoration-dotted underline-offset-2" title={LIMIT_HINT}>
+        limit ${o.limitPx.toFixed(2)}
+      </span>
+      {" · "}
+      {filled === 0 ? (
         <span className="text-warn">not filled: no order on the book within 1% of the oracle</span>
-      ) : (
-        <span className={full ? "text-up" : "text-warn"}>
-          {full ? "filled" : `filled ${o.filled.toFixed(3)}`} @ ${o.avgPx?.toFixed(2)}
+      ) : filled > size ? (
+        // the same cloid placed twice (two relayers at once): the hedge account holds more than the vault asked for
+        <span className="text-down" title="HyperCore filled more than the vault asked for: the order was placed twice">
+          filled {filled.toFixed(szDecimals)} of {size.toFixed(szDecimals)}{avg} (placed twice)
         </span>
+      ) : filled < size ? (
+        <span className="text-warn">
+          filled {filled.toFixed(szDecimals)} of {size.toFixed(szDecimals)}
+          {avg}
+        </span>
+      ) : (
+        <span className="text-up">filled{avg}</span>
       )}
-      {o.fills.map((f) => (
-        <a
-          key={f.hash}
-          href={`${HL_EXPLORER_TX}${f.hash}`}
-          target="_blank"
-          rel="noreferrer"
-          className="ml-2 font-mono text-[10px] text-faint hover:text-foreground"
-        >
-          fill {shortHash(f.hash)} ↗
-        </a>
-      ))}
+      {txs.map((hash) => {
+        const n = o.fills.filter((f) => f.hash === hash).length;
+        return (
+          <a
+            key={hash}
+            href={`${HL_EXPLORER_TX}${hash}`}
+            target="_blank"
+            rel="noreferrer"
+            className="ml-2 font-mono text-[10px] text-faint hover:text-foreground"
+          >
+            {n > 1 ? `${n} fills` : "fill"} {shortHash(hash)} ↗
+          </a>
+        );
+      })}
     </Step>
   );
 }

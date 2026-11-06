@@ -1,0 +1,105 @@
+# Afterbell on Base Sepolia, every service in docker: what `scripts/base-stack.sh sepolia live` runs on the host.
+#
+#   pnpm base:up      # docker compose -f docker-compose.base.yml up -d --build
+#   pnpm base:logs    # follow every service (pnpm base:logs keeper: one)
+#   pnpm base:ps
+#   pnpm base:down    # also takes the market maker's resting quotes off HyperCore
+#
+# Then http://localhost:3001/try (testers) and http://localhost:3001 (dashboard); API on http://localhost:8788.
+# The HyperEVM testnet stack (docker-compose.testnet.yml, :3000 / :8787) is separate and can run beside it.
+#
+# Each service runs `scripts/base-stack.sh sepolia <service>`, so its env is the one `live` gives it. Keys come from
+# .env.local, as on the host: DEPLOYER_PRIVATE_KEY, KEEPER_PRIVATE_KEY, BASE_HEDGE_PRIVATE_KEY (+ BASE_RELAYER_PRIVATE_KEY),
+# BASE_MM_PRIVATE_KEY, FAUCET_OPERATOR_PRIVATE_KEY, CRE_PRIVATE_KEY, DATA_STREAMS_API_KEY + DATA_STREAMS_USER_SECRET,
+# INFURA_API_KEY or BASE_SEPOLIA_RPC_URL. The script overrides RPC_URL / HL_MM_* from .env.local (the HyperEVM stack's).
+# Don't run this and `live` (or a host keeper / relayer / bots) at once: two relayers place every order twice. `live`
+# refuses while this stack holds :3001 / :8788.
+name: afterbell-base
+
+x-service: &service
+  build:
+    context: .
+    dockerfile: docker/base.Dockerfile
+    target: services
+  image: afterbell-base-services
+  restart: unless-stopped
+  env_file: .env.local
+  volumes:
+    - ./deployments:/app/deployments
+
+services:
+  risk-engine:
+    <<: *service
+    command: ["pnpm", "--filter", "@afterbell/keeper", "risk-engine:stub"]
+    environment:
+      RISK_ENGINE_PORT: "8081"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8081/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  # gateway orders → the hedge account on HyperCore; HyperCore state → the gateway (only one may run per deployment)
+  relayer:
+    <<: *service
+    command: ["scripts/base-stack.sh", "sepolia", "relayer"]
+
+  keeper:
+    <<: *service
+    depends_on:
+      risk-engine:
+        condition: service_healthy
+      relayer:
+        condition: service_started
+    # a stale gateway before the relayer's first snapshot fails the startup checks: the container restarts
+    command: ["scripts/base-stack.sh", "sepolia", "keeper"]
+    environment:
+      RISK_ENGINE_URL: http://risk-engine:8081
+      # three failed sends in a row (RPC timeouts count) open the breaker; retry a minute later instead of never
+      BREAKER_COOLDOWN_MS: "60000"
+
+  bots:
+    <<: *service
+    depends_on: [relayer]
+    command: ["scripts/base-stack.sh", "sepolia", "bots"]
+    # the market maker's quotes rest on HyperCore after the bot stops; base:down takes them off (see package.json)
+    stop_grace_period: 15s
+
+  api:
+    <<: *service
+    command: ["scripts/base-stack.sh", "sepolia", "api"]
+    ports: ["8788:8788"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8788/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  # Chainlink CRE every 60 s: RiskParams + the DON's snapshot of the hedge account to the gateway. Once a report has
+  # landed it must keep running: after RiskParams' maxReportAge (300 s) liquidations stop (fail closed).
+  cre:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/base.Dockerfile
+      target: cre
+    image: afterbell-base-cre
+    command: ["scripts/base-stack.sh", "sepolia", "cre-loop"]
+    volumes:
+      - ./deployments:/app/deployments
+      # the CRE CLI's login (`cre login` on the host): shared, since it rotates its refresh token in place
+      - ${HOME}/.cre:/home/node/.cre
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8788 # the API as the browser reaches it
+        NEXT_PUBLIC_NETWORK: base-sepolia
+        # the browser's reads; the public RPC rate-limits per IP (the page says so when a read fails)
+        NEXT_PUBLIC_RPC_URL: https://sepolia.base.org
+    image: afterbell-web:base
+    restart: unless-stopped
+    depends_on: [api]
+    ports: ["${BASE_WEB_PORT:-3001}:3000"]
