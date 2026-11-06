@@ -215,7 +215,9 @@ export class RiskEngineClient {
           if (!retriable) return { ok: false, error: lastError, retriable: false, attempts: attempt };
           continue;
         }
-        const json = (await response.json()) as unknown;
+        const json = (await response.json().catch(() => {
+          throw new RiskEngineProtocolError("risk engine returned invalid JSON");
+        })) as unknown;
         const decision = parseRiskDecision(json);
         return {
           ok: true,

@@ -2,6 +2,7 @@ import { Breaker } from "./breaker.js";
 import { makeClients } from "./clients.js";
 import { loadConfig } from "./config.js";
 import { executeAction, verifyEffect } from "./executor.js";
+import { buildPollExport, serializePollExport } from "./export.js";
 import {
   Logger,
   Metrics,
@@ -10,6 +11,7 @@ import {
   stateSnapshot,
   type RiskEngineStatus,
 } from "./observe.js";
+import { MorphoApiClient, morphoApiLiquidatable, morphoApiLtvBps, type MorphoApiSnapshot } from "./morphoApi.js";
 import {
   RiskEngineClient,
   buildRiskRequest,
@@ -17,7 +19,7 @@ import {
 } from "./riskEngine.js";
 import { readState } from "./state.js";
 import { StartupError, runStartup } from "./startup.js";
-import type { Action, Config, RiskDecision, ScanReport, VaultState } from "./types.js";
+import type { Action, Address, Config, RiskDecision, ScanReport, VaultState } from "./types.js";
 
 const logger = new Logger();
 const metrics = new Metrics();
@@ -36,6 +38,9 @@ async function main(): Promise<void> {
   const telemetry = new Telemetry(metrics);
   const breaker = new Breaker(cfg);
   const riskEngine = new RiskEngineClient(cfg);
+  const morphoApi = cfg.morphoApiEnabled ? new MorphoApiClient(cfg) : null;
+  let morphoApiSnapshot: MorphoApiSnapshot | null = null;
+  let morphoApiNextRefreshMs = 0;
   const riskStatus: {
     url: string;
     lastOkAtMs: number | null;
@@ -61,6 +66,8 @@ async function main(): Promise<void> {
       chainId: cfg.chainId,
       dryRun: cfg.dryRun,
       riskEngine: cfg.riskEngineUrl,
+      morphoApi: cfg.morphoApiEnabled ? cfg.morphoApiUrl : "disabled",
+      morphoApiIntervalMs: cfg.morphoApiEnabled ? cfg.morphoApiIntervalMs : 0,
     });
   } catch (error) {
     if (error instanceof StartupError) {
@@ -124,9 +131,11 @@ async function main(): Promise<void> {
       return;
     }
 
-    const { state, scan } = await readState(clients.publicClient, cfg, now);
+    const apiBorrowers = await morphoApiBorrowers(nowMs);
+    const { state, scan } = await readState(clients.publicClient, cfg, now, apiBorrowers);
     telemetry.tick(state.blockNumber, state);
     logScan(scan);
+    telemetry.setSnapshot(serializePollExport(buildPollExport(state, scan, morphoApiSnapshot, cfg)));
 
     const request = buildRiskRequest(state, scan, now, cfg);
     metrics.inc("afterbell_keeper_risk_engine_requests_total");
@@ -248,6 +257,56 @@ async function main(): Promise<void> {
         });
       }
     }
+  }
+
+  async function morphoApiBorrowers(nowMs: number): Promise<readonly Address[]> {
+    if (morphoApi === null) return [];
+    if (morphoApiSnapshot === null || nowMs >= morphoApiNextRefreshMs) {
+      morphoApiNextRefreshMs = nowMs + cfg.morphoApiIntervalMs;
+      try {
+        morphoApiSnapshot = await morphoApi.fetchPositions(
+          cfg.deployments.marketId,
+          cfg.chainId,
+        );
+        metrics.set("afterbell_morpho_api_positions", morphoApiSnapshot.positions.length, {
+          market: cfg.deployments.marketId,
+        });
+        logMorphoApi(morphoApiSnapshot);
+      } catch (error) {
+        metrics.inc("afterbell_morpho_api_errors_total");
+        logger.error({ event: "morpho-api-error", error: describeError(error) });
+      }
+    }
+    if (morphoApiSnapshot === null) return [];
+    return morphoApiSnapshot.positions.slice(0, 50).map((position) => position.user);
+  }
+
+  function logMorphoApi(snapshot: MorphoApiSnapshot): void {
+    const positions = snapshot.positions
+      .filter((position) => position.borrowAssets > 0n)
+      .map((position) => ({
+        user: position.user,
+        symbol: position.symbol,
+        loanSymbol: position.loanSymbol,
+        healthFactor: position.healthFactor,
+        liquidatable: morphoApiLiquidatable(position),
+        lltv: position.lltv,
+        lltvBps: Number(position.lltv / 10n ** 14n),
+        collateral: position.collateral,
+        borrowAssets: position.borrowAssets,
+        collateralUsd: position.collateralUsd,
+        borrowAssetsUsd: position.borrowAssetsUsd,
+        ltvBps: morphoApiLtvBps(position),
+      }));
+    logger.line({
+      event: "morpho-api-positions",
+      chainId: snapshot.chainId,
+      marketId: snapshot.marketId,
+      fetchedAt: snapshot.fetchedAt,
+      count: positions.length,
+      liquidatableCount: positions.filter((position) => position.liquidatable).length,
+      positions,
+    });
   }
 
   async function verifySentAction(

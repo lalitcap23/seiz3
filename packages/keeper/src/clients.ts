@@ -39,7 +39,7 @@ export function makeClients(cfg: Config): KeeperClients {
   const chain = makeChain(cfg);
   const account = privateKeyToAccount(cfg.keeperPrivateKey);
   const transport = http(cfg.rpcUrl, { retryCount: 2, timeout: 15_000 });
-  const publicClient = createPublicClient({ chain, transport });
+  const publicClient = createPublicClient({ chain, transport, pollingInterval: 250 });
   const walletClient = createWalletClient({ account, chain, transport });
   return { publicClient, walletClient, account, chain, nonces: new SingleNonceManager() };
 }

@@ -46,6 +46,14 @@ export function validateConfig(cfg: Config): string[] {
   if (cfg.chainId <= 0n) errors.push("chainId must be > 0");
   if (cfg.healthPort < 1 || cfg.healthPort > 65_535) errors.push("healthPort is invalid");
   if (cfg.riskEngineUrl.trim() === "") errors.push("riskEngineUrl is required");
+  if (cfg.morphoApiEnabled && cfg.morphoApiUrl.trim() === "") {
+    errors.push("morphoApiUrl is required when the Morpho API is enabled");
+  }
+  if (cfg.morphoApiTimeoutMs < 100) errors.push("morphoApiTimeoutMs must be >= 100");
+  if (cfg.morphoApiIntervalMs < 1000) errors.push("morphoApiIntervalMs must be >= 1000");
+  if (cfg.morphoApiMaxPositions < 1 || cfg.morphoApiMaxPositions > 500) {
+    errors.push("morphoApiMaxPositions must be between 1 and 500");
+  }
   if (cfg.vault.toLowerCase() === cfg.morpho.toLowerCase()) {
     errors.push("vault and morpho must be different addresses");
   }

@@ -120,6 +120,7 @@ export class Telemetry {
   private lastReason: string | null = null;
   private paused: boolean | null = null;
   private server: Server | null = null;
+  private snapshotJson: string | null = null;
 
   constructor(readonly metrics: Metrics = new Metrics()) {}
 
@@ -127,6 +128,10 @@ export class Telemetry {
     this.lastTickAtMs = Date.now();
     this.lastTickBlock = blockNumber;
     if (state !== null) this.paused = state.paused;
+  }
+
+  setSnapshot(value: string | null): void {
+    this.snapshotJson = value;
   }
 
   decision(action: string | null, reason: string): void {
@@ -177,6 +182,17 @@ export class Telemetry {
       if (req.url === "/metrics") {
         res.writeHead(200, { "content-type": "text/plain; version=0.0.4" });
         res.end(this.metrics.render());
+        return;
+      }
+      if (req.url === "/snapshot") {
+        const body = this.snapshotJson;
+        if (body === null) {
+          res.writeHead(503, { "content-type": "application/json" });
+          res.end(serializeJson({ error: "snapshot not ready" }));
+          return;
+        }
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(body);
         return;
       }
       res.writeHead(404, { "content-type": "application/json" });

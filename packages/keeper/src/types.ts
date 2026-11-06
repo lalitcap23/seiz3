@@ -142,6 +142,13 @@ export interface Config {
   readonly riskEngineTimeoutMs: number;
   readonly riskEngineRetries: number;
 
+  // Morpho RWA position discovery (GraphQL mirror of the on-chain market)
+  readonly morphoApiEnabled: boolean;
+  readonly morphoApiUrl: string;
+  readonly morphoApiTimeoutMs: number;
+  readonly morphoApiIntervalMs: number;
+  readonly morphoApiMaxPositions: number;
+
   // loop
   readonly tickMs: number;
   readonly txTimeoutMs: number;

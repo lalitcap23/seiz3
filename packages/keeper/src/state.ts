@@ -36,13 +36,11 @@ export async function readState(
   publicClient: PublicClient,
   cfg: Config,
   now: bigint,
+  extraBorrowers: readonly Address[] = [],
 ): Promise<ReadStateResult> {
   const blockNumber = await publicClient.getBlockNumber();
 
-  const statics = (await publicClient.multicall({
-    blockNumber,
-    allowFailure: true,
-    contracts: [
+  const statics = await multiCall(publicClient, blockNumber, [
       { address: cfg.vault, abi: vaultAbi, functionName: "pendingHedge" },
       { address: cfg.vault, abi: vaultAbi, functionName: "inventory" },
       { address: cfg.vault, abi: vaultAbi, functionName: "confirmedShort" },
@@ -58,8 +56,7 @@ export async function readState(
       { address: cfg.morpho, abi: morphoAbi, functionName: "price" },
       { address: cfg.morpho, abi: morphoAbi, functionName: "lltv" },
       { address: cfg.morpho, abi: morphoAbi, functionName: "borrowerCount" },
-    ],
-  })) as unknown as CallResult[];
+    ]);
 
   const pendingRaw = requireResult(statics[0], "vault.pendingHedge");
   const riskRaw = requireResult(statics[9], "vault.risk");
@@ -92,7 +89,10 @@ export async function readState(
     blockNumber,
     borrowerCount,
   );
-  const candidates = mergeCandidates(cfg.deployments.borrowers, onchainBorrowers);
+  const candidates = mergeCandidates(cfg.deployments.borrowers, [
+    ...onchainBorrowers,
+    ...extraBorrowers,
+  ]);
   const labels = new Map(
     cfg.deployments.borrowers
       .filter((b) => b.label !== undefined)
@@ -153,16 +153,16 @@ async function readBorrowerAddresses(
   const capped = count > BigInt(MAX_BORROWERS) ? BigInt(MAX_BORROWERS) : count;
   if (capped === 0n) return [];
   const indexes = Array.from({ length: Number(capped) }, (_v, i) => BigInt(i));
-  const results = (await publicClient.multicall({
+  const results = await multiCall(
+    publicClient,
     blockNumber,
-    allowFailure: true,
-    contracts: indexes.map((index) => ({
+    indexes.map((index) => ({
       address: cfg.morpho,
       abi: morphoAbi,
       functionName: "borrowerAt" as const,
       args: [index] as const,
     })),
-  })) as unknown as CallResult[];
+  );
 
   const addresses: Address[] = [];
   for (const result of results) {
@@ -181,16 +181,16 @@ async function readBorrowers(
   addresses: readonly Address[],
 ): Promise<BorrowerState[]> {
   if (addresses.length === 0) return [];
-  const results = (await publicClient.multicall({
+  const results = await multiCall(
+    publicClient,
     blockNumber,
-    allowFailure: true,
-    contracts: addresses.map((address) => ({
+    addresses.map((address) => ({
       address: cfg.morpho,
       abi: morphoAbi,
       functionName: "getBorrower" as const,
       args: [address] as const,
     })),
-  })) as unknown as CallResult[];
+  );
 
   const borrowers: BorrowerState[] = [];
   for (let i = 0; i < results.length; i += 1) {
@@ -203,6 +203,48 @@ async function readBorrowers(
     borrowers.push({ address, collateral, borrowAssets });
   }
   return borrowers;
+}
+
+interface ReadCall {
+  readonly address: Address;
+  readonly abi: readonly unknown[];
+  readonly functionName: string;
+  readonly args?: readonly unknown[];
+}
+
+async function multiCall(
+  publicClient: PublicClient,
+  blockNumber: bigint,
+  calls: readonly ReadCall[],
+): Promise<CallResult[]> {
+  try {
+    const batched = (await publicClient.multicall({
+      blockNumber,
+      allowFailure: true,
+      contracts: calls as never,
+    })) as unknown as CallResult[];
+    if (batched.length === calls.length && batched.some((result) => result.status === "success")) {
+      return batched;
+    }
+  } catch {
+    // fall through to individual calls
+  }
+
+  {
+    const results: CallResult[] = [];
+    for (const call of calls) {
+      try {
+        const result = await publicClient.readContract({ ...call, blockNumber } as never);
+        results.push({ status: "success", result });
+      } catch (error) {
+        results.push({
+          status: "failure",
+          error: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
+    }
+    return results;
+  }
 }
 
 function requireResult(result: CallResult | undefined, name: string): unknown {

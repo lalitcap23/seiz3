@@ -21,6 +21,11 @@ const envSchema = z.object({
   RISK_ENGINE_URL: z.string().min(1).default("http://localhost:8081"),
   RISK_ENGINE_TIMEOUT_MS: z.coerce.number().int().positive().default(2000),
   RISK_ENGINE_RETRIES: z.coerce.number().int().min(0).max(10).default(2),
+  MORPHO_API_ENABLED: z.string().optional(),
+  MORPHO_API_URL: z.string().min(1).default("https://blue-api.morpho.org/graphql"),
+  MORPHO_API_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  MORPHO_API_INTERVAL_MS: z.coerce.number().int().min(1000).default(5_000),
+  MORPHO_API_MAX_POSITIONS: z.coerce.number().int().min(1).max(500).default(100),
   TICK_MS: z.coerce.number().int().min(100).max(60_000).default(1000),
   TX_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   HEALTH_PORT: z.coerce.number().int().min(1).max(65_535).default(9090),
@@ -153,6 +158,14 @@ export function loadConfig(
     riskEngineUrl: e.RISK_ENGINE_URL,
     riskEngineTimeoutMs: e.RISK_ENGINE_TIMEOUT_MS,
     riskEngineRetries: e.RISK_ENGINE_RETRIES,
+    morphoApiEnabled:
+      e.MORPHO_API_ENABLED === undefined
+        ? deployment.chainId !== 31337n
+        : boolEnv(e.MORPHO_API_ENABLED),
+    morphoApiUrl: e.MORPHO_API_URL,
+    morphoApiTimeoutMs: e.MORPHO_API_TIMEOUT_MS,
+    morphoApiIntervalMs: e.MORPHO_API_INTERVAL_MS,
+    morphoApiMaxPositions: e.MORPHO_API_MAX_POSITIONS,
     tickMs: e.TICK_MS,
     txTimeoutMs: e.TX_TIMEOUT_MS,
     healthPort: e.HEALTH_PORT,
