@@ -19,7 +19,7 @@ const BORROWERS_SHOWN = 5;
 const LIQUIDATIONS_SHOWN = 4;
 
 /** Morpho has no "liquidated" flag: a loan with collateral but (next to) no debt left was cleared. */
-function status(b: BorrowerRow, lltv: number): { label: string; title: string; tone: Tone; bar: string } {
+export function borrowerStatus(b: BorrowerRow, lltv: number): { label: string; title: string; tone: Tone; bar: string } {
   if (!b.healthy) return { label: "liq", title: "Liquidatable", tone: "down", bar: "bg-down" };
   if (Number(b.debt) < 10_000) return { label: "no debt", title: "No debt", tone: "muted", bar: "bg-faint" };
   if (b.ltv > 0.95 * lltv) return { label: "limit", title: "At the limit", tone: "warn", bar: "bg-warn" };
@@ -57,7 +57,7 @@ function Borrowers({ borrowers, lltv }: { borrowers: BorrowerRow[]; lltv: number
         </thead>
         <tbody>
           {borrowers.slice(0, BORROWERS_SHOWN).map((b) => {
-            const s = status(b, lltv);
+            const s = borrowerStatus(b, lltv);
             // LTV against the market's LLTV: the bar fills up as the loan nears liquidation
             return (
               <tr key={b.address} className="border-t border-line/60">

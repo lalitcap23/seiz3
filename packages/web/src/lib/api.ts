@@ -140,6 +140,20 @@ export function useSnapshot() {
   });
 }
 
+/**
+ * The latest real snapshot once something on the page has fetched it (never the placeholder), without starting the
+ * stream itself: a reader above the page that fetched would fill the cache before the page hydrates, and the page
+ * would then hydrate with numbers its server HTML doesn't have.
+ */
+export function useCachedSnapshot(): Snapshot | undefined {
+  const qc = useQueryClient();
+  return useSyncExternalStore(
+    (w) => qc.getQueryCache().subscribe(w),
+    () => qc.getQueryData<Snapshot>(["snapshot"]),
+    () => undefined,
+  );
+}
+
 export function useHistory(from = 0) {
   return useQuery({
     queryKey: ["history", from],

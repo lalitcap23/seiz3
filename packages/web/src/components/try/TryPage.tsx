@@ -6,7 +6,7 @@ import type { Snapshot } from "@afterbell/shared";
 import { API_URL, useSnapshot } from "@/lib/api";
 import { dep } from "@/lib/chain";
 import { useMe, type Me } from "@/lib/me";
-import { useWallet, WalletProvider } from "@/lib/wallet";
+import { useWallet } from "@/lib/wallet";
 import { StatusBar } from "../StatusBar";
 import { BorrowCard } from "./BorrowCard";
 import { LoanTimeline } from "./LoanTimeline";
@@ -56,7 +56,7 @@ function Steps({ me, snapshot, address }: { me: Me | undefined; snapshot: Snapsh
   );
 }
 
-function Cards() {
+export function TryPage() {
   const { address } = useWallet();
   const { data: me } = useMe(address);
   const qc = useQueryClient();
@@ -109,13 +109,5 @@ function Cards() {
       )}
       <TxStatus />
     </div>
-  );
-}
-
-export function TryPage() {
-  return (
-    <WalletProvider>
-      <Cards />
-    </WalletProvider>
   );
 }
