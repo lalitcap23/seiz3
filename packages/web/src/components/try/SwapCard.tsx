@@ -11,14 +11,15 @@ import { Action, AmountInput, Card, Rows, fmt, useAmount } from "./ui";
 
 const SLIPPAGE_BPS = 100;
 const FEE = 0.003;
+const TITLE = "Swap · Uniswap v4";
 
 /** USDC ↔ NVDAx on the vault's Uniswap v4 pool, through v4-core's PoolSwapTest router. */
 export function SwapCard({ me }: { me: Me | undefined }) {
   const { address, write } = useWallet();
   const [buy, setBuy] = useState(true); // buy NVDAx with USDC
   const amount = useAmount(buy ? 6 : 18);
-  if (!dep.swapRouter) return <Card title="Swap · Uniswap v4" hint="No swap router on this network yet." />;
-  if (!address || !me) return <Card title="Swap · Uniswap v4" hint="Connect a wallet first." />;
+  if (!dep.swapRouter) return <Card title={TITLE} hint="No swap router on this network yet." />;
+  if (!address || !me) return <Card title={TITLE} hint="Connect a wallet first." />;
 
   const router = dep.swapRouter;
   const tokenIn = buy ? dep.usdc : dep.nvdax;
@@ -49,12 +50,23 @@ export function SwapCard({ me }: { me: Me | undefined }) {
 
   return (
     <Card
-      title="Swap · Uniswap v4"
+      title={TITLE}
+      meta={<span>NVDAx / USDC</span>}
       hint="The pool the vault unwinds into. A bot keeps it on HyperCore's price, as arbitrageurs would on mainnet."
     >
-      <div className="flex gap-2">
-        <Action tone={buy ? "primary" : "plain"} label="Buy NVDAx" onClick={() => setBuy(true)} />
-        <Action tone={buy ? "plain" : "primary"} label="Sell NVDAx" onClick={() => setBuy(false)} />
+      <div className="grid grid-cols-2 gap-1 rounded-[3px] bg-well p-1">
+        {[true, false].map((side) => (
+          <button
+            key={String(side)}
+            type="button"
+            onClick={() => setBuy(side)}
+            className={`h-8 rounded-[2px] text-[13px] font-semibold ${
+              buy === side ? (side ? "bg-up/15 text-up" : "bg-down/15 text-down") : "text-muted hover:text-foreground"
+            }`}
+          >
+            {side ? "Buy NVDAx" : "Sell NVDAx"}
+          </button>
+        ))}
       </div>
       <AmountInput amount={amount} unit={buy ? "USDC" : "NVDAx"} max={{ value: buy ? me.usdc : me.nvdax }} />
       <Rows
@@ -62,10 +74,16 @@ export function SwapCard({ me }: { me: Me | undefined }) {
           ["Pool price", price === 0 ? "not seeded" : `$${price.toFixed(2)}`],
           ["You get about", `${estimate.toLocaleString("en-US", { maximumFractionDigits: buy ? 5 : 2 })} ${buy ? "NVDAx" : "USDC"}`],
           ["Your balance", buy ? `${fmt(me.usdc, 6, 2)} USDC` : `${fmt(me.nvdax, 18)} NVDAx`],
+          ["Stops at price impact", `${SLIPPAGE_BPS / 100}% (partial fill)`],
         ]}
       />
-      <p className="text-xs opacity-60">Stops at {SLIPPAGE_BPS / 100}% price impact; a bigger swap fills only part.</p>
-      <Action label="Swap" onClick={swap} disabled={!amount.value || price === 0} />
+      <Action
+        tone={buy ? "up" : "down"}
+        label={buy ? "Buy NVDAx" : "Sell NVDAx"}
+        onClick={swap}
+        disabled={!amount.value || price === 0}
+        className="w-full"
+      />
     </Card>
   );
 }

@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { API_URL } from "@/lib/api";
 import { dep } from "@/lib/chain";
 import { describe } from "./ActivityFeed";
+import { KV, Panel, Tag } from "./ui";
 
 interface TxViewData {
   hash: string;
@@ -71,67 +72,88 @@ export function TxView() {
   });
 
   if (!data) {
-    return <p className="text-sm opacity-60">{error ? String(error.message) : "Loading transaction…"}</p>;
+    return (
+      <p className={`font-mono text-[12px] ${error ? "text-down" : "text-muted"}`}>
+        {error ? String(error.message) : "Loading transaction…"}
+      </p>
+    );
   }
   return (
-    <div className="flex flex-col gap-4">
-      <section className="rounded-xl border border-foreground/10 p-4 text-sm">
-        <div className="mb-3 flex flex-wrap items-center gap-3">
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-              data.status === "success" ? "bg-emerald-500/15 text-emerald-500" : "bg-red-500/15 text-red-500"
-            }`}
-          >
-            {data.status}
-          </span>
-          <span className="font-mono text-xs break-all opacity-70">{data.hash}</span>
-        </div>
-        <dl className="grid grid-cols-[8rem_1fr] gap-y-1">
-          <dt className="opacity-60">Block</dt>
-          <dd className="tabular-nums" suppressHydrationWarning>
-            {data.blockNumber} · {new Date(data.timestamp).toLocaleString()}
-          </dd>
-          <dt className="opacity-60">From</dt>
-          <dd className="font-mono text-xs break-all">{data.from}</dd>
-          <dt className="opacity-60">To</dt>
-          <dd>
-            {data.toName ?? ""} <span className="font-mono text-xs break-all opacity-70">{data.to}</span>
-          </dd>
-          <dt className="opacity-60">Called</dt>
-          <dd className="font-mono text-xs">{data.call ? `${data.call.name}(…)` : "–"}</dd>
-          <dt className="opacity-60">Gas used</dt>
-          <dd className="tabular-nums">{Number(data.gasUsed).toLocaleString()}</dd>
-        </dl>
-      </section>
+    <div className="flex flex-col gap-2">
+      <Panel
+        title={
+          <>
+            Transaction <Tag tone={data.status === "success" ? "up" : "down"}>{data.status}</Tag>
+          </>
+        }
+        meta={
+          <Link href="/" className="hover:text-foreground">
+            ← dashboard
+          </Link>
+        }
+      >
+        <p className="mb-2 font-mono text-[12px] break-all text-foreground">{data.hash}</p>
+        <KV
+          rows={[
+            [
+              "Block",
+              <span key="block" suppressHydrationWarning>
+                {data.blockNumber} · {new Date(data.timestamp).toLocaleString()}
+              </span>,
+            ],
+            ["From", <span key="from" className="break-all">{data.from}</span>],
+            [
+              "To",
+              <span key="to" className="break-all">
+                {data.toName && <span className="mr-2 font-sans text-foreground">{data.toName}</span>}
+                <span className="text-muted">{data.to}</span>
+              </span>,
+            ],
+            ["Called", data.call ? `${data.call.name}(…)` : "–"],
+            ["Gas used", Number(data.gasUsed).toLocaleString()],
+          ]}
+        />
+      </Panel>
 
-      <section className="rounded-xl border border-foreground/10 p-4 text-sm">
-        <h2 className="mb-2 font-semibold">What happened on HyperEVM</h2>
-        {data.events.length === 0 && <p className="opacity-60">No events.</p>}
-        <ol className="flex flex-col gap-1.5">
+      <Panel title={<span className="text-evm">HyperEVM · events</span>} meta={<span>{data.events.length}</span>} bodyClassName="">
+        {data.events.length === 0 && <p className="px-3 py-4 font-mono text-[12px] text-faint">No events.</p>}
+        <ol className="flex flex-col">
           {data.events.map((e, i) => (
-            <li key={i} className="flex flex-wrap gap-x-3">
-              <span className="w-40 shrink-0 opacity-50">
-                {e.contract ?? short(e.address)} · {e.name}
+            <li key={i} className="grid gap-x-3 gap-y-0.5 border-b border-line/60 px-3 py-2 last:border-b-0 md:grid-cols-[14rem_1fr]">
+              <span className="font-mono text-[11px] text-faint">
+                {e.contract ?? short(e.address)} · <span className="text-muted">{e.name}</span>
               </span>
-              <span>{line(e)}</span>
+              <span className="text-[12px]">{line(e)}</span>
             </li>
           ))}
         </ol>
-      </section>
+      </Panel>
 
       {data.hypercore.length > 0 && (
-        <section className="rounded-xl border border-violet-500/30 p-4 text-sm">
-          <h2 className="mb-2 font-semibold">What happened on HyperCore</h2>
-          <ol className="flex flex-col gap-1.5">
+        <Panel
+          title={<span className="text-core">HyperCore · orders</span>}
+          meta={
+            data.hypercoreExplorer && (
+              <a className="hover:text-foreground" href={data.hypercoreExplorer} target="_blank" rel="noreferrer">
+                vault account ↗
+              </a>
+            )
+          }
+          bodyClassName=""
+        >
+          <ol className="flex flex-col">
             {data.hypercore.map((o) => (
-              <li key={o.cloid}>
-                The vault&apos;s IOC <b>{o.side === "sell" ? "short" : "buy-back"}</b> of {o.size} NVDA:{" "}
-                <span className={o.status === "filled" ? "text-emerald-500" : "text-amber-500"}>{o.status}</span>
+              <li key={o.cloid} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line/60 px-3 py-2 text-[12px] last:border-b-0">
+                <Tag tone={o.side === "sell" ? "down" : "up"}>{o.side === "sell" ? "short" : "buy-back"}</Tag>
+                <span>
+                  The vault&apos;s IOC of <span className="font-mono">{o.size}</span> NVDA
+                </span>
+                <span className={`font-mono text-[11px] ${o.status === "filled" ? "text-up" : "text-warn"}`}>{o.status}</span>
                 {o.fills.map((f, i) =>
                   data.hypercoreTxExplorer ? (
                     <a
                       key={i}
-                      className="ml-2 tabular-nums underline opacity-80"
+                      className="font-mono text-[11px] text-muted hover:text-foreground"
                       href={`${data.hypercoreTxExplorer}${f.hash}`}
                       target="_blank"
                       rel="noreferrer"
@@ -139,7 +161,7 @@ export function TxView() {
                       {f.sz} @ ${f.px} ↗
                     </a>
                   ) : (
-                    <span key={i} className="ml-2 tabular-nums opacity-80">
+                    <span key={i} className="font-mono text-[11px] text-muted">
                       {f.sz} @ ${f.px}
                     </span>
                   ),
@@ -147,17 +169,8 @@ export function TxView() {
               </li>
             ))}
           </ol>
-          {data.hypercoreExplorer && (
-            <a className="mt-2 inline-block text-xs underline opacity-70" href={data.hypercoreExplorer} target="_blank" rel="noreferrer">
-              The vault&apos;s HyperCore account on Hyperliquid&apos;s explorer →
-            </a>
-          )}
-        </section>
+        </Panel>
       )}
-
-      <Link href="/" className="text-sm underline opacity-70">
-        ← Dashboard
-      </Link>
     </div>
   );
 }

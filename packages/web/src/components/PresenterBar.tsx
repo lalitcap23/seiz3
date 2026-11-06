@@ -59,22 +59,23 @@ export function PresenterBar() {
 
   if (token === null) return null;
   return (
-    <div className="fixed inset-x-0 bottom-0 border-t border-foreground/10 bg-background/95 px-4 py-3 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2">
+    <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-panel/95 px-4 py-2.5 backdrop-blur">
+      <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-1.5">
+        <span className="mr-2 font-mono text-[10px] uppercase tracking-[0.08em] text-faint">Replay</span>
         {STEPS.map((s, i) => (
           <button
             key={s.step}
             type="button"
             disabled={running !== null}
             onClick={() => void run(s.step)}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-40 ${
-              i === next ? "bg-emerald-500 text-white" : "bg-foreground/10"
+            className={`h-8 rounded-[3px] px-3 font-mono text-[11px] font-medium uppercase disabled:opacity-40 ${
+              i === next ? "bg-brand text-black" : "border border-line-strong text-muted hover:text-foreground"
             }`}
           >
             {running === s.step ? `${s.label}…` : s.label}
           </button>
         ))}
-        <span className="ml-auto max-w-md truncate text-xs opacity-70">{running ? `running ${running}…` : last}</span>
+        <span className="ml-auto max-w-md truncate font-mono text-[11px] text-muted">{running ? `running ${running}…` : last}</span>
       </div>
     </div>
   );

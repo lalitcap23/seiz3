@@ -2,12 +2,11 @@
 
 import { erc20Abi, maxUint256 } from "viem";
 import { iMorphoAbi } from "@afterbell/shared/abis";
-import { useSnapshot } from "@/lib/api";
 import { dep } from "@/lib/chain";
 import type { Me } from "@/lib/me";
 import { useWallet } from "@/lib/wallet";
-import { LoanTimeline } from "./LoanTimeline";
-import { Action, AmountInput, Card, Rows, fmt, useAmount } from "./ui";
+import { Label, Stat, Tag } from "../ui";
+import { Action, AmountInput, Card, Note, Rows, Section, fmt, useAmount } from "./ui";
 
 const WAD = 10n ** 18n;
 /** Max leaves this much interest (in seconds of it) under the limit: enough for the tx to land, then it tips over. */
@@ -23,16 +22,22 @@ function maxBorrow(me: Me): bigint {
   return out < me.market.liquidity ? out : me.market.liquidity;
 }
 
+const TITLE = "Borrow · Morpho Market C";
+
 export function BorrowCard({ me }: { me: Me | undefined }) {
   const { address, write } = useWallet();
   const collateral = useAmount(18);
   const borrow = useAmount(6);
-  const { data: snapshot } = useSnapshot();
-  if (!address || !me) return <Card title="Borrow on Morpho · Market C" hint="Connect a wallet first." />;
+  if (!address || !me) return <Card title={TITLE} hint="Connect a wallet first." />;
 
   const p = me.position;
   const params = me.market.params;
   const priceUsd = Number(me.market.price / 10n ** 18n) / 1e6;
+  const lltv = Number(params.lltv) / 1e18;
+  const fill = lltv === 0 ? 0 : p.ltv / lltv;
+  const over = p.debt > p.maxDebt;
+  const tone = over ? "text-down" : fill > 0.95 ? "text-warn" : p.debt === 0n ? "text-muted" : "text-up";
+  const bar = over ? "bg-down" : fill > 0.95 ? "bg-warn" : "bg-up";
 
   async function supplyCollateral() {
     const amount = collateral.value;
@@ -62,62 +67,78 @@ export function BorrowCard({ me }: { me: Me | undefined }) {
 
   return (
     <Card
-      title="Borrow on Morpho · Market C"
-      hint="The Afterbell market: when a loan here goes under, the vault buys the collateral and shorts it on HyperCore."
+      title={
+        <>
+          {TITLE} <Tag tone="brand">afterbell</Tag>
+        </>
+      }
+      meta={<span>LLTV {(lltv * 100).toFixed(0)}%</span>}
     >
+      {/* the loan at a glance: how close it is to the line, and the price that takes it over */}
+      <div className="flex flex-col gap-2 rounded-[3px] border border-line bg-well p-3">
+        <div className="flex items-end justify-between gap-4">
+          <div className="flex flex-col gap-1">
+            <Label>LTV / LLTV</Label>
+            <p className={`font-mono text-[26px] leading-none font-semibold ${tone}`}>
+              {(p.ltv * 100).toFixed(2)}%
+              <span className="text-[14px] font-normal text-faint"> / {(lltv * 100).toFixed(0)}%</span>
+            </p>
+          </div>
+          <Stat
+            label="Liquidated below"
+            value={p.debt === 0n ? "–" : `$${(Number(p.liquidationPriceUsd6) / 1e6).toFixed(2)}`}
+            className="items-end"
+          />
+        </div>
+        <div className="h-1.5 rounded-full bg-line-strong">
+          <div className={`h-full rounded-full ${bar}`} style={{ width: `${Math.min(1, fill) * 100}%` }} />
+        </div>
+      </div>
       <Rows
         rows={[
           ["NVDA price (market oracle)", `$${priceUsd.toFixed(2)}`],
           ["Your collateral", `${fmt(p.collateral, 18)} NVDAx`],
           ["Your debt", `${fmt(p.debt, 6, 6)} USDC`],
-          [
-            "LTV / LLTV",
-            <span key="ltv" className={p.debt > p.maxDebt ? "text-red-500" : ""}>
-              {(p.ltv * 100).toFixed(2)}% / {(Number(params.lltv) / 1e16).toFixed(0)}%
-            </span>,
-          ],
-          ["Liquidated below", p.debt === 0n ? "–" : `$${(Number(p.liquidationPriceUsd6) / 1e6).toFixed(2)}`],
           ["USDC left to borrow in market", fmt(me.market.liquidity, 6, 2)],
         ]}
       />
 
-      <div className="flex flex-col gap-2">
-        <span className="text-xs font-medium opacity-70">1 · Deposit NVDAx as collateral</span>
+      <div className="flex flex-col gap-2 border-t border-line pt-3">
+        <Section step="01" title="Deposit NVDAx collateral" aside={`wallet ${fmt(me.nvdax, 18)}`} />
         <AmountInput amount={collateral} unit="NVDAx" max={{ value: me.nvdax }} />
-        <Action label="Deposit collateral" onClick={supplyCollateral} disabled={!collateral.value} />
+        <Action label="Deposit collateral" onClick={supplyCollateral} disabled={!collateral.value} className="w-full" />
       </div>
 
-      <div className="flex flex-col gap-2">
-        <span className="text-xs font-medium opacity-70">2 · Borrow USDC</span>
+      <div className="flex flex-col gap-2 border-t border-line pt-3">
+        <Section step="02" title="Borrow USDC" aside={`max ${fmt(maxBorrow(me), 6, 2)}`} />
         <AmountInput amount={borrow} unit="USDC" max={{ value: maxBorrow(me), label: "Max" }} />
-        <p className="text-xs opacity-60">
-          Max borrows right up to the {(Number(params.lltv) / 1e16).toFixed(0)}% limit. Interest crosses it within about a
-          minute, and the keeper liquidates you through the Afterbell vault: it buys your NVDAx at Morpho&apos;s discount and
-          shorts the same amount on HyperCore. You keep the USDC; the collateral goes.
-        </p>
-        <Action label="Borrow" onClick={doBorrow} disabled={!borrow.value || p.collateral === 0n} />
+        <Note>
+          Max borrows right up to the {(lltv * 100).toFixed(0)}% limit. Interest crosses it within about a minute, and the
+          keeper liquidates you through the Afterbell vault: it buys your NVDAx at Morpho&apos;s discount and shorts the same
+          amount on HyperCore. You keep the USDC; the collateral goes.
+        </Note>
+        <Action label="Borrow" onClick={doBorrow} disabled={!borrow.value || p.collateral === 0n} className="w-full" />
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {p.borrowShares > 0n && <Action tone="plain" label="Repay all" onClick={repayAll} />}
-        {p.borrowShares === 0n && p.collateral > 0n && (
-          <Action
-            tone="plain"
-            label="Withdraw collateral"
-            onClick={() => write("Withdraw collateral", dep.morpho, iMorphoAbi, "withdrawCollateral", [params, p.collateral, address, address])}
-          />
-        )}
-      </div>
-
-      {p.collateral > 0n && p.debt < 10_000n && p.debt > 0n && (
-        <p className="text-xs opacity-70">
-          After a liquidation Morpho takes only the collateral the debt needs and leaves you the rest, plus a dust amount of
-          debt. Repay all (a few hundredths of a cent) to withdraw the {fmt(p.collateral, 18)} NVDAx you kept.
-        </p>
+      {(p.borrowShares > 0n || p.collateral > 0n) && (
+        <div className="flex flex-wrap gap-2 border-t border-line pt-3">
+          {p.borrowShares > 0n && <Action tone="plain" label="Repay all" onClick={repayAll} className="flex-1" />}
+          {p.borrowShares === 0n && p.collateral > 0n && (
+            <Action
+              tone="plain"
+              label="Withdraw collateral"
+              onClick={() => write("Withdraw collateral", dep.morpho, iMorphoAbi, "withdrawCollateral", [params, p.collateral, address, address])}
+              className="flex-1"
+            />
+          )}
+        </div>
       )}
 
-      {snapshot && (
-        <LoanTimeline operations={snapshot.operations ?? []} address={address} szDecimals={dep.hypercore.szDecimals} />
+      {p.collateral > 0n && p.debt < 10_000n && p.debt > 0n && (
+        <Note>
+          After a liquidation Morpho takes only the collateral the debt needs and leaves you the rest, plus a dust amount of
+          debt. Repay all (a few hundredths of a cent) to withdraw the {fmt(p.collateral, 18)} NVDAx you kept.
+        </Note>
       )}
     </Card>
   );

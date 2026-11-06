@@ -1,26 +1,57 @@
 @import "tailwindcss";
 
+/* Dark only: a trading terminal, not a document. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
+  --background: #070809;
+  --foreground: #dfe5e8;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-plex-sans);
+  --font-mono: var(--font-jetbrains-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+@theme {
+  --color-panel: #0d1012;
+  --color-raised: #13171a;
+  --color-well: #090b0c;
+  --color-line: #1b2024;
+  --color-line-strong: #283037;
+  --color-muted: #7c878d;
+  --color-faint: #4b555b;
+  --color-brand: #d4ff3a;
+  --color-up: #2ebd85;
+  --color-down: #f6465d;
+  --color-warn: #f0a92e;
+  --color-evm: #4fa3ff;
+  --color-core: #a68bff;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 13px;
+  font-feature-settings: "tnum";
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-brand) 30%, transparent);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
 }

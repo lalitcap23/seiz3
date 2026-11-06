@@ -5,24 +5,28 @@ import { API_URL } from "@/lib/api";
 import { dep, EXPLORER_TX } from "@/lib/chain";
 import type { Me } from "@/lib/me";
 import { useWallet } from "@/lib/wallet";
+import { Tag } from "../ui";
 import { Action, Card, Rows, fmt } from "./ui";
 
 export function WalletBar({ me }: { me: Me | undefined }) {
   const { address, hasWallet, onChain, connect, switchChain } = useWallet();
 
   if (!hasWallet) {
-    return <Card title="Wallet" hint="Install MetaMask or Rabby to try Afterbell on HyperEVM testnet." />;
+    return <Card title="Account" hint="Install MetaMask or Rabby to try Afterbell on HyperEVM testnet." />;
   }
   if (address === null) {
     return (
-      <Card title="Wallet" hint="Connect a wallet to borrow, provide liquidity or swap on HyperEVM testnet.">
-        <Action label="Connect wallet" onClick={connect} />
+      <Card title="Account" hint="Connect a wallet to borrow, provide liquidity or swap on HyperEVM testnet.">
+        <Action label="Connect wallet" onClick={connect} className="w-full" />
       </Card>
     );
   }
   return (
-    <Card title="Wallet" hint={address}>
-      {!onChain && <Action label="Switch to HyperEVM testnet" onClick={switchChain} />}
+    <Card title="Account" meta={onChain ? <Tag tone="up">HyperEVM</Tag> : <Tag tone="warn">wrong chain</Tag>}>
+      <p className="truncate font-mono text-[12px]" title={address}>
+        {address}
+      </p>
+      {!onChain && <Action label="Switch to HyperEVM testnet" onClick={switchChain} className="w-full" />}
       {me && (
         <Rows
           rows={[
@@ -64,17 +68,22 @@ export function FaucetCard({ me }: { me: Me | undefined }) {
   }
 
   return (
-    <Card title="Faucet" hint="Test NVDAx to borrow against, a little USDC, and HYPE for gas. One drip per address per cooldown (the button shows when the next is due).">
+    <Card
+      title="Faucet"
+      meta={<span>1 drip / cooldown</span>}
+      hint="Test NVDAx to borrow against, a little USDC, and HYPE for gas."
+    >
       <Action
         label={waitUntil ? `Next drip ${new Date(waitUntil * 1000).toLocaleString()}` : "Get test tokens"}
         onClick={drip}
         disabled={address === null || busy || waitUntil > 0}
+        className="w-full"
       />
       {state && (
-        <p className={`text-xs ${state.error ? "text-red-500" : "opacity-70"}`}>
+        <p className={`font-mono text-[11px] ${state.error ? "text-down" : "text-muted"}`}>
           {state.text}{" "}
           {state.hash && (
-            <a className="underline" href={`${EXPLORER_TX}${state.hash}`} target="_blank" rel="noreferrer">
+            <a className="text-faint underline hover:text-foreground" href={`${EXPLORER_TX}${state.hash}`} target="_blank" rel="noreferrer">
               view
             </a>
           )}

@@ -29,9 +29,12 @@ function FeedBanner({ data }: { data: Snapshot }) {
   }
   if (lines.length === 0) return null;
   return (
-    <div className="flex flex-col gap-1 text-sm text-amber-500">
+    <div className="flex flex-col gap-0.5 rounded-[3px] border border-warn/30 bg-warn/5 px-3 py-2 font-mono text-[11px] text-warn">
       {lines.map((l) => (
-        <p key={l}>{l}</p>
+        <p key={l}>
+          <span className="mr-2 font-semibold">!</span>
+          {l}
+        </p>
       ))}
     </div>
   );
@@ -42,15 +45,17 @@ export function Dashboard() {
   if (!data) return null;
 
   return (
-    <div className="flex flex-col gap-4 pb-20">
+    <div className="flex flex-col gap-2 pb-20">
       <FeedBanner data={data} />
       <StatusBar data={data} />
+      <div className="grid gap-2 lg:grid-cols-12">
+        <HedgeStrip vault={data.vault} coreShort={data.hyperliquid?.size ?? null} className="lg:col-span-8" />
+        <HyperliquidPanel data={data.hyperliquid} className="lg:col-span-4" />
+      </div>
       <MarketColumns markets={data.markets} />
-      <HedgeStrip vault={data.vault} coreShort={data.hyperliquid?.size ?? null} />
-      <Operations operations={data.operations ?? []} szDecimals={data.vault.szDecimals} />
-      <div className="grid gap-4 md:grid-cols-[2fr_3fr]">
-        <HyperliquidPanel data={data.hyperliquid} />
-        <ActivityFeed events={data.activity} szDecimals={data.vault.szDecimals} />
+      <div className="grid gap-2 lg:grid-cols-12">
+        <Operations operations={data.operations ?? []} szDecimals={data.vault.szDecimals} className="lg:col-span-6" />
+        <ActivityFeed events={data.activity} szDecimals={data.vault.szDecimals} className="lg:col-span-6" />
       </div>
       <PresenterBar />
     </div>

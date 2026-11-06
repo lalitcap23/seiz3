@@ -1,44 +1,55 @@
-import type { HyperliquidPanel as Panel } from "@afterbell/shared";
+import type { HyperliquidPanel as Position } from "@afterbell/shared";
 import { price } from "@/lib/format";
+import { KV, Label, Panel, Tag } from "./ui";
 
-export function HyperliquidPanel({ data }: { data: Panel | null }) {
+export function HyperliquidPanel({ data, className = "" }: { data: Position | null; className?: string }) {
   if (!data) {
     return (
-      <section className="rounded-xl border border-amber-500/40 p-4 text-sm">
-        Hyperliquid data stale
-      </section>
+      <Panel title="HyperCore position" meta={<Tag tone="warn">stale</Tag>} className={className}>
+        <p className="font-mono text-[12px] text-warn">Hyperliquid data stale</p>
+      </Panel>
     );
   }
+  const side = data.size === 0 ? null : data.size < 0 ? "short" : "long";
   return (
-    <section className="rounded-xl border border-foreground/10 p-4">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-sm font-semibold">Hyperliquid · {data.coin}</h2>
-        {data.explorerUrl ? (
-          <a href={data.explorerUrl} target="_blank" rel="noreferrer" className="text-xs underline opacity-70">
-            vault on the explorer ↗
+    <Panel
+      title={`HyperCore · ${data.coin}`}
+      meta={
+        data.explorerUrl ? (
+          <a href={data.explorerUrl} target="_blank" rel="noreferrer" className="hover:text-foreground">
+            explorer ↗
           </a>
         ) : (
-          <span className="text-xs opacity-50">local HyperCore</span>
-        )}
+          <span>local HyperCore</span>
+        )
+      }
+      className={className}
+    >
+      <div className="mb-2 flex items-end justify-between border-b border-line pb-3">
+        <div className="flex flex-col gap-1">
+          <Label>Position</Label>
+          <p className="font-mono text-[22px] leading-none font-semibold">
+            {side === null ? <span className="text-muted">flat</span> : `${Math.abs(data.size)} NVDA`}
+          </p>
+        </div>
+        {side && <Tag tone={side === "short" ? "down" : "up"}>{side}</Tag>}
       </div>
-      <dl className="mt-3 grid grid-cols-2 gap-y-1 text-sm tabular-nums">
-        <dt className="opacity-60">Position</dt>
-        <dd className={data.size < 0 ? "font-semibold text-violet-500" : ""}>
-          {data.size === 0 ? "flat" : `${data.size < 0 ? "short" : "long"} ${Math.abs(data.size)} NVDA`}
-        </dd>
-        <dt className="opacity-60">Entry</dt>
-        <dd>{data.entryPx === null ? "–" : price(data.entryPx)}</dd>
-        <dt className="opacity-60">Oracle / mark</dt>
-        <dd>
-          {price(data.oraclePx)} / {price(data.markPx)}
-        </dd>
-        <dt className="opacity-60">Unrealised PnL</dt>
-        <dd className={data.unrealizedPnl >= 0 ? "text-emerald-500" : "text-red-500"}>{price(data.unrealizedPnl)}</dd>
-        <dt className="opacity-60">Margin used / account</dt>
-        <dd>
-          {price(data.marginUsed)} / {price(data.accountValue)}
-        </dd>
-      </dl>
-    </section>
+      <KV
+        rows={[
+          ["Entry", data.entryPx === null ? "–" : price(data.entryPx)],
+          ["Oracle", price(data.oraclePx)],
+          ["Mark", price(data.markPx)],
+          [
+            "Unrealised PnL",
+            <span key="pnl" className={data.unrealizedPnl >= 0 ? "text-up" : "text-down"}>
+              {data.unrealizedPnl > 0 ? "+" : ""}
+              {price(data.unrealizedPnl)}
+            </span>,
+          ],
+          ["Margin used", price(data.marginUsed)],
+          ["Account value", price(data.accountValue)],
+        ]}
+      />
+    </Panel>
   );
 }
