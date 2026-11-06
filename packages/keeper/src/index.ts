@@ -88,6 +88,7 @@ async function main(): Promise<void> {
 
   let stopped = false;
   let timer: NodeJS.Timeout | undefined;
+  let lastBlock = -1n;
 
   const shutdown = async (signal: string) => {
     if (stopped) return;
@@ -131,6 +132,13 @@ async function main(): Promise<void> {
 
     const apiBorrowers = await morphoApiBorrowers(nowMs);
     const { state, scan } = await readState(clients.publicClient, cfg, apiBorrowers);
+    // The chain went back (an anvil revert between demo runs, or a reorg): the cached nonce is from the abandoned
+    // branch, and a transaction sent with it would sit in the queue until the receipt times out.
+    if (state.blockNumber < lastBlock) {
+      clients.nonces.reset();
+      logger.line({ event: "chain-rewound", from: lastBlock, to: state.blockNumber });
+    }
+    lastBlock = state.blockNumber;
     // The vault times orders with block.timestamp, so the keeper decides on the same clock.
     const now = state.blockTimestamp;
     telemetry.tick(state.blockNumber, state);
