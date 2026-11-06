@@ -5,6 +5,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {MarketParams} from "@morpho-blue/interfaces/IMorpho.sol";
 import {AfterbellBase} from "../utils/AfterbellBase.sol";
 import {NaiveLiquidator} from "../../src/mocks/NaiveLiquidator.sol";
+import {UnwindLib} from "../../src/libs/UnwindLib.sol";
 
 /// @notice Demo Market A vs Market C on a thin weekend pool: same crash, same seizure, different outcome.
 contract NaiveLiquidatorTest is AfterbellBase {
@@ -40,6 +41,29 @@ contract NaiveLiquidatorTest is AfterbellBase {
         vault.liquidate(market, borrower2, SEIZE);
         assertGt(vault.totalAssets(), before, "bought at a discount, marked at the oracle, hedged");
         assertEq(vault.inventory(), SEIZE, "nothing dumped into the thin pool");
+    }
+
+    /// Monday: the arbitrage swap puts the dumped pool back on the oracle for next to nothing.
+    function test_seeder_swapsTheDumpedPoolBackToTheOracle() public {
+        vm.prank(owner);
+        naive.liquidate(market, borrower, SEIZE);
+        (, uint256 dumped) = UnwindLib.poolPrice(pm, key, nvdax0);
+        assertLt(dumped, CRASH_PX / 2, "the dump emptied the thin pool's range");
+
+        usdc.mint(address(this), 1000e6);
+        uint256 below = CRASH_PX * 95 / 100; // under the old ±10% range: no liquidity on the way up
+        seeder.swapToPrice(key, UnwindLib.sqrtPriceAt(below, nvdax0));
+        assertGt(usdc.balanceOf(address(this)), 999e6, "crossing empty ticks costs under a dollar");
+
+        seeder.swapToPrice(key, UnwindLib.sqrtPriceAt(CRASH_PX, nvdax0));
+        (, uint256 restored) = UnwindLib.poolPrice(pm, key, nvdax0);
+        assertApproxEqRel(restored, CRASH_PX, 1e14, "back on the oracle"); // 0.01%
+    }
+
+    function test_seeder_swapToPriceIsOwnerOnly() public {
+        vm.prank(keeper);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, keeper));
+        seeder.swapToPrice(key, UnwindLib.sqrtPriceAt(CRASH_PX, nvdax0));
     }
 
     function test_naive_isOwnerOnly() public {
