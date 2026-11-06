@@ -174,6 +174,99 @@ export async function readState(
   return { state, scan };
 }
 
+interface RealMarketRead {
+  readonly mode: "real";
+  readonly price: bigint;
+  readonly lltv: bigint;
+  readonly totalBorrowAssets: bigint;
+  readonly totalBorrowShares: bigint;
+}
+
+interface MockMarketRead {
+  readonly mode: "mock";
+  readonly price: bigint;
+  readonly lltv: bigint;
+}
+
+type MarketRead = RealMarketRead | MockMarketRead;
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const ZERO_MARKET_ID = `0x${"0".repeat(64)}`;
+const BORROW_VIRTUAL_SHARES = 1_000_000n;
+const BORROW_VIRTUAL_ASSETS = 1n;
+
+async function readMarket(
+  publicClient: PublicClient,
+  blockNumber: bigint,
+  cfg: Config,
+  marketId: Hex,
+): Promise<MarketRead> {
+  if (marketId.toLowerCase() !== ZERO_MARKET_ID) {
+    const [paramsResult, marketResult] = await multiCall(publicClient, blockNumber, [
+      {
+        address: cfg.morpho,
+        abi: morphoBlueAbi,
+        functionName: "idToMarketParams",
+        args: [marketId],
+      },
+      {
+        address: cfg.morpho,
+        abi: morphoBlueAbi,
+        functionName: "market",
+        args: [marketId],
+      },
+    ]);
+
+    if (paramsResult?.status === "success" && marketResult?.status === "success") {
+      const oracle = tupleValue(paramsResult.result, 2, "oracle");
+      const lltv = tupleBig(paramsResult.result, 4, "lltv");
+      if (typeof oracle === "string" && oracle.toLowerCase() !== ZERO_ADDRESS && lltv > 0n) {
+        const priceResult = await multiCall(publicClient, blockNumber, [
+          { address: oracle as Address, abi: oracleAbi, functionName: "price" },
+        ]);
+        if (priceResult[0]?.status === "success") {
+          const price = asBigInt(priceResult[0].result, "oracle.price");
+          if (price > 0n) {
+            return {
+              mode: "real",
+              price,
+              lltv,
+              totalBorrowAssets: tupleBig(marketResult.result, 2, "totalBorrowAssets"),
+              totalBorrowShares: tupleBig(marketResult.result, 3, "totalBorrowShares"),
+            };
+          }
+        }
+      }
+    }
+  }
+
+  const [priceResult, lltvResult] = await multiCall(publicClient, blockNumber, [
+    { address: cfg.morpho, abi: morphoAbi, functionName: "price" },
+    { address: cfg.morpho, abi: morphoAbi, functionName: "lltv" },
+  ]);
+  if (priceResult?.status !== "success" || lltvResult?.status !== "success") {
+    throw new Error(
+      "cannot read market: set MARKET_ID for real Morpho Blue, or use a mock exposing price()/lltv()",
+    );
+  }
+  return {
+    mode: "mock",
+    price: asBigInt(priceResult.result, "morpho.price"),
+    lltv: asBigInt(lltvResult.result, "morpho.lltv"),
+  };
+}
+
+function borrowSharesToAssets(
+  shares: bigint,
+  totalAssets: bigint,
+  totalShares: bigint,
+): bigint {
+  if (shares <= 0n || totalAssets <= 0n) return 0n;
+  const denominator = totalShares + BORROW_VIRTUAL_SHARES;
+  const numerator = shares * (totalAssets + BORROW_VIRTUAL_ASSETS);
+  return (numerator + denominator - 1n) / denominator;
+}
+
 /** RiskParams.Params, in struct order. */
 function parseRisk(raw: unknown): Risk {
   return {
@@ -193,6 +286,46 @@ function parseRisk(raw: unknown): Risk {
     maxImpactBps: tupleBig(raw, 13, "maxImpactBps"),
     transitBlocks: tupleBig(raw, 14, "transitBlocks"),
   };
+}
+
+async function readBorrowersBlue(
+  publicClient: PublicClient,
+  blockNumber: bigint,
+  cfg: Config,
+  marketId: Hex,
+  totalBorrowAssets: bigint,
+  totalBorrowShares: bigint,
+  addresses: readonly Address[],
+): Promise<BorrowerState[]> {
+  if (addresses.length === 0) return [];
+  const results = await multiCall(
+    publicClient,
+    blockNumber,
+    addresses.map((address) => ({
+      address: cfg.morpho,
+      abi: morphoBlueAbi,
+      functionName: "position" as const,
+      args: [marketId, address] as const,
+    })),
+  );
+
+  const borrowers: BorrowerState[] = [];
+  for (let i = 0; i < results.length; i += 1) {
+    const result = results[i];
+    if (result === undefined || result.status !== "success") continue;
+    const address = addresses[i];
+    if (address === undefined) continue;
+    borrowers.push({
+      address,
+      collateral: tupleBig(result.result, 2, "collateral"),
+      borrowAssets: borrowSharesToAssets(
+        tupleBig(result.result, 1, "borrowShares"),
+        totalBorrowAssets,
+        totalBorrowShares,
+      ),
+    });
+  }
+  return borrowers;
 }
 
 interface ReadCall {
