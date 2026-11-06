@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {Script, console} from "forge-std/Script.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -18,7 +19,7 @@ import {DeployHelpers} from "./DeployHelpers.sol";
 
 /// @notice Initialises the NVDAx/USDC v4 pool (first run) and adds liquidity through PoolSeeder.
 /// THIN=true seeds weekend conditions; THIN=false adds the "Monday" deep liquidity. With a `thinPoolKey` in the
-/// deployment file (testnet), THIN=true seeds that separate pool instead of the vault's.
+/// deployment file (Deploy.s.sol writes one), THIN=true seeds market A's separate pool instead of the vault's.
 /// The deployer must hold USDC_AMOUNT USDC; NVDAx is minted if the deployer owns MockNVDAx.
 /// VERIFY (spike 6): PoolManager address on HyperEVM.
 ///
@@ -68,14 +69,21 @@ contract SeedPool is Script {
         c.usdc = vm.parseJsonAddress(dep, ".usdc");
         c.nvdax = vm.parseJsonAddress(dep, ".nvdax");
         c.thin = vm.envOr("THIN", true);
-        // testnet keeps weekend depth on its own pool (TestnetExtras.s.sol); locally both live on the vault's pool
-        c.key = c.thin && vm.keyExistsJson(dep, ".thinPoolKey")
-            ? DeployHelpers.thinPoolKey(c.usdc, c.nvdax)
-            : DeployHelpers.poolKey(c.usdc, c.nvdax);
+        // weekend depth lives on market A's own hookless pool; the vault's hooked pool gets the Monday depth.
+        // Keys come from the deployment file: the vault's names the hook, so it can't be rebuilt from tokens alone.
+        c.key = _key(dep, c.thin && vm.keyExistsJson(dep, ".thinPoolKey") ? ".thinPoolKey" : ".poolKey");
         c.nvdax0 = Currency.unwrap(c.key.currency0) == c.nvdax;
         c.initPrice = vm.envOr("PRICE_USD6", uint256(217e6));
         c.usdcAmount = vm.envOr("USDC_AMOUNT", c.thin ? uint256(2000e6) : uint256(200_000e6));
         c.rangeBps = vm.envOr("RANGE_BPS", c.thin ? uint256(300) : uint256(1000));
+    }
+
+    function _key(string memory dep, string memory at) internal pure returns (PoolKey memory key) {
+        key.currency0 = Currency.wrap(vm.parseJsonAddress(dep, string.concat(at, ".currency0")));
+        key.currency1 = Currency.wrap(vm.parseJsonAddress(dep, string.concat(at, ".currency1")));
+        key.fee = uint24(vm.parseJsonUint(dep, string.concat(at, ".fee")));
+        key.tickSpacing = int24(vm.parseJsonInt(dep, string.concat(at, ".tickSpacing")));
+        key.hooks = IHooks(vm.parseJsonAddress(dep, string.concat(at, ".hooks")));
     }
 
     function _ensureInitialized(Config memory c) internal returns (uint160 sqrtPriceX96) {

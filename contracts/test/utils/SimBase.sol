@@ -9,13 +9,16 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
+import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {PrecompileLib} from "@hyper-evm-lib/src/PrecompileLib.sol";
 import {HLConstants} from "@hyper-evm-lib/src/common/HLConstants.sol";
 import {HyperCore} from "@hyper-evm-lib/test/simulation/HyperCore.sol";
 import {CoreSimulatorLib} from "@hyper-evm-lib/test/simulation/CoreSimulatorLib.sol";
 
 import {AfterbellVault} from "../../src/AfterbellVault.sol";
+import {AfterbellHook, AFTERBELL_HOOK_FLAGS} from "../../src/AfterbellHook.sol";
 import {RiskParams} from "../../src/RiskParams.sol";
 import {MockNVDAx} from "../../src/mocks/MockNVDAx.sol";
 import {DemoOracle} from "../../src/mocks/DemoOracle.sol";
@@ -49,6 +52,7 @@ abstract contract SimBase is Test {
     DemoOracle oracle;
     MarketParams market;
     IPoolManager pm;
+    AfterbellHook hook;
     PoolKey key;
     RiskParams risk;
     AfterbellVault vault;
@@ -87,8 +91,11 @@ abstract contract SimBase is Test {
                 szDecimals: szDec
             })
         );
-        vm.prank(owner);
+        vm.startPrank(owner);
+        hook.setVault(vault);
         vault.setMarketAllowed(market, true);
+        vm.stopPrank();
+        _seedPool();
 
         deal(address(usdc), lp, 100_000e6);
         vm.startPrank(lp);
@@ -135,9 +142,19 @@ abstract contract SimBase is Test {
         vm.stopPrank();
     }
 
+    /// @dev The hook goes at an address carrying its permission bits; the pool is seeded once the hook knows its vault.
     function _deployPool() internal {
         pm = _poolManager();
-        key = DeployHelpers.poolKey(address(usdc), address(nvdax));
+        address at = address(
+            uint160(uint256(keccak256(abi.encode(address(pm), "afterbell-hook")))) & ~Hooks.ALL_HOOK_MASK
+                | AFTERBELL_HOOK_FLAGS
+        );
+        deployCodeTo("AfterbellHook.sol:AfterbellHook", abi.encode(pm, owner), at);
+        hook = AfterbellHook(at);
+        key = DeployHelpers.poolKey(address(usdc), address(nvdax), address(hook));
+    }
+
+    function _seedPool() internal {
         bool nvdax0 = Currency.unwrap(key.currency0) == address(nvdax);
         PoolSeeder seeder = new PoolSeeder(address(this), pm);
         uint160 sqrtP = UnwindLib.sqrtPriceAt(pxUsdc, nvdax0);
@@ -190,5 +207,45 @@ abstract contract SimBase is Test {
         CoreSimulatorLib.nextBlock();
         vm.warp(block.timestamp + 5);
         vault.syncHedge();
+    }
+
+    /// @dev Liquidate and hedge, then buyers bid the token 1% over the Core oracle on the curve and one more buys a
+    ///      full chunk from the vault through the hook; the next sync must see the buy-back on Core.
+    function _hookFillAndSync() internal {
+        _activateAndFund();
+        _crashAndLiquidate();
+        _syncLater();
+        vm.prank(owner);
+        risk.setMarketOpen(true);
+
+        PoolSwapTest router = new PoolSwapTest(pm);
+        address buyer = makeAddr("buyer");
+        deal(address(usdc), buyer, 100_000e6);
+        vm.prank(buyer);
+        usdc.approve(address(router), type(uint256).max);
+        bool nvdax0 = Currency.unwrap(key.currency0) == address(nvdax);
+        bool buyDir = !nvdax0; // pay USDC in
+
+        _swap(router, buyer, buyDir, -1e30, UnwindLib.sqrtPriceAt(pxUsdc * 101 / 100, nvdax0));
+        uint256 chunk = Units.fromCoreSize(DeployHelpers.defaultRisk().maxUnhedged, szDec);
+        _swap(router, buyer, buyDir, int256(chunk), buyDir ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1);
+        assertEq(vault.inventory(), SEIZE - chunk, "filled from inventory");
+
+        _syncLater();
+        int64 expected = -int64(Units.toCoreSize(SEIZE - chunk, szDec));
+        assertEq(vault.confirmedShort(), expected, "the buy-back landed");
+        assertEq(PrecompileLib.position(address(vault), PERP_INDEX).szi, expected);
+        (int64 delta,,,) = vault.pendingHedge();
+        assertEq(delta, 0);
+    }
+
+    function _swap(PoolSwapTest router, address who, bool zeroForOne, int256 amount, uint160 limit) internal {
+        vm.prank(who);
+        router.swap(
+            key,
+            IPoolManager.SwapParams({zeroForOne: zeroForOne, amountSpecified: amount, sqrtPriceLimitX96: limit}),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
     }
 }

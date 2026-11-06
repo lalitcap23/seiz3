@@ -7,6 +7,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 
 import {AfterbellBase, MockUSDC} from "../utils/AfterbellBase.sol";
@@ -35,8 +36,8 @@ struct Refs {
     address owner;
 }
 
-/// @notice Drives random sequences of liquidations, syncs, unwinds, price moves, partial fills and dropped
-///         orders. Ghost-checks the state right after every successful sync.
+/// @notice Drives random sequences of liquidations, syncs, unwinds, hook buys, price moves, partial fills and
+///         dropped orders. Ghost-checks the state right after every successful sync and every hook fill.
 contract VaultHandler is Test {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
@@ -60,7 +61,9 @@ contract VaultHandler is Test {
     uint256 public liquidations;
     uint256 public confirmedSyncs;
     uint256 public unwinds;
+    uint256 public hookFills;
     uint256 public badSyncs; // a confirmed sync left Core off target
+    uint256 public badFills; // a hook fill paid the vault less than the oracle value, or lowered totalAssets
 
     constructor(Refs memory r) {
         vault = r.vault;
@@ -123,6 +126,27 @@ contract VaultHandler is Test {
         } catch {}
     }
 
+    /// @dev Weekend buyers bid the token over the vault's ask on the curve, then buy more: the hook fills that
+    ///      from inventory whenever it may.
+    function buy(uint256 sizeSeed, bool exactOut) external {
+        uint160 above = UnwindLib.sqrtPriceAt(px * 10_050 / 10_000, nvdax0);
+        (uint160 current,,,) = pm.getSlot0(key.toId());
+        bool buyDir = !nvdax0; // paying USDC in
+        if (above != current) _swap(above < current, -1e30, above);
+
+        uint256 inv = vault.inventory();
+        uint256 idle = usdc.balanceOf(address(vault));
+        uint256 assets = vault.totalAssets();
+        int256 amount = exactOut ? int256(bound(sizeSeed, 1e15, 5e18)) : -int256(bound(sizeSeed, 1e6, 1000e6));
+        _swap(buyDir, amount, buyDir ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1);
+
+        uint256 sold = inv - vault.inventory();
+        if (sold == 0) return;
+        ++hookFills;
+        uint256 got = usdc.balanceOf(address(vault)) - idle;
+        if (got < Units.value(sold, px) || vault.totalAssets() < assets) ++badFills;
+    }
+
     /// @dev Thin books fill part of an order; a full book fills it all (the common case).
     function fills(uint16 bps) external {
         uint256 b = bound(bps, 0, 14_000);
@@ -168,9 +192,15 @@ contract VaultHandler is Test {
         uint160 target = UnwindLib.sqrtPriceAt(usd6, nvdax0);
         (uint160 current,,,) = pm.getSlot0(key.toId());
         if (target == current) return;
+        _swap(target < current, -1e30, target);
+    }
+
+    function _swap(bool zeroForOne, int256 amountSpecified, uint160 limit) internal {
         router.swap(
             key,
-            IPoolManager.SwapParams({zeroForOne: target < current, amountSpecified: -1e30, sqrtPriceLimitX96: target}),
+            IPoolManager.SwapParams({
+                zeroForOne: zeroForOne, amountSpecified: amountSpecified, sqrtPriceLimitX96: limit
+            }),
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );
@@ -220,10 +250,15 @@ contract HedgeInvariantTest is AfterbellBase {
         assertGe(nvdax.balanceOf(address(vault)), vault.inventory());
     }
 
+    function invariant_hookFillsAtOrAboveTheOracle() public view {
+        assertEq(handler.badFills(), 0);
+    }
+
     function afterInvariant() external {
         // keep the run honest: make sure the interesting paths were actually exercised
         emit log_named_uint("liquidations", handler.liquidations());
         emit log_named_uint("confirmed syncs", handler.confirmedSyncs());
         emit log_named_uint("unwinds", handler.unwinds());
+        emit log_named_uint("hook fills", handler.hookFills());
     }
 }

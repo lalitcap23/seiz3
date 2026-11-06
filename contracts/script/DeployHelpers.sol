@@ -4,13 +4,14 @@ pragma solidity ^0.8.28;
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
+import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 
 import {RiskParams} from "../src/RiskParams.sol";
 
 library DeployHelpers {
-    uint24 internal constant POOL_FEE = 3000;
     int24 internal constant TICK_SPACING = 60;
-    /// @dev Testnet's separate "weekend" pool for market A's NaiveLiquidator, so the vault's pool can stay deep.
+    /// @dev Market A's separate "weekend" pool for the NaiveLiquidator, so the vault's pool can stay on the oracle.
     uint24 internal constant THIN_POOL_FEE = 500;
     int24 internal constant THIN_TICK_SPACING = 10;
 
@@ -36,20 +37,43 @@ library DeployHelpers {
         });
     }
 
-    /// @notice The NVDAx/USDC pool every script and the vault agree on: 0.3% fee, no hooks.
-    function poolKey(address usdc, address nvdax) internal pure returns (PoolKey memory) {
+    /// @notice The vault's NVDAx/USDC pool every script agrees on: AfterbellHook with a dynamic fee (the hook sets
+    ///         it per swap: 0.3% while the market is open, wider after the bell).
+    function poolKey(address usdc, address nvdax, address hook) internal pure returns (PoolKey memory) {
         (address c0, address c1) = usdc < nvdax ? (usdc, nvdax) : (nvdax, usdc);
-        return PoolKey(Currency.wrap(c0), Currency.wrap(c1), POOL_FEE, TICK_SPACING, IHooks(address(0)));
+        return PoolKey(Currency.wrap(c0), Currency.wrap(c1), LPFeeLibrary.DYNAMIC_FEE_FLAG, TICK_SPACING, IHooks(hook));
     }
 
-    /// @notice Same tokens on the 0.05% tier: a different pool id. Only testnet has it (TestnetExtras.s.sol).
-    function thinPoolKey(address usdc, address nvdax) internal pure returns (PoolKey memory key) {
-        key = poolKey(usdc, nvdax);
-        key.fee = THIN_POOL_FEE;
-        key.tickSpacing = THIN_TICK_SPACING;
+    /// @notice Market A's own "weekend" pool: same tokens, 0.05% static fee, no hook. Keeps the naive dump out of
+    ///         the vault's pool, so the hook's pool stays on the oracle.
+    function thinPoolKey(address usdc, address nvdax) internal pure returns (PoolKey memory) {
+        (address c0, address c1) = usdc < nvdax ? (usdc, nvdax) : (nvdax, usdc);
+        return PoolKey(Currency.wrap(c0), Currency.wrap(c1), THIN_POOL_FEE, THIN_TICK_SPACING, IHooks(address(0)));
     }
 
     function deploymentPath(string memory projectRoot, string memory network) internal pure returns (string memory) {
         return string.concat(projectRoot, "/../deployments/", network, ".json");
+    }
+
+    /// @notice Find a CREATE2 salt whose address carries exactly `flags` in its low 14 bits (v4 reads a hook's
+    ///         permissions from its address). Hashes in scratch memory, so the ~16k tries stay far under the 30M
+    ///         gas a script call gets (v4-periphery's test HookMiner re-hashes the init code on every try).
+    /// @param deployer `CREATE2_FACTORY` in a broadcast script, the deploying contract otherwise
+    function mineHookSalt(address deployer, uint160 flags, bytes32 initCodeHash)
+        internal
+        view
+        returns (address hook, bytes32 salt)
+    {
+        for (uint256 s; s < 1_000_000; ++s) {
+            assembly ("memory-safe") {
+                let p := mload(0x40)
+                mstore(p, or(shl(160, 0xff), deployer)) // 0xff ++ deployer in bytes 11..31
+                mstore(add(p, 32), s)
+                mstore(add(p, 64), initCodeHash)
+                hook := and(keccak256(add(p, 11), 85), 0xffffffffffffffffffffffffffffffffffffffff)
+            }
+            if (uint160(hook) & Hooks.ALL_HOOK_MASK == flags && hook.code.length == 0) return (hook, bytes32(s));
+        }
+        revert("no hook salt found");
     }
 }

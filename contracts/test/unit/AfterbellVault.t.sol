@@ -328,7 +328,7 @@ contract AfterbellVaultTest is AfterbellBase {
             nvdax: IERC20(address(nvdax)),
             morpho: morpho,
             poolManager: pm,
-            poolKey: DeployHelpers.poolKey(address(usdc), address(nvdax)),
+            poolKey: DeployHelpers.poolKey(address(usdc), address(nvdax), address(hook)),
             risk: risk,
             coreDepositWallet: address(depositWallet),
             perpAsset: PERP_ASSET,

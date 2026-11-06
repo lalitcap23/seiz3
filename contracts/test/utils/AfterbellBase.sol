@@ -11,11 +11,13 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 
 import {AfterbellVault} from "../../src/AfterbellVault.sol";
+import {AfterbellHook, AFTERBELL_HOOK_FLAGS} from "../../src/AfterbellHook.sol";
 import {RiskParams} from "../../src/RiskParams.sol";
 import {UnwindLib} from "../../src/libs/UnwindLib.sol";
 import {Units} from "../../src/libs/Units.sol";
@@ -37,9 +39,9 @@ contract MockUSDC is ERC20 {
     }
 }
 
-/// @notice Real Morpho Blue + real Uniswap v4 PoolManager (deployed from their own artifacts) + MockHyperCore.
-///         After setUp the vault holds LP_DEPOSIT, its Core account is live with CORE_MARGIN on xyz, market C
-///         is allow-listed and a borrower sits at 76% LTV ready to be pushed under water.
+/// @notice Real Morpho Blue + real Uniswap v4 PoolManager (deployed from their own artifacts) + AfterbellHook on the
+///         vault's pool + MockHyperCore. After setUp the vault holds LP_DEPOSIT, its Core account is live with
+///         CORE_MARGIN on xyz, market C is allow-listed and a borrower sits at 76% LTV ready to be pushed under water.
 abstract contract AfterbellBase is Test {
     using MarketParamsLib for MarketParams;
     using PoolIdLibrary for PoolKey;
@@ -75,6 +77,7 @@ abstract contract AfterbellBase is Test {
     MarketParams internal market;
 
     IPoolManager internal pm;
+    AfterbellHook internal hook;
     PoolKey internal key;
     bool internal nvdax0;
     PoolSeeder internal seeder;
@@ -100,8 +103,11 @@ abstract contract AfterbellBase is Test {
 
         risk = new RiskParams(owner, DeployHelpers.defaultRisk());
         vault = _newVault();
-        vm.prank(owner);
+        vm.startPrank(owner);
+        hook.setVault(vault); // the hook's pool can only be initialised once it knows its vault
         vault.setMarketAllowed(market, true);
+        vm.stopPrank();
+        _seedPool();
 
         _bootstrap();
         _openBorrower(borrower, COLLATERAL, 7600);
@@ -127,14 +133,31 @@ abstract contract AfterbellBase is Test {
         vm.stopPrank();
     }
 
+    /// @dev PoolManager, the hook (at an address carrying its permission bits) and the hooked key. The pool is
+    ///      initialised in `_seedPool`, after the hook is bound to the vault.
     function _deployPool() internal {
         pm = IPoolManager(deployCode("PoolManager.sol:PoolManager", abi.encode(owner)));
-        key = DeployHelpers.poolKey(address(usdc), address(nvdax));
+        hook = _deployHook(pm, owner);
+        key = DeployHelpers.poolKey(address(usdc), address(nvdax), address(hook));
         nvdax0 = Currency.unwrap(key.currency0) == address(nvdax);
         seeder = new PoolSeeder(address(this), pm);
         swapRouter = new PoolSwapTest(pm);
+    }
+
+    function _seedPool() internal {
         seeder.initialize(key, UnwindLib.sqrtPriceAt(START_PX, nvdax0));
         _addLiquidity(_poolDepth(), 1000, bytes32(0));
+    }
+
+    /// @dev v4 reads a hook's permissions from its address. A fresh address per PoolManager keeps a re-run
+    ///      `setUp` from landing on the previous hook's storage.
+    function _deployHook(IPoolManager pm_, address owner_) internal returns (AfterbellHook) {
+        address at = address(
+            uint160(uint256(keccak256(abi.encode(address(pm_), "afterbell-hook")))) & ~Hooks.ALL_HOOK_MASK
+                | AFTERBELL_HOOK_FLAGS
+        );
+        deployCodeTo("AfterbellHook.sol:AfterbellHook", abi.encode(pm_, owner_), at);
+        return AfterbellHook(at);
     }
 
     /// @dev USDC side of the pool seeded in setUp. Override for weekend (thin) conditions.

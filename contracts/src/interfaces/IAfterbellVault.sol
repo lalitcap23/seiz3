@@ -75,11 +75,15 @@ interface IAfterbellVault {
     error OverTarget();
     error BadDex();
     error NotRescuable();
+    error NotHook();
 
     // ─── keeper-facing ────────────────────────────────────────────────────
     function liquidate(MarketParams calldata params, address borrower, uint256 seized) external;
     function syncHedge() external;
     function unwindStep() external;
+
+    // ─── hook-facing (AfterbellHook, the pool key's hook) ─────────────────
+    function onHookFill(uint256 sold, uint256 usdcIn) external;
     function topUpMargin(uint256 amount) external;
     function withdrawMargin(uint256 amount) external;
     function sweepSpotToDex() external;

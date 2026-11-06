@@ -286,7 +286,7 @@ contract AfterbellVault is
         uint64 corePx = HedgeLib.oraclePx(perpIndex);
         _checkMargin(actual, corePx, r);
 
-        if (_isHedged(gap, r)) {
+        if (_isHedged(target, gap, r)) {
             if (p.delta != 0) {
                 delete pendingHedge;
                 emit HedgeConfirmed(actual, target);
@@ -387,16 +387,30 @@ contract AfterbellVault is
         if (sold == 0) revert NothingSold();
         if (usdcOut * BPS < Units.value(sold, pxUsdc) * (BPS - r.maxSlippageBps)) revert Slippage();
 
-        inventory = inv - sold;
-        lastUnwindAt = uint64(block.timestamp);
-        confirmedShort = actual;
-
-        int64 gap = _target() - actual; // > 0: short is now bigger than the stock left
-        if (gap > 0) {
-            hedgeId = _newHedgeId();
-            _sendHedge(gap, corePx, 1, r);
-        }
+        _afterSale(inv, sold, actual, corePx, r);
         emit Unwound(sold, usdcOut);
+    }
+
+    /// @notice The pool's hook sold `sold` NVDAx to a buyer at its ask (`AfterbellHook.beforeSwap`) and has paid
+    ///         `usdcIn` USDC to the vault. Send the stock to the PoolManager and queue the matching reduce-only buy.
+    /// @dev The same rules as `unwindStep`, which the hook checks first; re-checked here because the stock is ours.
+    ///      Only the hook named in `poolKey` may call it, and only at or above the Core oracle price.
+    function onHookFill(uint256 sold, uint256 usdcIn) external nonReentrant {
+        if (msg.sender != address(poolKey.hooks)) revert NotHook();
+        if (pauseFlags & PAUSE_OWNER != 0) revert VaultPaused();
+        if (pendingHedge.delta != 0) revert HedgePending();
+        uint256 inv = inventory;
+        RiskParams.Params memory r = risk.get();
+        if (sold == 0 || sold > inv || sold > Units.fromCoreSize(r.maxUnhedged, szDecimals)) revert OverCap();
+
+        int64 actual = HedgeLib.position(address(this), perpIndex).szi;
+        if (_abs(_target() - actual) > r.maxUnhedged) revert HedgeDrift();
+        uint64 corePx = HedgeLib.oraclePx(perpIndex);
+        if (usdcIn < Units.value(sold, _corePxUsdc(corePx))) revert Slippage();
+
+        nvdax.safeTransfer(address(poolManager), sold);
+        _afterSale(inv, sold, actual, corePx, r);
+        emit Unwound(sold, usdcIn);
     }
 
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
@@ -543,6 +557,20 @@ contract AfterbellVault is
         emit HedgeSent(delta, wirePx, isBuy, tries, cloid);
     }
 
+    /// @dev After stock left the vault (push or hook fill): book it, restart the cooldown, and buy back the part of
+    ///      the short the remaining stock no longer needs.
+    function _afterSale(uint256 inv, uint256 sold, int64 actual, uint64 corePx, RiskParams.Params memory r) internal {
+        inventory = inv - sold;
+        lastUnwindAt = uint64(block.timestamp);
+        confirmedShort = actual;
+
+        int64 gap = _target() - actual; // > 0: short is now bigger than the stock left
+        if (gap > 0) {
+            hedgeId = _newHedgeId();
+            _sendHedge(gap, corePx, 1, r);
+        }
+    }
+
     /// @dev Refreshes `marginFloat` and sets or clears PAUSE_MARGIN for the short as it stands on Core.
     function _checkMargin(int64 actual, uint64 corePx, RiskParams.Params memory r) internal {
         uint256 value = _dexAccountValue() + inTransit();
@@ -589,9 +617,11 @@ contract AfterbellVault is
         return -int64(Units.toCoreSize(inventory, szDecimals));
     }
 
-    /// @dev With stock left, a gap within maxUnhedged is hedged. With none, only a fully closed short is.
-    function _isHedged(int64 gap, RiskParams.Params memory r) internal view returns (bool) {
-        return inventory == 0 ? gap == 0 : _abs(gap) <= r.maxUnhedged;
+    /// @dev With stock left, a gap within maxUnhedged is hedged. With none, only a fully closed short is. Stock
+    ///      under one Core size unit counts as none: a hook fill sells whole units and can leave that dust behind,
+    ///      and no order can hedge it (the keeper reads it the same way).
+    function _isHedged(int64 target, int64 gap, RiskParams.Params memory r) internal pure returns (bool) {
+        return target == 0 ? gap == 0 : _abs(gap) <= r.maxUnhedged;
     }
 
     /// @dev Isolated margin on a HIP-3 DEX: account value there already includes the position's uPnL.

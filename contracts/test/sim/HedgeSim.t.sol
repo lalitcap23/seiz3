@@ -60,4 +60,10 @@ contract HedgeSimTest is SimBase {
         assertEq(vault.confirmedShort(), expected);
         assertEq(int64(Units.toCoreSize(vault.inventory(), szDec)), -expected, "stock and short shrank together");
     }
+
+    /// @dev A buyer fills from the vault through the hook; the reduce-only buy it queues lands on the simulated
+    ///      HyperCore like an unwind's.
+    function test_sim_hookFill_buyBackLandsOnCore() public {
+        _hookFillAndSync();
+    }
 }

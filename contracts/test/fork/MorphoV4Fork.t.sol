@@ -68,4 +68,9 @@ contract MorphoV4ForkTest is SimBase {
         assertGt(usdc.balanceOf(address(vault)), idle, "real PoolManager paid out through unlock");
         assertLt(vault.inventory(), SEIZE);
     }
+
+    /// @dev AfterbellHook on the deployed PoolManager: the pool initialises through it and a buy fills from the vault.
+    function test_hookFill_onTheDeployedPoolManager() public {
+        _hookFillAndSync();
+    }
 }
