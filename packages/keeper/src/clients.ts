@@ -29,6 +29,9 @@ export function makeChain(cfg: Pick<Config, "chainId" | "rpcUrl">): Chain {
     name: "afterbell",
     nativeCurrency: { name: "HYPE", symbol: "HYPE", decimals: 18 },
     rpcUrls: { default: { http: [cfg.rpcUrl] } },
+    contracts: {
+      multicall3: { address: "0xcA11bde05977b3631167028862bE2a173976CA11" },
+    },
   });
 }
 

@@ -306,8 +306,7 @@ async function main(): Promise<void> {
     dryRun: cfg.dryRun,
     healthPort: cfg.healthPort,
   });
-  await tick();
-  if (!stopped) timer = setTimeout(() => void loop(), cfg.tickMs);
+  await loop();
 }
 
 void main();
