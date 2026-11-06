@@ -72,20 +72,23 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     const eth = window.ethereum;
     if (!eth) return;
     const id = numberToHex(chain.id);
+    const add = {
+      chainId: id,
+      chainName: chain.name,
+      nativeCurrency: chain.nativeCurrency,
+      rpcUrls: [...chain.rpcUrls.default.http],
+      blockExplorerUrls: chain.blockExplorers?.default
+        ? [chain.blockExplorers.default.url]
+        : undefined,
+    };
     try {
       await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: id }] });
-    } catch {
-      await eth.request({
-        method: "wallet_addEthereumChain",
-        params: [
-          {
-            chainId: id,
-            chainName: chain.name,
-            nativeCurrency: chain.nativeCurrency,
-            rpcUrls: [...chain.rpcUrls.default.http],
-          },
-        ],
-      });
+    } catch (error) {
+      // 4902 / -32603 (MetaMask): chain unknown → add it, then switch again.
+      const code = (error as { code?: number }).code;
+      if (code === 4001) throw error; // user rejected; don't stack a second prompt
+      await eth.request({ method: "wallet_addEthereumChain", params: [add] });
+      await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: id }] });
     }
   }, []);
 
