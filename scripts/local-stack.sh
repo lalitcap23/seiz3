@@ -30,6 +30,8 @@ TICKER_PK=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a
 BORROWER_PK=0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6
 BORROWER_A_PK=0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a
 BORROWER_B_PK=0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba
+# account 6: the redundant backup keeper (keeper2). Accounts 4/5 already borrow in the demo.
+KEEPER2_PK=0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e
 CHAIN_JSON=$ROOT/deployments/local-chain.json
 DEP_JSON=$ROOT/deployments/local.json
 KILL_FILE=$ROOT/deployments/KILL # the keeper's kill switch; the demo holds the keeper with it until marketC
@@ -163,6 +165,19 @@ keeper() {
     exec pnpm --filter @afterbell/keeper start
 }
 
+# keeper2 <risk-engine-url>: the redundant backup keeper (host process, anvil account 6). It shares the
+# risk engine with the docker keeper — whichever one the engine elected acts; the other idles in
+# "standby". Kill the docker keeper (or this one) and the survivor takes over within LEADER_LEASE_MS.
+keeper2() {
+  cd "$ROOT"
+  RPC_URL=$RPC KEEPER_PK=$KEEPER2_PK KEEPER_ID=${KEEPER2_ID:-keeper-b} DEPLOYMENTS_PATH=$DEP_JSON \
+    KILL_SWITCH_FILE=$ROOT/deployments/KILL \
+    RISK_ENGINE_URL=${1:-http://127.0.0.1:8081} \
+    HEALTH_PORT=${KEEPER2_HEALTH_PORT:-9091} \
+    MAX_ACTIONS_PER_MINUTE=${MAX_ACTIONS_PER_MINUTE:-60} \
+    exec pnpm --filter @afterbell/keeper start
+}
+
 case "${1:-}" in
   up) up ;;
   demo) demo ;;
@@ -170,8 +185,9 @@ case "${1:-}" in
   tick) tick ;;
   price) price "${2:?usage: local-stack.sh price <usd>}" ;;
   keeper) keeper ;;
+  keeper2) keeper2 "${2:-http://127.0.0.1:8081}" ;;
   *)
-    echo "usage: scripts/local-stack.sh up | demo | reset | tick | price <usd> | keeper" >&2
+    echo "usage: scripts/local-stack.sh up | demo | reset | tick | price <usd> | keeper | keeper2 [risk-engine-url]" >&2
     exit 1
     ;;
 esac

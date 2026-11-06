@@ -205,6 +205,8 @@ async function main(): Promise<void> {
         attempts: result.attempts,
         engineVersion: decision.engineVersion,
         confidenceBps: decision.confidenceBps,
+        role: result.role,
+        leaderId: result.leaderId,
       });
       return;
     }

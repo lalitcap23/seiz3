@@ -28,6 +28,8 @@ deployments/ASK_REQUEST.json
 # generated
 packages/shared/src/generated/
 docs/
+# quant research artifacts (raw data, results, charts, reports)
+analysis/
 # mock foundry project
 mocks/out/
 mocks/cache/

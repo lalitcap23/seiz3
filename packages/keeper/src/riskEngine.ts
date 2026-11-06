@@ -17,6 +17,9 @@ export interface RiskEngineOk {
   readonly decision: RiskDecision;
   readonly latencyMs: number;
   readonly attempts: number;
+  /** Leader election: this keeper's role and the elected leader, per the risk engine. */
+  readonly role: "leader" | "follower" | null;
+  readonly leaderId: string | null;
 }
 
 export interface RiskEngineErr {
@@ -185,11 +188,13 @@ export class RiskEngineClient {
   private readonly url: string;
   private readonly timeoutMs: number;
   private readonly retries: number;
+  private readonly keeperId: string;
 
-  constructor(config: Pick<Config, "riskEngineUrl" | "riskEngineTimeoutMs" | "riskEngineRetries">) {
+  constructor(config: Pick<Config, "riskEngineUrl" | "riskEngineTimeoutMs" | "riskEngineRetries" | "keeperId">) {
     this.url = config.riskEngineUrl.replace(/\/+$/, "");
     this.timeoutMs = config.riskEngineTimeoutMs;
     this.retries = config.riskEngineRetries;
+    this.keeperId = config.keeperId;
   }
 
   async decide(request: RiskRequest): Promise<RiskEngineResult> {
@@ -202,7 +207,11 @@ export class RiskEngineClient {
       try {
         const response = await fetch(`${this.url}/decide`, {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: {
+            "content-type": "application/json",
+            // heartbeat + identity: the risk engine elects a leader among the keepers it sees
+            "x-keeper-id": this.keeperId,
+          },
           body,
           signal: AbortSignal.timeout(this.timeoutMs),
         });
@@ -215,13 +224,15 @@ export class RiskEngineClient {
         }
         const json = (await response.json().catch(() => {
           throw new RiskEngineProtocolError("risk engine returned invalid JSON");
-        })) as unknown;
+        })) as Record<string, unknown>;
         const decision = parseRiskDecision(json);
         return {
           ok: true,
           decision,
           latencyMs: Date.now() - started,
           attempts: attempt,
+          role: json["role"] === "leader" || json["role"] === "follower" ? json["role"] : null,
+          leaderId: typeof json["leaderId"] === "string" ? json["leaderId"] : null,
         };
       } catch (error) {
         if (error instanceof RiskEngineProtocolError) {

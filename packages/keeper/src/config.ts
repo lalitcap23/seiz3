@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
+import { privateKeyToAccount } from "viem/accounts";
 
 import type { Address, Config, DeploymentInfo, Hex } from "./types.js";
 import { parseUsdc } from "./riskCalc.js";
@@ -17,6 +18,7 @@ const hex32Schema = z.string().regex(/^0x[0-9a-fA-F]{64}$/, "must be a 32-byte h
 const envSchema = z.object({
   RPC_URL: z.string().min(1, "RPC_URL is required"),
   KEEPER_PK: z.string().regex(/^0x[0-9a-fA-F]{64}$/, "KEEPER_PK must be a 32-byte hex key"),
+  KEEPER_ID: z.string().min(1).max(64).optional(), // default: KEEPER_PK's address — two keys are two keepers
   DEPLOYMENTS_PATH: z.string().min(1).optional(),
   VAULT: addressSchema.optional(),
   MORPHO: addressSchema.optional(),
@@ -204,6 +206,7 @@ export function loadConfig(
     morpho: deployment.morpho,
     deploymentsPath: e.DEPLOYMENTS_PATH ?? "",
     keeperPrivateKey: e.KEEPER_PK as Hex,
+    keeperId: e.KEEPER_ID ?? privateKeyToAccount(e.KEEPER_PK as Hex).address.toLowerCase(),
     deployments: deployment,
     riskEngineUrl: e.RISK_ENGINE_URL,
     riskEngineTimeoutMs: e.RISK_ENGINE_TIMEOUT_MS,
