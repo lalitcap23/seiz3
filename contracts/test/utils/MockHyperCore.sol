@@ -79,13 +79,20 @@ contract MockHyperCore {
 
     /// @notice Deploy the stubs and etch them over CoreWriter and the read precompiles.
     function install(Vm vm) external returns (MockCoreDepositWallet) {
-        PrecompileStub stub = new PrecompileStub(this);
+        (address stub, address writer) = deployStubs();
         for (uint160 i; i <= 0x13; ++i) {
-            vm.etch(address(uint160(0x800) + i), address(stub).code);
+            vm.etch(address(uint160(0x800) + i), stub.code);
         }
-        vm.etch(CORE_WRITER, address(new CoreWriterStub(this)).code);
-        depositWallet = new MockCoreDepositWallet(this, usdc);
+        vm.etch(CORE_WRITER, writer.code);
         return depositWallet;
+    }
+
+    /// @notice `install` without cheatcodes, for a live anvil: the caller copies the stubs' code over the
+    ///         precompiles (0x…0800–0x…0813) and CoreWriter with `anvil_setCode` (scripts/local-stack.sh).
+    function deployStubs() public returns (address precompileStub, address coreWriterStub) {
+        precompileStub = address(new PrecompileStub(this));
+        coreWriterStub = address(new CoreWriterStub(this));
+        depositWallet = new MockCoreDepositWallet(this, usdc);
     }
 
     // ─── knobs ────────────────────────────────────────────────────────────

@@ -30,14 +30,13 @@ services:
     environment:
       RPC_URL: ${RPC_URL:?set RPC_URL to an external node}
       KEEPER_PK: ${KEEPER_PK:-0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d}
-      DEPLOYMENTS_PATH: /shared/deployments.json
+      DEPLOYMENTS_PATH: /shared/${NETWORK:-testnet}.json
       RISK_ENGINE_URL: http://risk-engine:8081
       TICK_MS: "500"
       HEALTH_PORT: "9090"
-      UNWIND_COOLDOWN_OPEN_SEC: "2"
       DRY_RUN: "false"
     volumes:
-      - ./mocks/shared:/shared:ro
+      - ./deployments:/shared:ro
     ports:
       - "9090:9090"
     healthcheck:
@@ -51,19 +50,3 @@ services:
       retries: 20
       start_period: 15s
     restart: unless-stopped
-
-  scenarios:
-    image: afterbell-keeper:local
-    profiles: ["test"]
-    depends_on:
-      risk-engine:
-        condition: service_healthy
-    environment:
-      RPC_URL: ${RPC_URL:?set RPC_URL to an external node}
-      KEEPER_PK: ${KEEPER_PK:-0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d}
-      DEPLOYER_PK: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-      DEPLOYMENTS_PATH: /shared/deployments.json
-      RISK_ENGINE_URL: http://risk-engine:8081
-    volumes:
-      - ./mocks/shared:/shared:ro
-    command: ["pnpm", "--filter", "@afterbell/keeper", "test:scenarios"]

@@ -16,6 +16,10 @@ contracts/cache/
 contracts/broadcast/*/31337/
 contracts/broadcast/**/dry-run/
 deployments/test-local.json
+# scripts/local-stack.sh (ephemeral anvil addresses; KILL is the local keeper's kill switch)
+deployments/local.json
+deployments/local-chain.json
+deployments/KILL
 
 # generated
 packages/shared/src/generated/

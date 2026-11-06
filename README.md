@@ -46,6 +46,7 @@ pnpm codegen                              # forge build + wagmi ABIs → package
 | `pnpm dev`                                                      | API + web together                                                                                  |
 | `pnpm web`                                                      | Dashboard only; set `NEXT_PUBLIC_USE_FIXTURE=1` in `packages/web/.env.local` to run without the API |
 | `pnpm keeper` / `pnpm keeper:replay`                            | Keeper bot                                                                                          |
+| `pnpm test` / `pnpm test:scenarios`                             | Keeper unit tests / keeper against the real contracts on the local stack (below)                    |
 | `pnpm replay <setup\|scene\|marketA\|marketB\|marketC\|monday>` | One demo step                                                                                       |
 
 ## Deploying
@@ -78,6 +79,34 @@ cast send $VAULT "topUpMargin(uint256)" 20000000000 --rpc-url $RPC --private-key
 
 Top-ups go straight to the xyz DEX through CoreDepositWallet. If spike 2 shows that doesn't credit xyz, switch to deposit-to-spot + `sendAsset`: `cast send $VAULT "setMarginDepositDex(uint32)" 4294967295`.
 
+The keeper reads the same `deployments/<NETWORK>.json` (`DEPLOYMENTS_PATH`) and works market C. Morpho can't list a market's borrowers, so add the ones to watch as `"borrowers": [{ "address": "0x…", "label": "…" }]`.
+
+## Local end to end (keeper ↔ contracts)
+
+`scripts/local-stack.sh` puts the whole system on a local anvil: real Morpho Blue and Uniswap v4 bytecode, the deploy scripts above, and MockHyperCore copied over the HyperCore precompiles and CoreWriter with `anvil_setCode` (the `vm.etch` trick from the forge tests). HyperCore only acts when `MockHyperCore.processBlock()` is called.
+
+```bash
+anvil                                              # 1
+scripts/local-stack.sh up                          # 2: deploy + fund → deployments/local.json (~40 s)
+pnpm --filter @afterbell/keeper risk-engine:stub   # 3
+pnpm test:scenarios                                # 4: keeper scenarios, each from the same anvil snapshot
+
+# or watch the real keeper binary instead of 4:
+scripts/local-stack.sh tick                        # HyperCore processes a block every second
+scripts/local-stack.sh keeper
+scripts/local-stack.sh price 205                   # the market C borrower goes under water: liquidate → hedge
+scripts/local-stack.sh price 217                   # "Monday": unwind in 10 NVDA chunks
+```
+
+Locally nothing arbitrages the pool, so after a few chunks its price sags more than `maxSlippageBps` under the Core oracle and the vault refuses further unwinds (`Slippage`); the keeper skips them and the position stays hedged. Don't run `tick` during `test:scenarios`.
+
+## Keeper notes
+
+- **ABIs come from the contracts.** Every call goes through the wagmi-generated ABIs in `@afterbell/shared/abis`, so a renamed function or changed argument list is a type error. Run `pnpm codegen` after changing a contract.
+- **It mirrors the vault's rules, the contract decides.** Pauses, cooldowns and Morpho's liquidation maths (seize no more than the debt and idle USDC can repay) are checked before simulating; an `eth_call` that reverts anyway (pool or lending oracle out of band, low Core margin) is skipped and logged with its error name, not sent and not counted by the breaker.
+- **Block clock.** Order delays and cooldowns are compared against the latest block's timestamp, the clock the vault uses.
+- **Margin.** It tops up the vault's `marginShortfall()` plus 10%, syncs to clear a margin pause once the shortfall is gone, and only sends back Core USDC above `marginTarget()` (enough for the next max-size liquidation).
+
 ## Contract notes
 
 - **Two ids for one perp.** Orders take the asset id (`110002` for xyz:NVDA); position / oracle reads take the perp index (`10002`). The vault derives the second from the first.
@@ -89,7 +118,7 @@ Top-ups go straight to the xyz DEX through CoreDepositWallet. If spike 2 shows t
 
 ## Status
 
-Contracts, scripts and tests follow the architecture doc. The offline suite (unit, integration, invariant, scripts) and the CoreSimulator ring pass. Spikes still to run before kickoff:
+Contracts, scripts and tests follow the architecture doc. The offline suite (unit, integration, invariant, scripts) and the CoreSimulator ring pass. The keeper runs against the deployed contracts on the local stack (liquidate → hedge → retry/pause → unwind → margin moves). Spikes still to run before kickoff:
 
 - [ ] HIP-3 position read on testnet (the simulator agrees with `position2(address,uint32)` at perp index 10002)
 - [ ] Margin path to `xyz` (direct CoreDepositWallet deposit vs spot + `sendAsset`; both are implemented)
