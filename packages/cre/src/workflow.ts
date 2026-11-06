@@ -18,7 +18,7 @@ import { z } from "zod";
 import type { Address, Hex } from "viem";
 
 import { AfterbellBindings } from "./bindings";
-import { assess, type Assessment, type PositionRead } from "./risk";
+import { assess, toBorrowAssetsUp, type Assessment, type PositionRead } from "./risk";
 import { readPerpPriceUsd6 } from "./hyperliquid";
 
 export const configSchema = z.object({
@@ -38,6 +38,7 @@ export const configSchema = z.object({
   risk: z.object({
     oracleBandBps: z.coerce.bigint().default(200n),
     maxSeizedUsdc: z.coerce.bigint().default(5_000_000_000n), // $5k USDC for the demo
+    szDecimals: z.number().int().min(0).max(18).default(3), // xyz:NVDA on HyperCore
   }),
 });
 
@@ -54,8 +55,15 @@ export function runAfterbellLiquidation(runtime: Runtime<Config>, deps: Deps): s
   const b = deps.bindings;
 
   // 1 · on-chain state
-  const params = b.marketParams(runtime, cfg.evm.marketId as Hex);
-  const position: PositionRead = b.position(runtime, cfg.evm.marketId as Hex, cfg.evm.borrower as Address);
+  const marketId = cfg.evm.marketId as Hex;
+  const params = b.marketParams(runtime, marketId);
+  const raw = b.position(runtime, marketId, cfg.evm.borrower as Address);
+  const totals = b.market(runtime, marketId);
+  // Morpho stores debt as shares; convert exactly the way Morpho's toAssetsUp does.
+  const position: PositionRead = {
+    collateral: raw.collateral,
+    borrowAssets: toBorrowAssetsUp(raw.borrowShares, totals.totalBorrowAssets, totals.totalBorrowShares),
+  };
   const lendingRaw = b.lendingPriceRaw(runtime, params.oracle);
   const lendingPriceUsd6 = lendingRaw / 10n ** 18n; // DemoOracle: USD × 1e24 → 6-dec USDC
 
@@ -67,6 +75,7 @@ export function runAfterbellLiquidation(runtime: Runtime<Config>, deps: Deps): s
     lltv: params.lltv,
     oracleBandBps: cfg.risk.oracleBandBps,
     maxSeizedUsdc: cfg.risk.maxSeizedUsdc,
+    szDecimals: cfg.risk.szDecimals,
   });
 
   if (decision.action === "skip") {
@@ -75,7 +84,7 @@ export function runAfterbellLiquidation(runtime: Runtime<Config>, deps: Deps): s
   }
 
   // 4 · DON-signed write → CreKeeperGateway → AfterbellVault.liquidate
-  const write = b.writeLiquidation(runtime, cfg.evm.marketId as Hex, cfg.evm.borrower as Address, decision.seized);
+  const write = b.writeLiquidation(runtime, marketId, cfg.evm.borrower as Address, decision.seized);
   if (write.txStatus !== TxStatus.SUCCESS) {
     throw new Error(`liquidation tx failed: ${String(write.txStatus)}`);
   }

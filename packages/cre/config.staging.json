@@ -1,5 +1,5 @@
 {
-  "schedule": "*/30 * * * * *",
+  "schedule": "0 */1 * * * *",
   "evm": {
     "chainSelectorName": "hyperliquid-testnet",
     "isTestnet": true,
@@ -14,6 +14,7 @@
   },
   "risk": {
     "oracleBandBps": 200,
-    "maxSeizedUsdc": 5000000000
+    "maxSeizedUsdc": 5000000000,
+    "szDecimals": 3
   }
 }
