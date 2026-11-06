@@ -69,7 +69,8 @@ library HedgeLib {
     // ─── money in (CoreDepositWallet) ─────────────────────────────────────
 
     /// @notice HyperEVM → HyperCore. `destinationDex`: 0 = default perps, type(uint32).max = spot, else a perp DEX.
-    /// @dev Credit appears on Core from the next block. A brand-new account pays a 1 USDC activation fee.
+    /// @dev Credit appears on Core from the next block. A brand-new account pays a 1 USDC activation fee (mainnet
+    ///      ledger: `accountActivationGas`). Testnet's CoreDepositWallet never credits Core at all (spike 2a/2b).
     function depositUsdc(IERC20 usdc, address wallet, uint256 amount, uint32 destinationDex) internal {
         usdc.forceApprove(wallet, amount);
         ICoreDepositWallet(wallet).deposit(amount, destinationDex);

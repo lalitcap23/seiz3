@@ -25,6 +25,8 @@ import {DeployHelpers} from "./DeployHelpers.sol";
 ///
 /// The deployer needs SEED_DEPOSIT + nothing else in USDC; CORE_ACTIVATION comes out of the seed.
 /// Then wait for `coreUserExists(vault)` before funding margin (README, "After deploy").
+/// Testnet's CoreDepositWallet never credits HyperCore (spike 2a/2b), so there CORE_ACTIVATION defaults to 0 and
+/// the vault is funded with a HyperCore-side send instead.
 contract Deploy is Script {
     struct Config {
         string network;
@@ -92,7 +94,7 @@ contract Deploy is Script {
         c.perpDexIndex = uint32(vm.envUint("PERP_DEX_INDEX"));
         c.szDecimals = uint8(vm.envUint("SZ_DECIMALS"));
         c.seed = vm.envOr("SEED_DEPOSIT", uint256(10e6));
-        c.activation = vm.envOr("CORE_ACTIVATION", uint256(2e6));
+        c.activation = vm.envOr("CORE_ACTIVATION", block.chainid == 998 ? 0 : uint256(2e6));
         require(c.activation <= c.seed, "activation comes out of the seed deposit");
     }
 

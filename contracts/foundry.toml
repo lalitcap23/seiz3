@@ -34,6 +34,7 @@ depth = 500
 # the 30M big-block cap above. Only the simulator needs this; runtime calls are still sized for 3M.
 [profile.sim]
 gas_limit = 9223372036854775807
+disable_block_gas_limit = true # a fork inherits the forked block's limit, 3M on a HyperEVM small block
 
 [rpc_endpoints]
 hyperevm = "${HYPEREVM_RPC_URL}"

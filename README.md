@@ -56,7 +56,11 @@ The vault is too big for a 3M-gas fast block. Switch the deployer to big blocks 
 ```bash
 # big blocks on (see Hyperliquid docs: evmUserModify usingBigBlocks=true)
 cd contracts
-# 1. MockNVDAx, RiskParams, vault, NaiveLiquidator, PoolSeeder; seed deposit; start Core account activation
+# 0. testnet only: our own Morpho Blue + v4 PoolManager (mainnet has the real ones, see .env.example);
+#    writes deployments/testnet-infra.json → MORPHO_ADDRESS, MORPHO_IRM_ADDRESS, POOL_MANAGER_ADDRESS
+forge script script/TestnetInfra.s.sol --rpc-url hyperevm_testnet --private-key $DEPLOYER_PRIVATE_KEY --broadcast --slow
+# 1. MockNVDAx, RiskParams, vault, NaiveLiquidator, PoolSeeder; seed deposit
+#    testnet xyz:NVDA: PERP_DEX_INDEX=65 PERP_ASSET=750002 (mainnet: 1 / 110002)
 NETWORK=testnet forge script script/Deploy.s.sol --rpc-url hyperevm_testnet --private-key $DEPLOYER_PRIVATE_KEY --broadcast --slow
 # 2. three demo markets (one DemoOracle each), market C allow-listed on the vault; merges `markets` into the json
 NETWORK=testnet forge script script/CreateMarkets.s.sol --rpc-url hyperevm_testnet --private-key $DEPLOYER_PRIVATE_KEY --broadcast
@@ -68,16 +72,25 @@ NETWORK=testnet THIN=true forge script script/SeedPool.s.sol --rpc-url hyperevm_
 
 ### After deploy: fund the hedge account
 
-A new HyperCore account must exist before it sends actions, so margin goes on in later blocks. These calls read the HyperCore precompiles, which `forge script`'s local EVM doesn't have, so use `cast` (it runs against the node):
+A new HyperCore account must exist before it sends actions, so margin goes on in later blocks. These calls read the HyperCore precompiles, which `forge script`'s local EVM doesn't have, so use `cast` (it runs against the node).
+
+**Mainnet.** Deploy.s.sol's activation deposit creates the vault's account (1 USDC fee, `accountActivationGas` in the ledger):
 
 ```bash
 # true once the activation deposit has landed (read precompile 0x…0810)
 cast call 0x0000000000000000000000000000000000000810 $(cast abi-encode "f(address)" $VAULT) --rpc-url $RPC
+# top up via spot + sendAsset: both halves are proven, a direct deposit to xyz isn't (spike 2b)
+cast send $VAULT "setMarginDepositDex(uint32)" 4294967295 --rpc-url $RPC --private-key $DEPLOYER_PRIVATE_KEY
 cast send $VAULT "sweepSpotToDex()" --rpc-url $RPC --private-key $DEPLOYER_PRIVATE_KEY      # activation leftover → xyz
 cast send $VAULT "topUpMargin(uint256)" 20000000000 --rpc-url $RPC --private-key $DEPLOYER_PRIVATE_KEY  # 20k USDC
 ```
 
-Top-ups go straight to the xyz DEX through CoreDepositWallet. If spike 2 shows that doesn't credit xyz, switch to deposit-to-spot + `sendAsset`: `cast send $VAULT "setMarginDepositDex(uint32)" 4294967295`.
+**Testnet.** Its CoreDepositWallet takes the USDC and never credits HyperCore, for new and existing accounts alike (spike 2a/2b: 31 USDC lost). Nothing there may go through it, so not `activateCore` and not `topUpMargin`. Fund the vault from the HyperCore side:
+
+1. On app.hyperliquid-testnet.xyz, **Send USDC (spot) to the vault's address**, enough for all the margin the demo needs. The first send creates the account (the sender pays the 1 USDC fee).
+2. Once `coreUserExists` (above) is true, `cast send $VAULT "sweepSpotToDex()"` moves it to xyz (CoreWriter `sendAsset`, ~26 blocks on testnet).
+
+Keep that margin above `marginTarget()`: if the keeper sees a shortfall it calls `topUpMargin`, and on testnet that USDC is lost.
 
 The keeper reads the same `deployments/<NETWORK>.json` (`DEPLOYMENTS_PATH`) and works market C. Morpho can't list a market's borrowers, so add the ones to watch as `"borrowers": [{ "address": "0x…", "label": "…" }]`.
 
@@ -120,10 +133,10 @@ Locally nothing arbitrages the pool, so after a few chunks its price sags more t
 
 Contracts, scripts and tests follow the architecture doc. The offline suite (unit, integration, invariant, scripts) and the CoreSimulator ring pass. The keeper runs against the deployed contracts on the local stack (liquidate → hedge → retry/pause → unwind → margin moves). Spikes still to run before kickoff:
 
-- [ ] HIP-3 position read on testnet (the simulator agrees with `position2(address,uint32)` at perp index 10002)
-- [ ] Margin path to `xyz` (direct CoreDepositWallet deposit vs spot + `sendAsset`; both are implemented)
-- [ ] Account activation (`activateCore` → `coreUserExists`)
+- [x] HIP-3 position read on testnet: `position2` at perp index 650002 and `accountMarginSummary(65, user)` match the info API for live traders. On testnet xyz is DEX 65 (asset 750002), not 1
+- [x] Margin path to `xyz`: CoreWriter `sendAsset` spot → xyz works (testnet, 26 blocks). The direct CoreDepositWallet deposit to xyz can't be tested on testnet (below), so mainnet uses spot + `sendAsset`
+- [x] Account activation: mainnet CoreDepositWallet deposits create the account (1 USDC fee). Testnet's CoreDepositWallet never credits HyperCore at all, so testnet is funded with HyperCore-side sends (see "After deploy")
 - [ ] Order delay → `RiskParams.orderDelaySec`; deposit visibility → `RiskParams.transitBlocks`
 - [ ] Leverage on xyz: CoreWriter can't set it. If the default is wrong, `addApiWallet` lets an agent set it
-- [ ] Morpho on HyperEVM (address, LLTVs, IRM) → then `pnpm contracts:test:fork`
-- [ ] Uniswap v4 on HyperEVM (PoolManager) → same
+- [x] Morpho on HyperEVM mainnet: `0x68e37dE8…` with 77% and 38.5% LLTVs and the AdaptiveCurve IRM `0xD4a426F0…` enabled. Not on testnet → `TestnetInfra.s.sol`
+- [x] Uniswap v4 PoolManager on HyperEVM mainnet: `0x12D4Fd9C…`. Not on testnet → same. `pnpm contracts:test:fork` passes against both

@@ -470,7 +470,8 @@ contract AfterbellVault is
     }
 
     /// @notice Create the vault's HyperCore account: deposit a few USDC to Core spot (1 USDC activation fee),
-    ///         wait for `coreUserExists`, then `sweepSpotToDex` / `topUpMargin`.
+    ///         wait for `coreUserExists`, then `sweepSpotToDex` / `topUpMargin`. Mainnet only: testnet's
+    ///         CoreDepositWallet never credits Core, so there a HyperCore-side send to the vault creates the account.
     function activateCore(uint256 amount) external onlyOwner nonReentrant {
         if (amount == 0) revert ZeroAmount();
         if (amount > usdc.balanceOf(address(this))) revert ExceedsIdle();
