@@ -64,7 +64,7 @@ export function FaucetCard({ me }: { me: Me | undefined }) {
   }
 
   return (
-    <Card title="Faucet" hint="Test NVDAx to borrow against, a little USDC, and HYPE for gas. Once a day.">
+    <Card title="Faucet" hint="Test NVDAx to borrow against, a little USDC, and HYPE for gas. One drip per address per cooldown (the button shows when the next is due).">
       <Action
         label={waitUntil ? `Next drip ${new Date(waitUntil * 1000).toLocaleString()}` : "Get test tokens"}
         onClick={drip}

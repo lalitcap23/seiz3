@@ -1,4 +1,11 @@
-import { createPublicClient, http, type PublicClient } from "viem";
+import {
+  createPublicClient,
+  decodeAbiParameters,
+  encodeAbiParameters,
+  http,
+  parseAbiParameters,
+  type PublicClient,
+} from "viem";
 
 import { Breaker } from "./breaker.js";
 import { BorrowerScan } from "./borrowerScan.js";
@@ -210,7 +217,9 @@ async function main(): Promise<void> {
     }
 
     // a buy-back with no ask to fill it is rejected on HyperCore, after the unwind has already sold the stock
-    const need = buyNeeded(decision.action, state, cfg.deployments.szDecimals ?? 3, cfg.unwindChunkEstimateUnits);
+    const coreSzi =
+      decision.action.kind === "syncHedge" && state.pendingHedge.delta > 0n ? await readCoreSzi() : null;
+    const need = buyNeeded(decision.action, state, cfg.deployments.szDecimals ?? 3, cfg.unwindChunkEstimateUnits, coreSzi);
     if (need > 0n) {
       const gate = await checkBuyLiquidity(
         { hlInfoUrl: cfg.hlInfoUrl, coin: cfg.hlCoin, requestFile: cfg.askRequestFile },
@@ -313,6 +322,22 @@ async function main(): Promise<void> {
           confidenceBps: decision.confidenceBps,
         });
       }
+    }
+  }
+
+  /** The vault's position on HyperCore (position2 precompile), or null when there's no HyperCore to read. */
+  async function readCoreSzi(): Promise<bigint | null> {
+    const asset = cfg.deployments.perpAsset;
+    if (asset === undefined) return null;
+    try {
+      const { data } = await clients.publicClient.call({
+        to: "0x0000000000000000000000000000000000000813",
+        data: encodeAbiParameters(parseAbiParameters("address, uint32"), [cfg.vault, asset >= 100_000 ? asset - 100_000 : asset]),
+      });
+      const [szi] = decodeAbiParameters(parseAbiParameters("int64, uint64, int64, uint32, bool"), data ?? "0x");
+      return szi;
+    } catch {
+      return null; // unknown: the gate treats the whole pending buy as needed
     }
   }
 

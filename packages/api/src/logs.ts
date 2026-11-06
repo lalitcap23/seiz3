@@ -1,6 +1,6 @@
 import { parseAbiItem, toHex, type AbiEvent, type Address, type PublicClient } from "viem";
 import { afterbellVaultAbi, naiveLiquidatorAbi } from "@afterbell/shared/abis";
-import type { ActivityEvent, MarketName } from "@afterbell/shared";
+import type { ActivityEvent, MarketLiquidation, MarketName } from "@afterbell/shared";
 import { MARKETS } from "./chain.js";
 import type { DeploymentFile } from "@afterbell/shared/node";
 
@@ -16,6 +16,9 @@ const ACTIVITY_KEPT = 50;
 
 const morphoLiquidate = parseAbiItem(
   "event Liquidate(bytes32 indexed id, address indexed caller, address indexed borrower, uint256 repaidAssets, uint256 repaidShares, uint256 seizedAssets, uint256 badDebtAssets, uint256 badDebtShares)",
+);
+const morphoBorrow = parseAbiItem(
+  "event Borrow(bytes32 indexed id, address caller, address indexed onBehalf, address indexed receiver, uint256 assets, uint256 shares)",
 );
 const vaultEvents = afterbellVaultAbi.filter(
   (item): item is Extract<(typeof afterbellVaultAbi)[number], { type: "event" }> =>
@@ -41,6 +44,12 @@ const plain = (args: Record<string, unknown>) =>
  */
 export class LogScanner {
   activity: ActivityEvent[] = [];
+  /** Every vault event since the start block: operations (LIQ-n / UNW-n) are numbered and linked from it. */
+  all: ActivityEvent[] = [];
+  /** Morpho liquidations per market (opId is filled in by the collector). */
+  readonly liquidations = new Map<MarketName, MarketLiquidation[]>(MARKETS.map((m) => [m, []]));
+  /** Everyone who borrowed on one of the three markets. */
+  readonly borrowers = new Set<Address>();
   readonly badDebt = new Map<MarketName, bigint>(MARKETS.map((m) => [m, 0n]));
   private next: bigint | null;
   private readonly times = new Map<bigint, number>();
@@ -56,7 +65,7 @@ export class LogScanner {
     this.next = fromBlock;
     this.marketById = new Map(MARKETS.map((m) => [dep.markets[m].id.toLowerCase(), m]));
     this.addresses = [dep.vault, dep.morpho, ...(dep.naiveLiquidator ? [dep.naiveLiquidator] : [])];
-    this.events = [...vaultEvents, morphoLiquidate, ...(shortfall ? [shortfall] : [])] as AbiEvent[];
+    this.events = [...vaultEvents, morphoLiquidate, morphoBorrow, ...(shortfall ? [shortfall] : [])] as AbiEvent[];
   }
 
   async scan(head: bigint): Promise<void> {
@@ -75,7 +84,24 @@ export class LogScanner {
     const from = log.address.toLowerCase();
     if (from === this.dep.morpho.toLowerCase()) {
       const market = this.marketById.get(String(log.args.id).toLowerCase());
-      if (market !== undefined) this.addBadDebt(market, log.args.badDebtAssets as bigint);
+      if (market === undefined) return;
+      if (log.eventName === "Borrow") {
+        this.borrowers.add(log.args.onBehalf as Address);
+        return;
+      }
+      this.addBadDebt(market, log.args.badDebtAssets as bigint);
+      const caller = String(log.args.caller).toLowerCase();
+      this.liquidations.get(market)?.push({
+        txHash: log.transactionHash,
+        blockNumber: log.blockNumber.toString(),
+        timestamp: await this.timeOf(log.blockNumber),
+        borrower: String(log.args.borrower),
+        repaid: String(log.args.repaidAssets),
+        seized: String(log.args.seizedAssets),
+        badDebt: String(log.args.badDebtAssets),
+        by: caller === this.dep.vault.toLowerCase() ? "vault" : caller === this.dep.naiveLiquidator?.toLowerCase() ? "naive" : "other",
+        opId: null,
+      });
       return;
     }
     if (from === this.dep.naiveLiquidator?.toLowerCase()) {
@@ -83,19 +109,24 @@ export class LogScanner {
       return;
     }
     const cloid = log.args.cloid;
-    this.activity.push({
+    const event: ActivityEvent = {
       type: log.eventName as ActivityEvent["type"],
       txHash: log.transactionHash,
       blockNumber: log.blockNumber.toString(),
       timestamp: await this.timeOf(log.blockNumber),
-      ...(typeof cloid === "bigint" ? { cloid: toHex(cloid) } : {}),
+      ...(typeof cloid === "bigint" ? { cloid: toHex(cloid, { size: 16 }) } : {}),
       args: plain(log.args),
-    });
+    };
+    this.all.push(event);
+    this.activity.push(event);
     if (this.activity.length > ACTIVITY_KEPT) this.activity = this.activity.slice(-ACTIVITY_KEPT);
   }
 
   private reset(): void {
     this.activity = [];
+    this.all = [];
+    this.borrowers.clear();
+    for (const m of MARKETS) this.liquidations.set(m, []);
     for (const m of MARKETS) this.badDebt.set(m, 0n);
     this.times.clear();
     this.next = this.fromBlock;

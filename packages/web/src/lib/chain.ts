@@ -15,3 +15,7 @@ export const publicClient = createPublicClient({
 
 /** Our own transaction page (app/tx/[hash]): HyperEVM testnet has no public explorer that resolves these. */
 export const EXPLORER_TX = "/tx/";
+
+/** Hyperliquid's explorer: HyperCore transactions (the vault's orders and fills), not HyperEVM ones. */
+export const HL_EXPLORER_TX =
+  NETWORK === "mainnet" ? "https://app.hyperliquid.xyz/explorer/tx/" : "https://app.hyperliquid-testnet.xyz/explorer/tx/";

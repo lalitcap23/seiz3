@@ -136,8 +136,9 @@ export interface DeploymentInfo {
   readonly borrowers: readonly DeploymentBorrower[];
   /** Block the markets were created in, if the deployment file records it. */
   readonly startBlock?: bigint;
-  /** xyz:NVDA size decimals (deployments hypercore.szDecimals). */
+  /** xyz:NVDA size decimals and order id (deployments hypercore). */
   readonly szDecimals?: number;
+  readonly perpAsset?: number;
 }
 
 export interface Config {

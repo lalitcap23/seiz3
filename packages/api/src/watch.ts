@@ -26,6 +26,10 @@ export class Watchlist {
     return true;
   }
 
+  list(): readonly Address[] {
+    return this.addresses;
+  }
+
   get size(): number {
     return this.addresses.length;
   }

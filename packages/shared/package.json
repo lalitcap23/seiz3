@@ -11,7 +11,8 @@
     "./node": "./src/node.ts",
     "./pool": "./src/pool.ts",
     "./morpho": "./src/morpho.ts",
-    "./deployments": "./src/deployments.ts"
+    "./deployments": "./src/deployments.ts",
+    "./types": "./src/types.ts"
   },
   "scripts": {
     "codegen": "wagmi generate",

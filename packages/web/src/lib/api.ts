@@ -3,7 +3,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import type { HistoryPoint, Snapshot } from "@afterbell/shared";
-import fixture from "@afterbell/shared/fixtures/snapshot.json";
+import fixtureJson from "@afterbell/shared/fixtures/snapshot.json";
+// a subpath, not the package root: Turbopack can't resolve the root's "./x.js" re-exports to TS sources
+import { snapshotSchema } from "@afterbell/shared/types";
+
+/** The demo snapshot, with the schema's defaults for fields added after it was recorded. */
+const fixture = snapshotSchema.parse(fixtureJson);
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8787";
 const USE_FIXTURE = process.env.NEXT_PUBLIC_USE_FIXTURE === "1";
@@ -24,12 +29,12 @@ export function useSnapshot() {
   return useQuery({
     queryKey: ["snapshot"],
     queryFn: async (): Promise<Snapshot> => {
-      if (USE_FIXTURE) return fixture as Snapshot;
+      if (USE_FIXTURE) return fixture;
       const res = await fetch(`${API_URL}/snapshot`);
       if (!res.ok) throw new Error(`snapshot ${res.status}`);
       return res.json();
     },
-    placeholderData: fixture as Snapshot,
+    placeholderData: fixture,
   });
 }
 

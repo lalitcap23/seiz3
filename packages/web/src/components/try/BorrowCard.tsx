@@ -116,7 +116,9 @@ export function BorrowCard({ me }: { me: Me | undefined }) {
         </p>
       )}
 
-      {snapshot && <LoanTimeline activity={snapshot.activity} address={address} szDecimals={dep.hypercore.szDecimals} />}
+      {snapshot && (
+        <LoanTimeline operations={snapshot.operations ?? []} address={address} szDecimals={dep.hypercore.szDecimals} />
+      )}
     </Card>
   );
 }

@@ -1,6 +1,7 @@
 import type { ActivityEvent } from "@afterbell/shared";
 import Link from "next/link";
 import { coreSize, nvdax, shortHash, usd } from "@/lib/format";
+import { OpBadge } from "./OperationCard";
 
 const SHOWN = 12;
 
@@ -40,6 +41,7 @@ export function ActivityFeed({ events, szDecimals }: { events: ActivityEvent[]; 
           return (
             <li key={`${e.txHash}-${e.type}-${events.length - i}`} className="flex gap-3">
               <span className="w-16 shrink-0 tabular-nums opacity-50" suppressHydrationWarning>{new Date(e.timestamp).toLocaleTimeString([], { hour12: false })}</span>
+              <span className="w-12 shrink-0">{e.opId && <OpBadge id={e.opId} />}</span>
               <span className={d.tone}>{d.text}</span>
               <Link href={`/tx/${e.txHash}`} className="ml-auto shrink-0 font-mono text-xs underline opacity-50 hover:opacity-100">
                 {shortHash(e.txHash)}

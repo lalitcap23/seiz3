@@ -74,7 +74,7 @@ const deploymentSchema = z.object({
   borrowers: z.array(borrowerSchema).default([]),
   /** Block the markets were created in: where borrower discovery starts. */
   startBlock: z.union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)]).optional(),
-  hypercore: z.object({ szDecimals: z.number().int().min(0).max(6) }).optional(),
+  hypercore: z.object({ szDecimals: z.number().int().min(0).max(6), perpAsset: z.number().int().positive() }).optional(),
 });
 
 function toBig(value: number | string): bigint {
@@ -109,7 +109,7 @@ function parseDeploymentsJson(raw: string): DeploymentInfo {
       ...(b.label === undefined ? {} : { label: b.label }),
     })),
     ...(d.startBlock === undefined ? {} : { startBlock: toBig(d.startBlock) }),
-    ...(d.hypercore === undefined ? {} : { szDecimals: d.hypercore.szDecimals }),
+    ...(d.hypercore === undefined ? {} : { szDecimals: d.hypercore.szDecimals, perpAsset: d.hypercore.perpAsset }),
   };
 }
 

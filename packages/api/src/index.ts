@@ -32,6 +32,9 @@ if (chainId !== dep.chainId) {
   throw new Error(`RPC is chain ${chainId}, but the deployment file is for chain ${dep.chainId}`);
 }
 
+// testers the keeper and the dashboard follow: /try connects and faucet drips
+const watchlist = new Watchlist(env.WATCH_FILE ?? `${DEPLOYMENTS_DIR}watch.json`);
+
 const collector = new Collector(client, dep, {
   hlInfoUrl: remote ? (env.HL_INFO_API_URL ?? HL_INFO_API[remote]) : null,
   explorerUrl: EXPLORER[env.NETWORK] && `${EXPLORER[env.NETWORK]}${dep.vault}`,
@@ -40,6 +43,7 @@ const collector = new Collector(client, dep, {
     ? { logsClient: createPublicClient({ chain, transport: http(env.LOGS_RPC_URL) }) as PublicClient }
     : {}),
   logScanMs: env.LOG_SCAN_MS,
+  extraBorrowers: () => watchlist.list(),
 });
 collector.start(env.POLL_MS);
 
@@ -95,7 +99,6 @@ app.get("/tx/:hash", async (c) => {
   return "error" in view ? c.json(view, 502) : c.json(view);
 });
 
-const watchlist = new Watchlist(env.WATCH_FILE ?? `${DEPLOYMENTS_DIR}watch.json`);
 
 /** /try calls this on connect: from then on the keeper checks the address every tick, with no log scan involved. */
 app.post("/watch", async (c) => {

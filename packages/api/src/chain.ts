@@ -12,7 +12,7 @@ import {
   type PublicClient,
 } from "viem";
 import { afterbellVaultAbi, demoOracleAbi, iMorphoAbi, riskParamsAbi } from "@afterbell/shared/abis";
-import { extsloadAbi, poolSlots, type MarketName } from "@afterbell/shared";
+import { accruedTotalBorrow, extsloadAbi, poolSlots, type MarketName } from "@afterbell/shared";
 import type { DeploymentFile } from "@afterbell/shared/node";
 
 /** Canonical Multicall3: deployed on HyperEVM mainnet and testnet; scripts/local-stack.sh etches it on anvil. */
@@ -33,18 +33,28 @@ const PRECOMPILE = {
   position2: "0x0000000000000000000000000000000000000813",
 } as const;
 
+const irmAbi = parseAbi([
+  "struct MarketParams { address loanToken; address collateralToken; address oracle; address irm; uint256 lltv; }",
+  "struct Market { uint128 totalSupplyAssets; uint128 totalSupplyShares; uint128 totalBorrowAssets; uint128 totalBorrowShares; uint128 lastUpdate; uint128 fee; }",
+  "function borrowRateView(MarketParams marketParams, Market market) view returns (uint256)",
+]);
+
 export const MARKETS: readonly MarketName[] = ["A_naive", "B_conservative", "C_afterbell"];
 const HEDGE_STATES = ["Idle", "Pending", "Retrying", "Paused"] as const;
 
 export interface MarketRead {
   name: MarketName;
   lltv: bigint;
+  /** totalBorrowAssets with the interest since lastUpdate (Morpho books it only when someone touches the market) */
   totalBorrowAssets: bigint;
   totalBorrowShares: bigint;
+  totalSupplyAssets: bigint;
   price: bigint; // Morpho 1e36 scale
   borrower: Address | null;
   borrowShares: bigint;
   collateral: bigint;
+  /** Every borrower the API knows of, read at the same block. */
+  positions: { address: Address; borrowShares: bigint; collateral: bigint }[];
 }
 
 export interface CoreRead {
@@ -105,7 +115,11 @@ function precompile(name: string, address: Address, inputs: string, outputs: str
 }
 
 /** Everything the snapshot needs from HyperEVM and HyperCore, in one eth_call at one block. */
-export async function readChain(client: PublicClient, dep: DeploymentFile): Promise<ChainRead> {
+export async function readChain(
+  client: PublicClient,
+  dep: DeploymentFile,
+  borrowers: readonly Address[] = [],
+): Promise<ChainRead> {
   const perpIndex = dep.hypercore.perpAsset >= 100_000 ? dep.hypercore.perpAsset - 100_000 : dep.hypercore.perpAsset;
   const slots = poolSlots(dep.poolKey);
   const borrowerOf = (name: MarketName) => dep.borrowers.find((b) => b.label === name)?.address ?? null;
@@ -148,6 +162,8 @@ export async function readChain(client: PublicClient, dep: DeploymentFile): Prom
         borrower === null
           ? contract(`${name}.noBorrower`, MULTICALL3, multicall3Abi, "getBlockNumber") // keeps the stride fixed
           : contract(`${name}.position`, dep.morpho, iMorphoAbi, "position", [m.id, borrower]),
+        contract(`${name}.params`, dep.morpho, iMorphoAbi, "idToMarketParams", [m.id]),
+        ...borrowers.map((b) => contract(`${name}.position.${b}`, dep.morpho, iMorphoAbi, "position", [m.id, b])),
       ];
     }),
   ];
@@ -220,22 +236,49 @@ export async function readChain(client: PublicClient, dep: DeploymentFile): Prom
       : null;
 
   // IMorpho returns the Market and Position structs, which decode as named objects
-  const markets = MARKETS.map((name): MarketRead => {
-    const market = next() as { totalBorrowAssets: bigint; totalBorrowShares: bigint };
+  type MarketStruct = {
+    totalSupplyAssets: bigint;
+    totalSupplyShares: bigint;
+    totalBorrowAssets: bigint;
+    totalBorrowShares: bigint;
+    lastUpdate: bigint;
+    fee: bigint;
+  };
+  const raw = MARKETS.map((name) => {
+    const market = next() as MarketStruct;
     const price = big(next());
     const borrower = borrowerOf(name);
     const position = borrower === null ? (next(), null) : (next() as { borrowShares: bigint; collateral: bigint });
-    return {
-      name,
-      lltv: BigInt(dep.markets[name].lltv),
-      totalBorrowAssets: market.totalBorrowAssets,
-      totalBorrowShares: market.totalBorrowShares,
-      price,
-      borrower,
-      borrowShares: position?.borrowShares ?? 0n,
-      collateral: position?.collateral ?? 0n,
-    };
+    const params = next() as { loanToken: Address; collateralToken: Address; oracle: Address; irm: Address; lltv: bigint };
+    const positions = borrowers.map((address) => ({ address, ...(next() as { borrowShares: bigint; collateral: bigint }) }));
+    return { name, market, price, borrower, position, params, positions };
   });
+  // the rate Morpho would accrue at, from each market's IRM (Morpho passes it the stored market, as here)
+  const rates = await Promise.all(
+    raw.map(({ params, market }) =>
+      params.irm === "0x0000000000000000000000000000000000000000"
+        ? 0n
+        : (client.readContract({
+            address: params.irm,
+            abi: irmAbi,
+            functionName: "borrowRateView",
+            args: [params, market],
+            blockNumber,
+          }) as Promise<bigint>).catch(() => 0n),
+    ),
+  );
+  const markets = raw.map(({ name, market, price, borrower, position, positions }, i): MarketRead => ({
+    name,
+    lltv: BigInt(dep.markets[name].lltv),
+    totalBorrowAssets: accruedTotalBorrow(market.totalBorrowAssets, rates[i] ?? 0n, timestamp - market.lastUpdate),
+    totalBorrowShares: market.totalBorrowShares,
+    totalSupplyAssets: market.totalSupplyAssets,
+    price,
+    borrower,
+    borrowShares: position?.borrowShares ?? 0n,
+    collateral: position?.collateral ?? 0n,
+    positions: positions.filter((p) => p.borrowShares > 0n || p.collateral > 0n),
+  }));
 
   const thinPool = thinSlots
     ? {

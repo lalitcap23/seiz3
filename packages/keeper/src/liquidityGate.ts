@@ -25,8 +25,23 @@ export type GateResult = { readonly ok: true } | { readonly ok: false; readonly 
  * stops it far sooner, so the chunk counts at most `chunkUnits`. A partial fill is fine: the rest stays over-short,
  * inside the tolerance, and goes into the next round's buy.
  */
-export function buyNeeded(action: Action, state: VaultState, szDecimals: number, chunkUnits: bigint): bigint {
-  if (action.kind === "syncHedge") return state.pendingHedge.delta > 0n ? state.pendingHedge.delta : 0n;
+export function buyNeeded(
+  action: Action,
+  state: VaultState,
+  szDecimals: number,
+  chunkUnits: bigint,
+  /** The vault's live position on HyperCore (precompile), when known: a sync only buys if it's still over-short. */
+  coreSzi: bigint | null = null,
+): bigint {
+  if (action.kind === "syncHedge") {
+    if (state.pendingHedge.delta <= 0n) return 0n;
+    if (coreSzi === null) return state.pendingHedge.delta;
+    // what syncHedge would resend: the gap to −inventory, unless it's within the vault's tolerance (then it just confirms)
+    const held = state.inventory / 10n ** BigInt(18 - szDecimals);
+    const gap = -held - coreSzi; // > 0: still more short than stock
+    const tolerance = held > 0n ? state.risk.maxUnhedged : 0n;
+    return gap > tolerance ? gap : 0n;
+  }
   if (action.kind !== "unwindStep") return 0n;
   const held = state.inventory / 10n ** BigInt(18 - szDecimals);
   const overShort = -held - state.confirmedShort; // > 0: short bigger than the stock

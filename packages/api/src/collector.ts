@@ -1,4 +1,4 @@
-import type { PublicClient } from "viem";
+import type { Address, PublicClient } from "viem";
 import {
   morphoPxToNumber,
   snapshotSchema,
@@ -11,6 +11,7 @@ import { readChain, type ChainRead, type MarketRead } from "./chain.js";
 import type { DeploymentFile } from "@afterbell/shared/node";
 import { panelFromApi, panelFromCore } from "./hyperliquid.js";
 import { LogScanner } from "./logs.js";
+import { buildOperations, type CoreFill } from "./operations.js";
 
 const HISTORY_KEPT = 3600;
 const ORACLE_SCALE = 10n ** 36n;
@@ -26,7 +27,15 @@ export interface CollectorOptions {
   logsClient?: PublicClient;
   /** Minimum gap between log scans: a public logs RPC allows ~100 requests a minute. */
   logScanMs?: number;
+  /** Testers to read positions for besides the deployment's (the API's watch list). */
+  extraBorrowers?: () => readonly Address[];
 }
+
+/** Positions read per market each poll, riskiest shown first. */
+const MAX_BORROWERS = 100;
+/** The operations the snapshot carries (plus LIQ-0): the feed and /try only need the recent ones. */
+const OPERATIONS_KEPT = 40;
+const FILLS_EVERY_MS = 5_000;
 
 const LOGS_RPC_LAG = 2n;
 
@@ -48,6 +57,8 @@ export class Collector {
   }
 
   private nextLogScanAt = 0;
+  private fills: CoreFill[] = [];
+  private nextFillsAt = 0;
 
   get deployment(): DeploymentFile {
     return this.dep;
@@ -78,7 +89,8 @@ export class Collector {
 
   private async poll() {
     try {
-      const chain = await readChain(this.client, this.dep);
+      const chain = await readChain(this.client, this.dep, this.borrowers());
+      await this.refreshFills();
       if (this.latest !== null && chain.blockNumber < BigInt(this.latest.blockNumber)) this.history = []; // anvil revert
       // a separate logs RPC can sit a block behind the main one, and refuses a range past its own head
       await this.scanLogs(chain.blockNumber - LOGS_RPC_LAG);
@@ -99,6 +111,32 @@ export class Collector {
       const message = err instanceof Error ? err.message.split("\n")[0] ?? String(err) : String(err);
       if (message !== this.lastError) console.error(`[api] poll failed: ${message}`);
       this.lastError = message;
+    }
+  }
+
+  /** Deployment borrowers, /try and faucet testers, and everyone with a Borrow event: deduplicated, capped. */
+  private borrowers(): Address[] {
+    const seen = new Map<string, Address>();
+    const add = (a: string) => seen.set(a.toLowerCase(), a as Address);
+    for (const b of this.dep.borrowers) add(b.address);
+    for (const a of this.opts.extraBorrowers?.() ?? []) add(a);
+    for (const a of this.logs.borrowers) add(a);
+    return [...seen.values()].slice(0, MAX_BORROWERS);
+  }
+
+  /** The vault's HyperCore fills (they carry our cloids), every few seconds; a failure keeps the last ones. */
+  private async refreshFills() {
+    if (this.opts.hlInfoUrl === null || Date.now() < this.nextFillsAt) return;
+    this.nextFillsAt = Date.now() + FILLS_EVERY_MS;
+    try {
+      const res = await fetch(this.opts.hlInfoUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "userFills", user: this.dep.vault }),
+      });
+      if (res.ok) this.fills = (await res.json()) as CoreFill[];
+    } catch {
+      // keep the last fills
     }
   }
 
@@ -148,10 +186,15 @@ export class Collector {
       };
     };
 
+    const { operations, opOf } = buildOperations(this.logs.all, this.fills, vault.inventory);
+    const opByTx = new Map(operations.filter((o) => o.txHash !== "").map((o) => [o.txHash.toLowerCase(), o.id]));
+    const kept = operations.length > OPERATIONS_KEPT + 1 ? operations.slice(-OPERATIONS_KEPT) : operations;
+    const zero = operations[0]?.id === "LIQ-0" && kept[0]?.id !== "LIQ-0" ? [operations[0]] : [];
+
     return {
       updatedAt: Date.now(),
       blockNumber: chain.blockNumber.toString(),
-      markets: chain.markets.map((m) => this.market(m)),
+      markets: chain.markets.map((m) => this.market(m, opByTx)),
       vault: {
         address: this.dep.vault,
         inventory: vault.inventory.toString(),
@@ -176,32 +219,51 @@ export class Collector {
       pool: poolOut(chain.pool),
       ...(chain.thinPool ? { thinPool: poolOut(chain.thinPool) } : {}),
       marketOpen: chain.marketOpen,
-      activity: this.logs.activity,
+      activity: this.logs.activity.map((e) => {
+        const opId = opOf.get(e);
+        return opId === undefined ? e : { ...e, opId };
+      }),
+      operations: [...zero, ...kept],
     };
   }
 
   /** Borrow shares → assets rounded up and the health check exactly as Morpho Blue does them. */
-  private market(m: MarketRead): MarketSnapshot {
-    const debt =
-      m.borrowShares === 0n
-        ? 0n
-        : (m.borrowShares * (m.totalBorrowAssets + 1n) + m.totalBorrowShares + 1_000_000n - 1n) /
-          (m.totalBorrowShares + 1_000_000n);
-    const collateralValue = (m.collateral * m.price) / ORACLE_SCALE;
+  private market(m: MarketRead, opByTx: Map<string, string>): MarketSnapshot {
+    const row = (address: string, borrowShares: bigint, collateral: bigint) => {
+      const debt =
+        borrowShares === 0n
+          ? 0n
+          : (borrowShares * (m.totalBorrowAssets + 1n) + m.totalBorrowShares + 1_000_000n - 1n) /
+            (m.totalBorrowShares + 1_000_000n);
+      const collateralValue = (collateral * m.price) / ORACLE_SCALE;
+      return {
+        address,
+        debt: debt.toString(),
+        collateral: collateral.toString(),
+        collateralValue: collateralValue.toString(),
+        ltv: collateralValue === 0n ? (debt > 0n ? Infinity : 0) : Number(debt) / Number(collateralValue),
+        healthy: (collateralValue * m.lltv) / WAD >= debt,
+      };
+    };
+    const borrowers = m.positions
+      .map((p) => row(p.address, p.borrowShares, p.collateral))
+      .sort((a, b) => b.ltv - a.ltv);
+    const demo = row(m.borrower ?? ZERO_ADDRESS, m.borrowShares, m.collateral);
+    // the column's headline: the riskiest open loan, else the deployment's demo borrower
+    const headline = borrowers.find((b) => BigInt(b.debt) > 0n) ?? demo;
     return {
       name: m.name,
       lltv: Number(m.lltv) / 1e18,
       totalBorrow: m.totalBorrowAssets.toString(),
-      totalCollateral: m.collateral.toString(), // Morpho keeps no market total: the demo borrower's collateral
-      borrower: {
-        address: m.borrower ?? ZERO_ADDRESS,
-        debt: debt.toString(),
-        collateral: m.collateral.toString(),
-        ltv: collateralValue === 0n ? 0 : Number(debt) / Number(collateralValue),
-        healthy: (collateralValue * m.lltv) / WAD >= debt,
-      },
+      // Morpho keeps no market total of collateral: the sum over the borrowers we know
+      totalCollateral: borrowers.reduce((s, b) => s + BigInt(b.collateral), 0n).toString(),
+      borrower: { ...headline, ltv: Number.isFinite(headline.ltv) ? headline.ltv : 0 },
       badDebt: (this.logs.badDebt.get(m.name) ?? 0n).toString(),
       oraclePrice: morphoPxToNumber(m.price),
+      borrowers: borrowers.map((b) => ({ ...b, ltv: Number.isFinite(b.ltv) ? b.ltv : 99 })),
+      liquidations: (this.logs.liquidations.get(m.name) ?? [])
+        .slice(-10)
+        .map((l) => ({ ...l, opId: opByTx.get(l.txHash.toLowerCase()) ?? null })),
     };
   }
 }

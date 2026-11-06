@@ -35,6 +35,15 @@ describe("buy-back liquidity gate", () => {
     expect(buyNeeded({ kind: "liquidate" } as never, state, 3, 100n)).toBe(0n);
   });
 
+  it("a sync whose buy-back already filled on HyperCore just confirms: no ask needed", () => {
+    // 0.129 held, 66 bought back: HyperCore already shows −129
+    const state = makeState({ inventory: 129n * NVDAX / 1000n, confirmedShort: -195n, pendingHedge: { delta: 66n }, risk: { maxUnhedged: 500n } });
+    expect(buyNeeded(sync, state, 3, 100n, -129n)).toBe(0n);
+    expect(buyNeeded(sync, state, 3, 100n, -195n)).toBe(0n); // unfilled but within tolerance: confirms too
+    expect(buyNeeded(sync, makeState({ ...state, risk: { maxUnhedged: 50n } }), 3, 100n, -195n)).toBe(66n);
+    expect(buyNeeded(sync, state, 3, 100n, null)).toBe(66n); // HyperCore unreadable: assume the whole buy
+  });
+
   it("passes when asks within oracle + hedgeCap cover the buy, counting every level under the cap", async () => {
     const gate = { hlInfoUrl: "http://hl", coin: "xyz:NVDA", requestFile: null };
     const info = fakeInfo("200", [["201", "0.2"], ["201.9", "0.2"], ["203", "5"]]);

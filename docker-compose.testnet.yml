@@ -86,6 +86,9 @@ services:
       NETWORK: testnet
       BOTS: oracle,pool,mm,alerts
       HOLD_FILE: /app/deployments/BOTS_HOLD
+      # the rebalancer recycles the deployer's own LP shares (it owns the vault); keep ~3 tester liquidations of cash
+      VAULT_FLOOR_USDC: "60"
+      USDC_TOPUP: "30"
 
   web:
     build:
