@@ -1,20 +1,28 @@
 "use client";
 
 import { useSnapshot } from "@/lib/api";
-import { MarketColumns } from "./MarketColumns";
-import { HyperliquidPanel } from "./HyperliquidPanel";
+import { ActivityFeed } from "./ActivityFeed";
 import { HedgeStrip } from "./HedgeStrip";
+import { HyperliquidPanel } from "./HyperliquidPanel";
+import { MarketColumns } from "./MarketColumns";
+import { PresenterBar } from "./PresenterBar";
+import { StatusBar } from "./StatusBar";
 
 export function Dashboard() {
   const { data, isError } = useSnapshot();
   if (!data) return null;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 pb-20">
       {isError && <p className="text-sm text-amber-500">API unreachable, showing last snapshot</p>}
+      <StatusBar data={data} />
       <MarketColumns markets={data.markets} />
-      <HyperliquidPanel data={data.hyperliquid} updatedAt={data.updatedAt} />
-      <HedgeStrip vault={data.vault} />
+      <HedgeStrip vault={data.vault} coreShort={data.hyperliquid?.size ?? null} />
+      <div className="grid gap-4 md:grid-cols-[2fr_3fr]">
+        <HyperliquidPanel data={data.hyperliquid} />
+        <ActivityFeed events={data.activity} szDecimals={data.vault.szDecimals} />
+      </div>
+      <PresenterBar />
     </div>
   );
 }
