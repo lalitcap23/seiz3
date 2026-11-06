@@ -1,0 +1,12 @@
+// ==========================================================================
+// CRE PROJECT SETTINGS FILE — Afterbell
+// ==========================================================================
+staging-settings:
+  rpcs:
+    - chain-name: hyperevm-testnet
+      url: https://rpc.hyperliquid-testnet.xyz/evm
+
+production-settings:
+  rpcs:
+    - chain-name: hyperevm-testnet
+      url: https://rpc.hyperliquid-testnet.xyz/evm
