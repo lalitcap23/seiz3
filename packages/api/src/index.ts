@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
@@ -6,7 +8,7 @@ import { createPublicClient, http, type PublicClient } from "viem";
 import { foundry } from "viem/chains";
 import { chains, HL_INFO_API, rpcUrlFor } from "@afterbell/shared";
 import { env } from "./env.js";
-import { loadDeployment } from "./deployment.js";
+import { loadDeployment } from "@afterbell/shared/node";
 import { Collector } from "./collector.js";
 
 const EXPLORER = {
@@ -73,11 +75,42 @@ app.get("/stream", (c) =>
   }),
 );
 
-app.post("/replay/:step", (c) => {
+const REPLAY_STEPS = ["setup", "reset", "scene", "marketA", "marketB", "marketC", "monday"];
+let replaying: string | null = null;
+
+/** `pnpm replay <step>` in the repo, with this process's env; resolves with its exit status and output tail. */
+function runReplay(step: string): Promise<{ ok: boolean; output: string }> {
+  return new Promise((resolve) => {
+    const child = spawn("pnpm", ["--silent", "--filter", "@afterbell/replay", "start", step], {
+      cwd: fileURLToPath(new URL("../../../", import.meta.url)),
+      env: process.env,
+    });
+    let output = "";
+    const keep = (chunk: Buffer) => {
+      output = (output + chunk.toString()).slice(-4000);
+    };
+    child.stdout.on("data", keep);
+    child.stderr.on("data", keep);
+    child.on("error", (error) => resolve({ ok: false, output: String(error) }));
+    child.on("exit", (code) => resolve({ ok: code === 0, output }));
+  });
+}
+
+/** The presenter's clicker: one demo step at a time, answered when it has finished. */
+app.post("/replay/:step", async (c) => {
   if (c.req.header("authorization") !== `Bearer ${env.REPLAY_TOKEN}`)
     return c.json({ error: "unauthorized" }, 401);
-  // TODO: forward to @afterbell/replay step runner
-  return c.json({ ok: true, step: c.req.param("step") });
+  const step = c.req.param("step");
+  if (!REPLAY_STEPS.includes(step)) return c.json({ error: `unknown step ${step}`, steps: REPLAY_STEPS }, 404);
+  if (replaying !== null) return c.json({ error: `${replaying} is still running` }, 409);
+  replaying = step;
+  try {
+    const { ok, output } = await runReplay(step);
+    if (ok && step === "setup") collector.reload(loadDeployment(env.NETWORK, env.DEPLOYMENTS_PATH)); // new addresses
+    return c.json({ ok, step, output }, ok ? 200 : 500);
+  } finally {
+    replaying = null;
+  }
 });
 
 serve({ fetch: app.fetch, port: env.API_PORT }, (info) =>

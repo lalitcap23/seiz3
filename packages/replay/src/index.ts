@@ -8,5 +8,10 @@ if (!step || !(step in STEPS)) {
 }
 
 console.log(`[replay] ${step}`);
-await STEPS[step]();
-console.log(`[replay] ${step} done`);
+try {
+  await STEPS[step]();
+  console.log(`[replay] ${step} done`);
+} catch (error) {
+  console.error(`[replay] ${step} failed: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`);
+  process.exit(1);
+}

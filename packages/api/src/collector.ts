@@ -8,7 +8,7 @@ import {
   type Snapshot,
 } from "@afterbell/shared";
 import { readChain, type ChainRead, type MarketRead } from "./chain.js";
-import type { ApiDeployment } from "./deployment.js";
+import type { DeploymentFile } from "@afterbell/shared/node";
 import { panelFromApi, panelFromCore } from "./hyperliquid.js";
 import { LogScanner } from "./logs.js";
 
@@ -31,14 +31,22 @@ export class Collector {
   lastError: string | null = null;
   logError: string | null = null;
   private listeners = new Set<(s: Snapshot) => void>();
-  private readonly logs: LogScanner;
+  private logs: LogScanner;
 
   constructor(
     private readonly client: PublicClient,
-    private readonly dep: ApiDeployment,
+    private dep: DeploymentFile,
     private readonly opts: CollectorOptions,
   ) {
     this.logs = new LogScanner(client, dep, opts.fromBlock);
+  }
+
+  /** After the replay's setup redeploys: new addresses, so a fresh feed and history. */
+  reload(dep: DeploymentFile) {
+    this.dep = dep;
+    this.logs = new LogScanner(this.client, dep, this.opts.fromBlock);
+    this.history = [];
+    this.latest = null;
   }
 
   /** Polls back to back, never overlapping: a slow RPC stretches the interval instead of stacking requests. */
@@ -59,6 +67,7 @@ export class Collector {
   private async poll() {
     try {
       const chain = await readChain(this.client, this.dep);
+      if (this.latest !== null && chain.blockNumber < BigInt(this.latest.blockNumber)) this.history = []; // anvil revert
       await this.scanLogs(chain.blockNumber);
       const snapshot = snapshotSchema.parse(this.build(chain, await this.panel(chain)));
       this.latest = snapshot;

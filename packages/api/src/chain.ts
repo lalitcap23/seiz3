@@ -16,7 +16,7 @@ import {
 } from "viem";
 import { afterbellVaultAbi, demoOracleAbi, iMorphoAbi, riskParamsAbi } from "@afterbell/shared/abis";
 import type { MarketName } from "@afterbell/shared";
-import type { ApiDeployment } from "./deployment.js";
+import type { DeploymentFile } from "@afterbell/shared/node";
 
 /** Canonical Multicall3: deployed on HyperEVM mainnet and testnet; scripts/local-stack.sh etches it on anvil. */
 export const MULTICALL3: Address = "0xcA11bde05977b3631167028862bE2a173976CA11";
@@ -107,7 +107,7 @@ function precompile(name: string, address: Address, inputs: string, outputs: str
 }
 
 /** `pools[poolId]` in the PoolManager (v4 StateLibrary: POOLS_SLOT 6, liquidity at +3). */
-function poolSlots(key: ApiDeployment["poolKey"]): { slot0: Hex; liquidity: Hex } {
+function poolSlots(key: DeploymentFile["poolKey"]): { slot0: Hex; liquidity: Hex } {
   const id = keccak256(
     encodeAbiParameters(parseAbiParameters("address, address, uint24, int24, address"), [
       key.currency0,
@@ -122,7 +122,7 @@ function poolSlots(key: ApiDeployment["poolKey"]): { slot0: Hex; liquidity: Hex 
 }
 
 /** Everything the snapshot needs from HyperEVM and HyperCore, in one eth_call at one block. */
-export async function readChain(client: PublicClient, dep: ApiDeployment): Promise<ChainRead> {
+export async function readChain(client: PublicClient, dep: DeploymentFile): Promise<ChainRead> {
   const perpIndex = dep.hypercore.perpAsset >= 100_000 ? dep.hypercore.perpAsset - 100_000 : dep.hypercore.perpAsset;
   const slots = poolSlots(dep.poolKey);
   const borrowerOf = (name: MarketName) => dep.borrowers.find((b) => b.label === name)?.address ?? null;

@@ -2,7 +2,7 @@ import { parseAbiItem, toHex, type AbiEvent, type Address, type PublicClient } f
 import { afterbellVaultAbi, naiveLiquidatorAbi } from "@afterbell/shared/abis";
 import type { ActivityEvent, MarketName } from "@afterbell/shared";
 import { MARKETS } from "./chain.js";
-import type { ApiDeployment } from "./deployment.js";
+import type { DeploymentFile } from "@afterbell/shared/node";
 
 const ACTIVITY: readonly string[] = [
   "LiquidationTaken",
@@ -50,8 +50,8 @@ export class LogScanner {
 
   constructor(
     private readonly client: PublicClient,
-    private readonly dep: ApiDeployment,
-    fromBlock: bigint | null,
+    private readonly dep: DeploymentFile,
+    private readonly fromBlock: bigint | null,
   ) {
     this.next = fromBlock;
     this.marketById = new Map(MARKETS.map((m) => [dep.markets[m].id.toLowerCase(), m]));
@@ -60,6 +60,7 @@ export class LogScanner {
   }
 
   async scan(head: bigint): Promise<void> {
+    if (this.next !== null && this.next > head + 1n) this.reset(); // the chain went back (an anvil revert)
     let from = this.next ?? (head > DEFAULT_LOOKBACK ? head - DEFAULT_LOOKBACK : 0n);
     for (let page = 0; page < PAGES_PER_SCAN && from <= head; page++) {
       const to = from + PAGE - 1n < head ? from + PAGE - 1n : head;
@@ -91,6 +92,13 @@ export class LogScanner {
       args: plain(log.args),
     });
     if (this.activity.length > ACTIVITY_KEPT) this.activity = this.activity.slice(-ACTIVITY_KEPT);
+  }
+
+  private reset(): void {
+    this.activity = [];
+    for (const m of MARKETS) this.badDebt.set(m, 0n);
+    this.times.clear();
+    this.next = this.fromBlock;
   }
 
   private addBadDebt(market: MarketName, amount: bigint): void {
