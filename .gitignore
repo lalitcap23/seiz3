@@ -20,3 +20,9 @@ deployments/test-local.json
 # generated
 packages/shared/src/generated/
 docs/
+# mock foundry project
+mocks/out/
+mocks/cache/
+mocks/broadcast/
+mocks/shared/
+context.md
