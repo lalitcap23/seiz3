@@ -1,0 +1,100 @@
+# The whole testnet demo in one command: risk engine, keeper, API (faucet + presenter replay), bots and the web app.
+#
+#   pnpm testnet:up      # docker compose -f docker-compose.testnet.yml up -d --build
+#   pnpm testnet:logs    # follow every service
+#   pnpm testnet:down
+#
+# Then http://localhost:3000 (dashboard) and http://localhost:3000/try (testers). API on http://localhost:8787.
+#
+# Keys come straight from .env.local: DEPLOYER_PRIVATE_KEY, KEEPER_PRIVATE_KEY, FAUCET_OPERATOR_PRIVATE_KEY,
+# HL_MM_PRIVATE_KEY + HL_MM_ACCOUNT, RPC_URL (private, e.g. Alchemy; the public one rate-limits ~100 requests a minute
+# per IP). Optional there: REPLAY_TOKEN (turns the presenter bar on), ALERT_WEBHOOK_URL.
+# eth_getLogs goes to thirdweb's keyless RPC (LOGS_RPC_URL): Alchemy's HyperEVM testnet doesn't serve it, and the
+# public one rate-limits this IP along with the browser and the wallet.
+# deployments/ is shared with the host: testnet.json, the keeper's KILL switch, the bots' BOTS_HOLD.
+name: afterbell-testnet
+
+x-logs-rpc: &logs-rpc https://998.rpc.thirdweb.com
+
+x-service: &service
+  build:
+    context: .
+    dockerfile: docker/services.Dockerfile
+  image: afterbell-services:testnet
+  restart: unless-stopped
+  env_file: .env.local
+  volumes:
+    - ./deployments:/app/deployments
+
+services:
+  risk-engine:
+    <<: *service
+    command: ["pnpm", "--filter", "@afterbell/keeper", "risk-engine:stub"]
+    environment:
+      RISK_ENGINE_PORT: "8081"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8081/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  keeper:
+    <<: *service
+    depends_on:
+      risk-engine:
+        condition: service_healthy
+    # .env.local names the key KEEPER_PRIVATE_KEY; the keeper reads KEEPER_PK and needs an explicit RPC_URL
+    command:
+      - sh
+      - -c
+      - KEEPER_PK=$$KEEPER_PRIVATE_KEY RPC_URL=$${RPC_URL:-https://rpc.hyperliquid-testnet.xyz/evm} exec pnpm --filter @afterbell/keeper start
+    environment:
+      DEPLOYMENTS_PATH: /app/deployments/testnet.json
+      KILL_SWITCH_FILE: /app/deployments/KILL
+      RISK_ENGINE_URL: http://risk-engine:8081
+      MORPHO_API_ENABLED: "0" # Morpho's API doesn't index our own Morpho copy
+      IDLE_RESERVE_USDC: "1000000000" # never top up: testnet's CoreDepositWallet loses the deposit
+      TICK_MS: "2000"
+      LOGS_RPC_URL: *logs-rpc
+      # /try and the faucet also put testers on deployments/watch.json, read every tick
+      BORROWER_SCAN_PAGES_PER_TICK: "2" # new blocks first, then backfill
+      BORROWER_SCAN_INTERVAL_MS: "4000"
+      # buy-back liquidity gate: no unwind until HyperCore has an ask for the buy-back (the bots post it on request)
+      HL_INFO_API_URL: https://api.hyperliquid-testnet.xyz/info
+      BORROWER_SCAN_FROM_BLOCK: "67922691" # the faucet's deploy: no tester borrowed before it (the deployer is listed)
+
+  api:
+    <<: *service
+    command: ["pnpm", "--filter", "@afterbell/api", "start"]
+    ports: ["8787:8787"]
+    environment:
+      NETWORK: testnet
+      FROM_BLOCK: "67922691" # activity feed from the faucet's deploy: caught up within a minute of a restart
+      LOGS_RPC_URL: *logs-rpc
+      LOG_SCAN_MS: "1000"
+      KILL_SWITCH_FILE: /app/deployments/KILL
+      HOLD_FILE: /app/deployments/BOTS_HOLD
+      # Docker Desktop shows every local request as one IP, so the per-IP limit would allow one drip an hour in
+      # total. The faucet's own once-a-day-per-address limit still holds. Public behind a proxy: 3600 + TRUST_PROXY=1.
+      FAUCET_IP_COOLDOWN_SEC: "0"
+
+  bots:
+    <<: *service
+    depends_on: [api]
+    command: ["pnpm", "--filter", "@afterbell/bots", "start"]
+    environment:
+      NETWORK: testnet
+      BOTS: oracle,pool,mm,alerts
+      HOLD_FILE: /app/deployments/BOTS_HOLD
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8787 # the API as the browser reaches it
+        NEXT_PUBLIC_NETWORK: testnet
+    image: afterbell-web:testnet
+    restart: unless-stopped
+    depends_on: [api]
+    ports: ["3000:3000"]

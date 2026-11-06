@@ -20,6 +20,9 @@ deployments/test-local.json
 deployments/local.json
 deployments/local-chain.json
 deployments/KILL
+deployments/BOTS_HOLD
+deployments/watch.json
+deployments/ASK_REQUEST.json
 
 # generated
 packages/shared/src/generated/

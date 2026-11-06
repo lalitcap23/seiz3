@@ -21,6 +21,17 @@
 #   pnpm --filter @afterbell/keeper risk-engine:stub   # its own terminal
 #   scripts/testnet-stack.sh keeper                    # its own terminal
 #   scripts/testnet-stack.sh crash           # market C oracle 1.4% under HyperCore's: the keeper liquidates and hedges
+#
+# Public testers (after step 3, same vault):
+#   scripts/testnet-stack.sh extras                 # Faucet, swap router, NaiveLiquidator on its own thin pool
+#   scripts/testnet-stack.sh seed deep <usdc>       # the vault's 0.3% pool, centred on HyperCore's oracle
+#   scripts/testnet-stack.sh seed thin <usdc>       # market A's 0.05% weekend pool
+#   scripts/testnet-stack.sh fund-vault <usdc>      # LP deposit: idle USDC pays each liquidation's repayment
+#   scripts/testnet-stack.sh fund-faucet <nvdax> <usdc> <hype>
+#   scripts/testnet-stack.sh fund-naive <usdc>      # covers market A's shortfall when it dumps into the thin pool
+#   scripts/testnet-stack.sh bots                   # oracle follower + pool rebalancer (+ HyperCore market maker
+#                                                   #   with HL_MM_PRIVATE_KEY in .env.local), its own terminal
+#   scripts/testnet-stack.sh release                # after a crash: the oracles follow HyperCore again
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -33,6 +44,7 @@ RPC=${RPC_URL:-https://rpc.hyperliquid-testnet.xyz/evm}
 API=${HL_INFO_API_URL:-https://api.hyperliquid-testnet.xyz/info}
 INFRA_JSON=$ROOT/deployments/testnet-infra.json
 DEP_JSON=$ROOT/deployments/testnet.json
+HOLD_FILE=$ROOT/deployments/BOTS_HOLD # while it exists the oracle and pool bots stand still
 DEPLOYER=$(cast wallet address "$DEPLOYER_PRIVATE_KEY")
 # xyz:NVDA on testnet (info API `perpDexs` / `meta`): mainnet is dex 1, asset 110002
 PERP_DEX_INDEX=65
@@ -139,6 +151,48 @@ sweep() {
   echo "swept spot → xyz; margin shows up in a few blocks (status)"
 }
 
+extras() {
+  # FAUCET_OPERATOR: the API's faucet key (FAUCET_OPERATOR_PRIVATE_KEY), which drips for testers who have no gas yet
+  local op=""
+  [[ -n ${FAUCET_OPERATOR_PRIVATE_KEY:-} ]] && op=$(cast wallet address "$FAUCET_OPERATOR_PRIVATE_KEY")
+  NETWORK=testnet FAUCET_OPERATOR=${op:-0x0000000000000000000000000000000000000000} forge_script TestnetExtras.s.sol
+}
+
+# seed deep|thin <usdc>: adds liquidity around HyperCore's oracle (the pool is initialised there on first use)
+seed() {
+  local kind=${1:?usage: seed deep|thin <usdc>} usdc=${2:?usage: seed deep|thin <usdc>} thin
+  case $kind in deep) thin=false ;; thin) thin=true ;; *) echo "seed deep|thin <usdc>" >&2; exit 1 ;; esac
+  # RANGE_BPS from the caller's env passes through (SeedPool's default: ±3% thin, ±10% deep)
+  NETWORK=testnet THIN=$thin USDC_AMOUNT=$((usdc * 1000000)) PRICE_USD6=$(oracle_usd6) forge_script SeedPool.s.sol
+}
+
+fund_vault() {
+  local amount=$((${1:?usage: fund-vault <usdc>} * 1000000)) vault usdc
+  vault=$(json "$DEP_JSON" vault)
+  usdc=$(json "$DEP_JSON" usdc)
+  send "$usdc" "approve(address,uint256)" "$vault" "$amount"
+  send "$vault" "deposit(uint256,address)" "$amount" "$DEPLOYER"
+  echo "vault idle now $(cast format-units "$(cast call "$usdc" "balanceOf(address)(uint256)" "$vault" --rpc-url "$RPC" |
+    awk '{print $1}')" 6) USDC"
+}
+
+fund_faucet() {
+  local nvdax=${1:?usage: fund-faucet <nvdax> <usdc> <hype>} usdc=${2:?} hype=${3:?} faucet
+  faucet=$(json "$DEP_JSON" faucet)
+  [[ $nvdax != 0 ]] && send "$(json "$DEP_JSON" nvdax)" "mint(address,uint256)" "$faucet" "$(cast to-wei "$nvdax")"
+  [[ $usdc != 0 ]] && send "$(json "$DEP_JSON" usdc)" "transfer(address,uint256)" "$faucet" "$((usdc * 1000000))"
+  [[ $hype != 0 ]] && cast send "$faucet" --value "$(cast to-wei "$hype")" --private-key "$DEPLOYER_PRIVATE_KEY" \
+    --rpc-url "$RPC" >/dev/null
+  echo "faucet $faucet funded: +$nvdax NVDAx, +$usdc USDC, +$hype HYPE"
+}
+
+fund_naive() {
+  local naive
+  naive=$(json "$DEP_JSON" naiveLiquidator)
+  send "$(json "$DEP_JSON" usdc)" "transfer(address,uint256)" "$naive" "$((${1:?usage: fund-naive <usdc>} * 1000000))"
+  echo "NaiveLiquidator $naive funded"
+}
+
 crash() {
   local live target threshold oracle
   live=$(oracle_usd6)
@@ -150,8 +204,23 @@ crash() {
     exit 1
   fi
   oracle=$(json "$DEP_JSON" markets.C_afterbell.oracle)
+  echo crash >"$HOLD_FILE" # or the oracle follower puts it straight back
   send "$oracle" "setPrice(uint256)" "${target}000000000000000000"
   echo "market C oracle \$$(cast format-units "$target" 6), HyperCore \$$(cast format-units "$live" 6): the keeper should liquidate"
+  echo "the bots hold until: scripts/testnet-stack.sh release"
+}
+
+release() {
+  rm -f "$HOLD_FILE"
+  echo "bots released: the oracles follow HyperCore again"
+}
+
+bots() {
+  cd "$ROOT"
+  local which=${BOTS:-oracle,pool,alerts}
+  [[ -n ${HL_MM_PRIVATE_KEY:-} && -z ${BOTS:-} ]] && which=oracle,pool,mm,alerts
+  RPC_URL=$RPC NETWORK=testnet DEPLOYMENTS_PATH=$DEP_JSON HOLD_FILE=$HOLD_FILE BOTS=$which \
+    exec pnpm --filter @afterbell/bots start
 }
 
 status() {
@@ -200,9 +269,17 @@ case "${1:-}" in
   crash) crash ;;
   status) status ;;
   keeper) keeper ;;
+  extras) extras ;;
+  seed) seed "${2:-}" "${3:-}" ;;
+  fund-vault) fund_vault "${2:-}" ;;
+  fund-faucet) fund_faucet "${2:-}" "${3:-}" "${4:-}" ;;
+  fund-naive) fund_naive "${2:-}" ;;
+  bots) bots ;;
+  release) release ;;
   *)
     echo "usage: scripts/testnet-stack.sh big-blocks on|off | infra | deploy | markets | actors | sweep | status |" \
-      "keeper | crash" >&2
+      "keeper | crash | extras | seed deep|thin <usdc> | fund-vault <usdc> |" \
+      "fund-faucet <nvdax> <usdc> <hype> | fund-naive <usdc> | bots | release" >&2
     exit 1
     ;;
 esac

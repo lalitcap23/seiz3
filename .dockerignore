@@ -10,4 +10,7 @@ docs
 .git
 .env
 .env.*
+# package-level env files too (packages/web/.env.local can switch the dashboard to its fixture)
+**/.env
+**/.env.*
 coverage

@@ -23,7 +23,11 @@
     "keeper:replay": "pnpm --filter @afterbell/keeper start --replay",
     "api": "pnpm --filter @afterbell/api dev",
     "web": "pnpm --filter @afterbell/web dev",
-    "replay": "pnpm --filter @afterbell/replay start"
+    "replay": "pnpm --filter @afterbell/replay start",
+    "testnet:up": "docker compose -f docker-compose.testnet.yml up -d --build",
+    "testnet:logs": "docker compose -f docker-compose.testnet.yml logs -f --tail 50",
+    "testnet:down": "docker compose -f docker-compose.testnet.yml down",
+    "testnet:ps": "docker compose -f docker-compose.testnet.yml ps"
   },
   "devDependencies": {
     "prettier": "^3.9.10"
