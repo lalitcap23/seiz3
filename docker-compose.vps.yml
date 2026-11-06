@@ -1,0 +1,26 @@
+# The Base Sepolia stack on the VPS, reachable only through Cloudflare at seiz3.xyz (web) and api.seiz3.xyz (API).
+#
+#   docker compose -f docker-compose.base.yml -f docker-compose.vps.yml up -d
+#
+# No container publishes a port: cloudflared dials out to Cloudflare and forwards each hostname to its container over
+# the compose network, so the server's IP serves nothing. cloudflared/ (git-ignored) holds config.yml and the tunnel's
+# credentials JSON, made with `cloudflared tunnel create`.
+services:
+  api:
+    ports: !reset []
+
+  web:
+    ports: !reset []
+    build:
+      args:
+        NEXT_PUBLIC_API_URL: https://api.seiz3.xyz # baked into the page: the browser calls the API here
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.7
+    restart: unless-stopped
+    # rootless docker: container root is the host's unprivileged user, so it can read the 0600 credentials file
+    user: root
+    command: ["tunnel", "--no-autoupdate", "--config", "/etc/cloudflared/config.yml", "run"]
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+    depends_on: [web, api]

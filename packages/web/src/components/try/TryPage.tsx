@@ -76,12 +76,6 @@ export function TryPage() {
   const { data: me, isRefetchError, dataUpdatedAt } = useMe(address);
   const qc = useQueryClient();
   const { data: snapshot } = useSnapshot();
-  const lastLiquidation =
-    address === null
-      ? undefined
-      : (snapshot?.operations ?? []).findLast(
-          (o) => o.kind === "liquidation" && o.borrower?.toLowerCase() === address.toLowerCase(),
-        );
   // the API's snapshot arrives every second over SSE; when something that touches this wallet changed (a vault event,
   // the vault's stock, this address's collateral or health), re-read the wallet's balances and position right away.
   // Not debt: interest moves it every second, and the browser shares the public RPC's rate limit.
@@ -126,7 +120,7 @@ export function TryPage() {
           <LendCard me={me} />
         </div>
         <div className="lg:col-span-5">
-          <BorrowCard me={me} liquidation={lastLiquidation} />
+          <BorrowCard me={me} />
         </div>
         <div className="flex flex-col gap-2 lg:col-span-4">
           <VaultCard me={me} />
@@ -134,9 +128,7 @@ export function TryPage() {
         </div>
       </div>
       {snapshot && address && (
-        <div id="your-loan" className="scroll-mt-4">
-          <LoanTimeline operations={snapshot.operations ?? []} address={address} szDecimals={dep.hypercore.szDecimals} />
-        </div>
+        <LoanTimeline operations={snapshot.operations ?? []} address={address} szDecimals={dep.hypercore.szDecimals} />
       )}
       <TxStatus />
     </div>

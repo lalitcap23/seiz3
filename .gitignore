@@ -39,3 +39,8 @@ context.md
 deployments/# CRE CLI build scratch
 .cre_build_tmp.js
 deployments/
+
+# VPS access (never commit) + the tunnel credentials docker-compose.vps.yml mounts
+guest_ed25519
+FOR_GUEST.txt
+cloudflared/

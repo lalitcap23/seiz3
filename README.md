@@ -252,6 +252,56 @@ What keeps a round clean on testnet (found by auditing the vault's HyperCore ord
 
 Two consecutive rounds after these changes: 17 of 17 HyperCore orders filled on the first try (the hedge, every buy-back, the hook fill's buy-back), vault flat at the end, no keeper failures.
 
+## Base Sepolia (vault on Base, short on HyperCore)
+
+Uniswap v4 isn't deployed on HyperEVM testnet, so this variant runs the vault where Morpho and Uniswap both have their own deployments: Base Sepolia. Morpho Blue `0xBBBB…FFCb` (no IRM, 77% and 38.5% LLTVs enabled) and the v4 PoolManager `0x05E7…3408` are theirs; nothing of either is redeployed. The short stays on HyperCore testnet (xyz:NVDA), in a hedge account the relayer controls. The HyperEVM contracts, scripts and stacks above are untouched; everything for Base is new and lives beside them.
+
+```
+Base Sepolia                                              HyperCore testnet
+Morpho (theirs) ─liquidate─► AfterbellVaultRemote ─placeOrder─► HyperCoreGateway ─► relayer ─IOC─► hedge account (short)
+Uniswap v4 (theirs) ◄─ AfterbellHookRemote ─┘   ▲                     ▲   ◄── snapshot + ack ──┘          │
+                                                └─ reads (precompile   └── Chainlink CRE: DON-signed snapshot ◄┘
+                                                   shapes) ─────────        of the hedge account, + RiskParams
+```
+
+| Piece | What it is |
+| --- | --- |
+| [`HyperCoreGateway`](contracts/src/remote/HyperCoreGateway.sol) | HyperCore's precompiles + CoreWriter for a chain without them: stores the vault's orders for the relayer, serves the precompile reads from the last snapshot (newer of relayer / CRE wins; older than `maxStateAge` → reads revert, the vault fails closed), and `settled()` once every order is acknowledged |
+| [`AfterbellVaultRemote`](contracts/src/remote/AfterbellVaultRemote.sol) | AfterbellVault with every HyperCore call through the gateway. Same ABI (`AbiParity.t.sol`), so the keeper, API and scripts drive it unchanged. `syncHedge` waits for `settled()`; margin moves revert `NoBridge` (fund the hedge account on HyperCore) |
+| [`AfterbellHookRemote`](contracts/src/remote/AfterbellHookRemote.sol) | AfterbellHook with its two HyperCore reads through the gateway; same flags, events and quote |
+| [`packages/relayer`](packages/relayer) | Places each gateway order on HyperCore from the hedge account (vault's cloid; never twice), posts the account back with the acknowledgement, heartbeats in between. `BACKEND=hyperliquid` or `mock` (MockHyperCore on anvil) |
+| CRE ([`src/gateway.ts`](packages/cre/src/gateway.ts), `base-feed/`) | The same market feed to RiskParams on Base, plus every node's own read of the hedge account → one DON-signed snapshot to the gateway |
+
+`scripts/base-stack.sh local|fork|sepolia <command>` runs it (header has the full list):
+
+- **local**: plain anvil on :8546, Morpho/v4 bytecode set up like Base Sepolia's, MockHyperCore behind the relayer. `up`, `relayer`, `activate`, `keeper`, then `round`: weekend → borrow → crash → liquidate → relayed short → hook fill → relayed buy-back → Monday unwind → flat, each step checked.
+- **fork**: anvil forking Base Sepolia on :8547 (`anvil --fork-url https://sepolia.base.org --port 8547`): the same, against Morpho's and Uniswap's real deployments and Chainlink's real CRE forwarder (`cre --broadcast` lands both reports).
+- **sepolia**: `infra`, `deploy`, `markets`, `seed deep|thin`, `actors`, fund the hedge account on HyperCore + `to-xyz`, `relayer`, `activate`, `keeper`, `bots`, `cre-loop`, then `crash` / `hook-fill` / `status`.
+
+**Try it yourself on Base Sepolia.** `pnpm base:up` runs every service in docker (`docker-compose.base.yml`: risk engine, relayer, keeper, bots, the Chainlink CRE loop every minute, API on :8788, web on :3001; `pnpm base:logs [service]`, `pnpm base:ps`; `pnpm base:down` also takes the market maker's quotes off HyperCore). Each container runs `scripts/base-stack.sh sepolia <service>` with keys from `.env.local`; the CRE container uses the host's `cre login` (`~/.cre`). Without docker, `scripts/base-stack.sh sepolia live` starts the same services in one terminal (logs in `deployments/base-logs/`; Ctrl-C stops all). Run one or the other, never both: two relayers place every HyperCore order twice. Then open `http://localhost:3001/try` with a wallet on Base Sepolia:
+
+1. **Get test tokens**: the faucet sends 1 NVDAx, 500 USDC and gas (the API pays the gas, so a new wallet works).
+2. **Lend USDC** on Morpho market C.
+3. **Deposit NVDAx** and **borrow Max**: right at the 77% LLTV. Market C runs on Morpho's AdaptiveCurveIrm at ~90% utilization (the bots' `util`), so interest tips it over ~15 s after the borrow lands; the Borrow card counts it down. To keep a loan open, borrow less than Max.
+4. **Get liquidated** live: the keeper liquidates you, the vault holds your NVDAx, and the relayer shorts it on HyperCore.
+5. **Watch it unwind** on the dashboard (`http://localhost:3001`): first to a buyer through the v4 hook at its ask, then into the pool, each sale bought back on HyperCore. Every liquidation sells to a buyer through the hook: the keeper waits up to 60 s for one (`BUYER_WINDOW_SEC`), the bots' buyer takes the first fill, and the pool sits just over the hook's ask while the vault holds stock (`POOL_ABOVE_ASK_BPS`), so you can also buy from the vault on the Swap card yourself.
+
+The hedge account's 115 USDC of HyperCore margin covers about 1.3 NVDA of short at the vault's 3× margin check: one faucet drip per liquidation fits; bigger positions need more margin on `0x6011…40cB` (send USDC on HyperCore, then `to-xyz`).
+
+**Live on Base Sepolia** (`deployments/base-sepolia.json`): vault [`0x9557…6c20`](https://sepolia.basescan.org/address/0x9557cd78f2332fb661eBd0017eE057cD4A086c20), hook `0x4fbe…2088`, gateway `0x6db0…d826`, RiskParams `0xce19…0990`, on Morpho `0xBBBB…FFCb` and PoolManager `0x05E7…3408`. Hedge account on HyperCore testnet `0x6011…40cB`. One full round on 2026-11-07:
+
+| Step | Where | Transaction |
+| --- | --- | --- |
+| LP deposit 100 USDC | Base Sepolia | `0x066fab58…9882` |
+| Borrow to 76.8% LTV, market C 1.4% under HyperCore | Base Sepolia | `scripts/base-stack.sh sepolia borrow` / `crash` |
+| Keeper liquidates 1.054 NVDAx | Base Sepolia | `0xe14f8062…5bc9` |
+| Relayer opens the short, 1.054 @ $212.23 (vault's cloid `0x6863…936f`) | HyperCore testnet | `0x64d435dd…e017` |
+| `syncHedge` confirms −1054 through the gateway | Base Sepolia | `0x2a6bf640…5138` |
+| 3 unwind chunks into Uniswap v4, each bought back on HyperCore (0.5 + 0.5 + 0.054 @ $213.51) | both | `0x624cf9fb…`, `0x32e4a03f…`, `0x526f57c6…` |
+| Vault flat; CRE reports every minute (Data Streams status 2, equity book, HyperCore depth, hedge attestation) | Base Sepolia | via forwarder `0x8230…f3e5` |
+
+Tests: `test/remote/` (gateway, the whole round with MockHyperCore behind a test relayer and nothing at the precompile addresses, ABI parity) and `test/fork/BaseSepoliaFork.t.sol` (the same round on Base Sepolia's own Morpho + PoolManager: `BASE_SEPOLIA_RPC_URL=https://sepolia.base.org pnpm contracts:test:fork`). CRE reads RiskParams at the last *finalized* block, so on Base Sepolia the first report lands ~20 min after deploy.
+
 ## API (dashboard data)
 
 `packages/api` reads everything the dashboard shows once a second and serves it as `GET /snapshot`, `GET /stream` (SSE) and `GET /history`:
