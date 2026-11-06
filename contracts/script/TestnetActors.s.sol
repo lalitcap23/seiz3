@@ -45,6 +45,7 @@ contract TestnetActors is Script {
         RiskParams.Params memory p = DeployHelpers.defaultRisk();
         p.maxUnhedged = 500; // 0.5 NVDA: a missed 1 NVDA hedge shows as unhedged; chunks stay over the $10 order minimum
         p.withdrawReserve = 10e6; // the default 500 USDC is more than this demo's whole LP deposit
+        p.cooldownClosedSec = 30; // testers watch their unwind live: 5 min between chunks is too long
         vault.risk().setParams(p);
 
         DemoOracle(market.oracle).setPrice(px * MORPHO_SCALE);

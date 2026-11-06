@@ -11,7 +11,7 @@ export function describe(e: Pick<ActivityEvent, "type" | "args">, szDecimals: nu
   const size = (v: unknown) => Math.abs(coreSize(String(v), szDecimals)).toFixed(3);
   switch (e.type) {
     case "LiquidationTaken":
-      return { text: `Liquidated: bought ${nvdax(String(a.seized)).toFixed(3)} NVDAx, repaid ${usd(String(a.repaid))} to lenders`, tone: "text-sky-500" };
+      return { text: `Liquidated: bought ${nvdax(String(a.seized)).toFixed(4)} NVDAx, repaid ${usd(String(a.repaid), 2)} to lenders`, tone: "text-sky-500" };
     case "HedgeSent":
       return Number(a.delta) < 0
         ? { text: `Short ${size(a.delta)} NVDA sent to HyperCore${Number(a.tries) > 1 ? ` (retry ${a.tries})` : ""}`, tone: "text-violet-500" }
@@ -23,9 +23,9 @@ export function describe(e: Pick<ActivityEvent, "type" | "args">, szDecimals: nu
     case "HedgeStuck":
       return { text: `Hedge stuck: ${size(a.gap)} NVDA unfilled, vault paused`, tone: "text-red-500" };
     case "Unwound":
-      return { text: `Sold ${nvdax(String(a.chunk)).toFixed(3)} NVDAx into Uniswap v4 for ${usd(String(a.usdcOut))}`, tone: "text-sky-500" };
+      return { text: `Sold ${nvdax(String(a.chunk)).toFixed(4)} NVDAx into Uniswap v4 for ${usd(String(a.usdcOut), 2)}`, tone: "text-sky-500" };
     case "MarginMoved":
-      return { text: `${usd(String(a.amount))} margin ${a.toCore ? "to" : "back from"} HyperCore`, tone: "opacity-70" };
+      return { text: `${usd(String(a.amount), 2)} margin ${a.toCore ? "to" : "back from"} HyperCore`, tone: "opacity-70" };
   }
 }
 

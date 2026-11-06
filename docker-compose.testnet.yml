@@ -61,7 +61,7 @@ services:
       BORROWER_SCAN_INTERVAL_MS: "4000"
       # buy-back liquidity gate: no unwind until HyperCore has an ask for the buy-back (the bots post it on request)
       HL_INFO_API_URL: https://api.hyperliquid-testnet.xyz/info
-      BORROWER_SCAN_FROM_BLOCK: "67922691" # the faucet's deploy: no tester borrowed before it (the deployer is listed)
+      BORROWER_SCAN_FROM_BLOCK: "68013191" # the vault's deploy (2026-10-27): no one borrowed before it
 
   api:
     <<: *service
@@ -69,7 +69,7 @@ services:
     ports: ["8787:8787"]
     environment:
       NETWORK: testnet
-      FROM_BLOCK: "67922691" # activity feed from the faucet's deploy: caught up within a minute of a restart
+      FROM_BLOCK: "68013191" # activity feed from the vault's deploy: caught up within a minute of a restart
       LOGS_RPC_URL: *logs-rpc
       LOG_SCAN_MS: "1000"
       KILL_SWITCH_FILE: /app/deployments/KILL
@@ -89,6 +89,10 @@ services:
       # the rebalancer recycles the deployer's own LP shares (it owns the vault); keep ~3 tester liquidations of cash
       VAULT_FLOOR_USDC: "60"
       USDC_TOPUP: "30"
+      # the market maker's account is short ~3 NVDA on ~$32 of margin (liq. ~3% away): its asks only sell the vault
+      # back what its bid bought from the hedge, so allow them down to 3% (default 8%) and keep them just over the need
+      MM_MIN_LIQ_DISTANCE: "0.03"
+      MM_ASK_BUFFER: "0.02"
 
   web:
     build:
