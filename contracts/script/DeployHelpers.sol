@@ -10,6 +10,9 @@ import {RiskParams} from "../src/RiskParams.sol";
 library DeployHelpers {
     uint24 internal constant POOL_FEE = 3000;
     int24 internal constant TICK_SPACING = 60;
+    /// @dev Testnet's separate "weekend" pool for market A's NaiveLiquidator, so the vault's pool can stay deep.
+    uint24 internal constant THIN_POOL_FEE = 500;
+    int24 internal constant THIN_TICK_SPACING = 10;
 
     /// @notice Hackathon defaults for xyz:NVDA (szDecimals 3, ~$217, max 20x). Tune after the pre-kickoff
     ///         spikes (orderDelaySec and transitBlocks especially).
@@ -37,6 +40,13 @@ library DeployHelpers {
     function poolKey(address usdc, address nvdax) internal pure returns (PoolKey memory) {
         (address c0, address c1) = usdc < nvdax ? (usdc, nvdax) : (nvdax, usdc);
         return PoolKey(Currency.wrap(c0), Currency.wrap(c1), POOL_FEE, TICK_SPACING, IHooks(address(0)));
+    }
+
+    /// @notice Same tokens on the 0.05% tier: a different pool id. Only testnet has it (TestnetExtras.s.sol).
+    function thinPoolKey(address usdc, address nvdax) internal pure returns (PoolKey memory key) {
+        key = poolKey(usdc, nvdax);
+        key.fee = THIN_POOL_FEE;
+        key.tickSpacing = THIN_TICK_SPACING;
     }
 
     function deploymentPath(string memory projectRoot, string memory network) internal pure returns (string memory) {

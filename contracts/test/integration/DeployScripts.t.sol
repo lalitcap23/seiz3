@@ -11,6 +11,9 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {Deploy} from "../../script/Deploy.s.sol";
 import {CreateMarkets} from "../../script/CreateMarkets.s.sol";
 import {SeedPool} from "../../script/SeedPool.s.sol";
+import {TestnetExtras} from "../../script/TestnetExtras.s.sol";
+import {NaiveLiquidator} from "../../src/mocks/NaiveLiquidator.sol";
+import {Faucet} from "../../src/mocks/Faucet.sol";
 import {DeployHelpers} from "../../script/DeployHelpers.sol";
 import {AfterbellVault} from "../../src/AfterbellVault.sol";
 import {MockUSDC} from "../utils/AfterbellBase.sol";
@@ -56,6 +59,7 @@ contract DeployScriptsTest is Test {
     }
 
     function test_scripts_deployMarketsAndSeedThePool() public {
+        vm.pauseGasMetering(); // the whole stack takes more than the 30M a test may use
         string memory path = DeployHelpers.deploymentPath(vm.projectRoot(), NETWORK);
 
         // 1. deploy + seed deposit + Core activation
@@ -91,6 +95,27 @@ contract DeployScriptsTest is Test {
         assertGt(
             pm.getLiquidity(PoolIdLibrary.toId(_key(json))), thin * 10, "Monday makers are back (100x USDC, ~3x range)"
         );
+
+        // 4. testnet extras: faucet, swap router, and market A's own thin pool
+        address oldNaive = vm.parseJsonAddress(json, ".naiveLiquidator");
+        vm.setEnv("FAUCET_OPERATOR", vm.toString(address(0xBEEF)));
+        new TestnetExtras().run();
+        json = vm.readFile(path);
+        assertEq(vm.parseJsonAddress(json, ".vault"), address(vault), "earlier fields preserved");
+        assertTrue(Faucet(payable(vm.parseJsonAddress(json, ".faucet"))).operators(address(0xBEEF)));
+        assertGt(vm.parseJsonAddress(json, ".swapRouter").code.length, 0);
+        NaiveLiquidator naive = NaiveLiquidator(vm.parseJsonAddress(json, ".naiveLiquidator"));
+        assertTrue(address(naive) != oldNaive, "replaced");
+        (,, uint24 fee,,) = naive.poolKey();
+        assertEq(fee, DeployHelpers.THIN_POOL_FEE);
+
+        uint128 deep = pm.getLiquidity(PoolIdLibrary.toId(_key(json)));
+        vm.setEnv("THIN", "true");
+        new SeedPool().run();
+        PoolKey memory thinKey =
+            DeployHelpers.thinPoolKey(vm.parseJsonAddress(json, ".usdc"), vm.parseJsonAddress(json, ".nvdax"));
+        assertGt(pm.getLiquidity(PoolIdLibrary.toId(thinKey)), 0, "thin pool seeded");
+        assertEq(pm.getLiquidity(PoolIdLibrary.toId(_key(json))), deep, "the vault's pool untouched");
 
         vm.removeFile(path);
     }

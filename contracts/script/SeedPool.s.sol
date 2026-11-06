@@ -17,7 +17,8 @@ import {UnwindLib} from "../src/libs/UnwindLib.sol";
 import {DeployHelpers} from "./DeployHelpers.sol";
 
 /// @notice Initialises the NVDAx/USDC v4 pool (first run) and adds liquidity through PoolSeeder.
-/// THIN=true seeds weekend conditions; THIN=false adds the "Monday" deep liquidity.
+/// THIN=true seeds weekend conditions; THIN=false adds the "Monday" deep liquidity. With a `thinPoolKey` in the
+/// deployment file (testnet), THIN=true seeds that separate pool instead of the vault's.
 /// The deployer must hold USDC_AMOUNT USDC; NVDAx is minted if the deployer owns MockNVDAx.
 /// VERIFY (spike 6): PoolManager address on HyperEVM.
 ///
@@ -66,9 +67,12 @@ contract SeedPool is Script {
         c.seeder = PoolSeeder(vm.parseJsonAddress(dep, ".poolSeeder"));
         c.usdc = vm.parseJsonAddress(dep, ".usdc");
         c.nvdax = vm.parseJsonAddress(dep, ".nvdax");
-        c.key = DeployHelpers.poolKey(c.usdc, c.nvdax);
-        c.nvdax0 = Currency.unwrap(c.key.currency0) == c.nvdax;
         c.thin = vm.envOr("THIN", true);
+        // testnet keeps weekend depth on its own pool (TestnetExtras.s.sol); locally both live on the vault's pool
+        c.key = c.thin && vm.keyExistsJson(dep, ".thinPoolKey")
+            ? DeployHelpers.thinPoolKey(c.usdc, c.nvdax)
+            : DeployHelpers.poolKey(c.usdc, c.nvdax);
+        c.nvdax0 = Currency.unwrap(c.key.currency0) == c.nvdax;
         c.initPrice = vm.envOr("PRICE_USD6", uint256(217e6));
         c.usdcAmount = vm.envOr("USDC_AMOUNT", c.thin ? uint256(2000e6) : uint256(200_000e6));
         c.rangeBps = vm.envOr("RANGE_BPS", c.thin ? uint256(300) : uint256(1000));
