@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { buyNeeded, checkBuyLiquidity } from "../../src/liquidityGate.js";
+import { buyNeeded, checkBuyLiquidity, keepStandingAsk } from "../../src/liquidityGate.js";
 import { makeState } from "./fixtures.js";
 
 const NVDAX = 10n ** 18n;
@@ -71,5 +71,18 @@ describe("buy-back liquidity gate", () => {
     expect(await checkBuyLiquidity(off, 362n, 3, 100n)).toEqual({ ok: true });
     const on = { hlInfoUrl: "http://hl", coin: "xyz:NVDA", requestFile: null };
     expect(await checkBuyLiquidity(on, 0n, 3, 100n, fakeInfo("1", []))).toEqual({ ok: true });
+  });
+
+  it("keeps an ask standing for one hook fill while the vault holds stock", () => {
+    const requestFile = join(mkdtempSync(join(tmpdir(), "gate-")), "ASK_REQUEST.json");
+    // 40 NVDA held, maxUnhedged 2 NVDA: a buyer can take at most 2 before the next sync
+    const held = makeState({ inventory: 40n * NVDAX, confirmedShort: -40_000n, risk: { maxUnhedged: 2000n } });
+    expect(keepStandingAsk(requestFile, held, 3, 1_000)).toBe(2);
+    expect(JSON.parse(readFileSync(requestFile, "utf8"))).toEqual({ sizeNvda: 2, until: 9_000 });
+    // less than a chunk left: ask for what's left
+    expect(keepStandingAsk(requestFile, makeState({ inventory: 588n * NVDAX / 1000n, risk: { maxUnhedged: 2000n } }), 3)).toBe(0.588);
+    // dust under one Core unit, or no file: nothing to ask for
+    expect(keepStandingAsk(requestFile, makeState({ inventory: 10n ** 14n }), 3)).toBe(0);
+    expect(keepStandingAsk(null, held, 3)).toBe(0);
   });
 });

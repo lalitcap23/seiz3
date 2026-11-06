@@ -146,7 +146,7 @@ app.post("/faucet", async (c) => {
   return result.ok ? c.json(result) : c.json(result, result.status);
 });
 
-const REPLAY_STEPS = ["setup", "reset", "scene", "marketA", "marketB", "marketC", "monday"];
+const REPLAY_STEPS = ["setup", "reset", "scene", "marketA", "marketB", "marketC", "buyers", "monday"];
 let replaying: string | null = null;
 
 /** `pnpm replay <step>` in the repo, with this process's env; resolves with its exit status and output tail. */

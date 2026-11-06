@@ -90,3 +90,25 @@ export async function checkBuyLiquidity(
   }
   return available + 1e-9 >= needNvda ? { ok: true } : { ok: false, reason: "waiting-for-ask", needNvda };
 }
+
+/**
+ * A hook fill (AfterbellHook) sells stock to a buyer inside their swap and sends the buy-back at once, so no gate runs
+ * before it. While the vault holds stock its hook can sell, keep an ask request standing for the most one fill can
+ * take (min(stock, maxUnhedged)), so asks are on the book whenever a buyer comes. Returns the size requested, NVDA.
+ */
+export function keepStandingAsk(
+  requestFile: string | null,
+  state: VaultState,
+  szDecimals: number,
+  nowMs: number = Date.now(),
+): number {
+  if (requestFile === null) return 0;
+  const held = state.inventory / 10n ** BigInt(18 - szDecimals);
+  const units = held < state.risk.maxUnhedged ? held : state.risk.maxUnhedged;
+  if (units <= 0n) return 0;
+  const sizeNvda = Number(units) / 10 ** szDecimals;
+  const tmp = `${requestFile}.tmp`;
+  writeFileSync(tmp, JSON.stringify({ sizeNvda, until: nowMs + REQUEST_TTL_MS }));
+  renameSync(tmp, requestFile);
+  return sizeNvda;
+}

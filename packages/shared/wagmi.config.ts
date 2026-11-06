@@ -16,6 +16,7 @@ export default defineConfig({
       forge: { build: false },
       include: [
         "AfterbellVault.sol/**",
+        "AfterbellHook.sol/**",
         "RiskParams.sol/**",
         "MockNVDAx.sol/**",
         "DemoOracle.sol/**",

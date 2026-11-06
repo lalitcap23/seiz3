@@ -1,14 +1,24 @@
-import { erc20Abi, maxUint256, parseAbi, parseEventLogs, type Address } from "viem";
+import { erc20Abi, maxUint256, parseAbi, parseEventLogs, type Address, type Hex } from "viem";
 import {
+  afterbellHookAbi,
   afterbellVaultAbi,
   demoOracleAbi,
   iMorphoAbi,
   mockNvdAxAbi,
   naiveLiquidatorAbi,
   poolSeederAbi,
+  poolSwapTestAbi,
   riskParamsAbi,
 } from "@afterbell/shared/abis";
-import { sqrtPriceAt, type MarketName } from "@afterbell/shared";
+import {
+  extsloadAbi,
+  poolSlots,
+  priceLimit,
+  slot0SqrtPrice,
+  sqrtPriceAt,
+  usdcPerNvdaxAt,
+  type MarketName,
+} from "@afterbell/shared";
 import {
   borrowerOf,
   bots,
@@ -97,6 +107,19 @@ async function vaultState() {
     read<readonly [bigint, bigint, bigint, number]>(d.vault, afterbellVaultAbi, "pendingHedge"),
   ]);
   return { inventory, confirmedShort, pendingDelta: pending[0] };
+}
+
+/** AfterbellHook.quote(): what one buy can take from the vault right now, at what ask. */
+async function hookQuote() {
+  const hook = dep().hook;
+  if (hook === undefined) throw new Error("no hook in the deployment file: redeploy with Deploy.s.sol");
+  const [capacity, ask, fee, open] = await read<readonly [bigint, bigint, number, boolean]>(hook, afterbellHookAbi, "quote");
+  return { capacity, ask, fee: Number(fee), open };
+}
+
+async function vaultPoolSqrtPrice() {
+  const d = dep();
+  return slot0SqrtPrice(await read<Hex>(d.poolManager, extsloadAbi, "extsload", [poolSlots(d.poolKey).slot0]));
 }
 
 function localOnly(step: string) {
@@ -208,6 +231,66 @@ export const STEPS = {
     throw new Error("market C not hedged within 90 s: check the keeper's log");
   },
 
+  /**
+   * Weekend buyers (between marketC and monday): people buy NVDAx on the vault's pool, and the hook fills them from the
+   * vault's hedged stock at its ask, off the curve. Each fill queues the matching buy-back on HyperCore, and the next one
+   * waits for the keeper's syncHedge. Needs the keeper running, as for marketC.
+   */
+  buyers: async () => {
+    const d = dep();
+    if (d.swapRouter === undefined) throw new Error("no swapRouter in the deployment file: redeploy with Deploy.s.sol");
+    const scale = 10n ** BigInt(18 - d.hypercore.szDecimals);
+    const nvdax0 = d.poolKey.currency0.toLowerCase() === d.nvdax.toLowerCase();
+    const buyDir = !nvdax0; // pay USDC in
+    const swap = (amountSpecified: bigint, limit: bigint) =>
+      send(d.swapRouter!, poolSwapTestAbi, "swap", [
+        d.poolKey,
+        { zeroForOne: buyDir, amountSpecified, sqrtPriceLimitX96: limit },
+        { takeClaims: false, settleUsingBurn: false },
+        "0x",
+      ]);
+    await send(d.usdc, erc20Abi, "approve", [d.swapRouter, maxUint256]);
+
+    let q = await hookQuote();
+    const pool = usdcPerNvdaxAt(await vaultPoolSqrtPrice(), nvdax0);
+    console.log(
+      `vault's ask ${usd(q.ask)} (HyperCore oracle + ${q.open ? "market" : "after-hours"} spread); pool at ${usd(pool)}; ` +
+        `${q.open ? "market" : "after-hours"} fee on the curve ${(q.fee / 10_000).toFixed(2)}%`,
+    );
+    if (pool < q.ask) {
+      // the hook only sells at its ask when the pool trades at or above it: weekend buyers bid the token up first
+      await swap(-(10n ** 30n), sqrtPriceAt((q.ask * 10_050n) / 10_000n, nvdax0));
+      console.log(`weekend buyers bid the pool up to ${usd(usdcPerNvdaxAt(await vaultPoolSqrtPrice(), nvdax0))}`);
+    }
+
+    const fills = env.BUYERS;
+    for (let i = 0; i < fills; i++) {
+      const started = Date.now();
+      while ((q = await hookQuote()).capacity === 0n) {
+        const v = await vaultState();
+        if (v.inventory < scale) return console.log("nothing left to sell: the vault is flat");
+        if (Date.now() - started > 60_000) throw new Error("the hook stayed closed for 60 s: is the keeper syncing?");
+        await sleep(1000);
+      }
+      const before = (await vaultState()).inventory;
+      await swap(q.capacity, priceLimit(await vaultPoolSqrtPrice(), buyDir, 500)); // exact out: one full fill
+      const v = await vaultState();
+      console.log(
+        `buyer ${i + 1}: took ${nvda(before - v.inventory)} from the vault at ${usd(q.ask)}; ` +
+          `buy-back of ${v.pendingDelta} sent to HyperCore`,
+      );
+    }
+    const started = Date.now();
+    while (Date.now() - started < 60_000) {
+      const v = await vaultState();
+      if (v.pendingDelta === 0n) {
+        return console.log(`hedged again: ${nvda(v.inventory)} held, short ${v.confirmedShort} on HyperCore`);
+      }
+      await sleep(1000);
+    }
+    throw new Error("the last buy-back wasn't confirmed within 60 s: check the keeper's log");
+  },
+
   /** Monday: the arbitrage puts the pool back on the oracle, deep liquidity arrives, the market opens, the keeper unwinds. */
   monday: async () => {
     const d = dep();
@@ -221,6 +304,13 @@ export const STEPS = {
     const dumped = d.thinPoolKey ?? d.poolKey;
     await send(d.poolSeeder, poolSeederAbi, "swapToPrice", [dumped, sqrtPriceAt(oracle, nvdaxIsCurrency0)]);
     console.log(`arbitrage: ${d.thinPoolKey ? "thin " : ""}pool back on HyperCore's ${usd(oracle)}`);
+    if (local && d.thinPoolKey) {
+      // locally nothing else arbitrages the vault's own pool (testnet's bots do); bringing it down from Friday's
+      // price sells NVDAx into it, so the owner mints the mock stock that takes
+      await send(d.nvdax, mockNvdAxAbi, "mint", [owner.address, 1_000n * WAD]);
+      await send(d.poolSeeder, poolSeederAbi, "swapToPrice", [d.poolKey, sqrtPriceAt(oracle, nvdaxIsCurrency0)]);
+      console.log(`arbitrage: the vault's pool back on ${usd(oracle)}`);
+    }
 
     const depth = env.MONDAY_USDC ?? (local ? 1_000_000 : undefined);
     if (depth !== undefined) {
@@ -234,7 +324,11 @@ export const STEPS = {
 
     await send(d.riskParams, riskParamsAbi, "setMarketOpen", [true]);
     keeper.release();
-    console.log("market open: the keeper unwinds, selling NVDAx into the pool and buying the short back");
+    console.log(
+      d.hook
+        ? "market open: buyers keep filling from the vault through the hook, and the keeper pushes the rest into the pool"
+        : "market open: the keeper unwinds, selling NVDAx into the pool and buying the short back",
+    );
 
     const started = Date.now();
     let last = -1n;

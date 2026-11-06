@@ -11,7 +11,7 @@ import {
   type Hex,
   type PublicClient,
 } from "viem";
-import { afterbellVaultAbi, demoOracleAbi, iMorphoAbi, riskParamsAbi } from "@afterbell/shared/abis";
+import { afterbellHookAbi, afterbellVaultAbi, demoOracleAbi, iMorphoAbi, riskParamsAbi } from "@afterbell/shared/abis";
 import { accruedTotalBorrow, extsloadAbi, poolSlots, type MarketName } from "@afterbell/shared";
 import type { DeploymentFile } from "@afterbell/shared/node";
 
@@ -83,9 +83,19 @@ export interface ChainRead {
   };
   marketOpen: boolean;
   pool: { sqrtPriceX96: bigint; liquidity: bigint };
-  /** Market A's own weekend pool (testnet); null where it shares the vault's pool. */
+  /** Market A's own weekend pool; null where it shares the vault's pool. */
   thinPool: { sqrtPriceX96: bigint; liquidity: bigint } | null;
+  /** AfterbellHook's quote; null without a hook, or while its HyperCore reads fail. */
+  hook: HookRead | null;
   core: CoreRead | null; // null without HyperCore precompiles
+}
+
+export interface HookRead {
+  capacity: bigint; // NVDAx 18 dec
+  ask: bigint; // USDC 6 dec per NVDAx
+  fee: number; // pips
+  open: boolean;
+  fillsEnabled: boolean;
 }
 
 interface Call {
@@ -188,6 +198,13 @@ export async function readChain(
     calls.push(
       contract("thinPool.slot0", dep.poolManager, extsloadAbi, "extsload", [thinSlots.slot0]),
       contract("thinPool.liquidity", dep.poolManager, extsloadAbi, "extsload", [thinSlots.liquidity]),
+    );
+  }
+
+  if (dep.hook) {
+    calls.push(
+      contract("hook.quote", dep.hook, afterbellHookAbi, "quote"),
+      contract("hook.settings", dep.hook, afterbellHookAbi, "settings"),
     );
   }
 
@@ -294,11 +311,22 @@ export async function readChain(
       }
     : null;
 
+  let hook: HookRead | null = null;
+  if (dep.hook) {
+    const quote = optional() as readonly [bigint, bigint, number, boolean] | null;
+    const settings = optional() as { fillsEnabled: boolean } | null;
+    hook =
+      quote && settings
+        ? { capacity: quote[0], ask: quote[1], fee: Number(quote[2]), open: quote[3], fillsEnabled: settings.fillsEnabled }
+        : null;
+  }
+
   return {
     blockNumber,
     timestamp,
     markets,
     thinPool,
+    hook,
     vault: {
       inventory,
       confirmedShort,

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Snapshot } from "@afterbell/shared";
-import { price, signedPct } from "@/lib/format";
+import { nvdax, price, signedPct } from "@/lib/format";
 import { Label, Tag, type Tone } from "./ui";
 
 /** The vault won't sell into a pool more than this far from HyperCore's price (RiskParams.oracleBandBps). */
@@ -55,6 +55,31 @@ export function StatusBar({ data }: { data: Snapshot }) {
             <Tag tone="down" title="thin pool drained">
               drained
             </Tag>
+          )}
+        </Cell>
+      )}
+      {data.hook && (
+        <Cell label="Vault's ask · v4 hook">
+          <span className="text-[15px] font-medium">{price(data.hook.ask)}</span>
+          <Tag
+            tone={data.hook.open ? "muted" : "warn"}
+            title="LP fee the hook sets for curve swaps: wide after the bell, tight while the market is open"
+          >
+            {data.hook.open ? "market fee" : "after-hours fee"} {(data.hook.fee / 10_000).toFixed(2)}%
+          </Tag>
+          {BigInt(data.hook.capacity) > 0n ? (
+            <span className="text-up" title="what one buy can take from the vault's hedged stock right now">
+              {nvdax(data.hook.capacity).toFixed(3)} for sale
+            </span>
+          ) : (
+            holding && (
+              <span
+                className="text-faint"
+                title="fills wait for the last buy-back to confirm, or for the pool to trade at or above the ask"
+              >
+                waiting
+              </span>
+            )
           )}
         </Cell>
       )}

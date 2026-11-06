@@ -139,6 +139,8 @@ export interface DeploymentInfo {
   /** xyz:NVDA size decimals and order id (deployments hypercore). */
   readonly szDecimals?: number;
   readonly perpAsset?: number;
+  /** AfterbellHook on the vault's pool (deployments hook), if the deployment has one. */
+  readonly hook?: Address;
 }
 
 export interface Config {

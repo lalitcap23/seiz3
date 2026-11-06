@@ -88,6 +88,7 @@ export const activityEventSchema = z.object({
     "HedgeStuck",
     "Unwound",
     "MarginMoved",
+    "InventoryFill", // AfterbellHook: a buyer was filled from the vault's stock
   ]),
   txHash: z.string(),
   blockNumber: bigintString,
@@ -130,6 +131,18 @@ export const operationSchema = z.object({
   /** liquidation: unwound by UNW-n; unwind: sold from LIQ-n. NVDAx 18 dec. */
   lots: z.array(z.object({ opId: z.string(), nvdax: bigintString })),
   held: bigintString, // liquidation: NVDAx of it still in the vault
+  /** unwind: "buyer" when the hook filled a buyer from the vault, "pool" when the keeper pushed a chunk into the curve */
+  soldTo: z.enum(["buyer", "pool"]).nullable().default(null),
+});
+
+/** AfterbellHook's quote: what a buyer of NVDAx gets from the vault right now. */
+export const hookSnapshotSchema = z.object({
+  address: z.string(),
+  ask: z.number(), // USD per NVDAx the vault sells at: Core oracle × (1 + spread)
+  capacity: bigintString, // NVDAx (18 dec) one fill can take now; "0" while fills wait (hedge in flight, pool under the ask, …)
+  fee: z.number(), // LP fee, pips, a curve swap pays now (3000 = 0.30%)
+  open: z.boolean(), // the market-hours flag the spread and fee were picked from
+  fillsEnabled: z.boolean(),
 });
 
 export const snapshotSchema = z.object({
@@ -139,8 +152,10 @@ export const snapshotSchema = z.object({
   vault: vaultSnapshotSchema,
   hyperliquid: hyperliquidPanelSchema.nullable(), // null when info API is unreachable (stale badge)
   pool: z.object({ price: z.number(), sqrtPriceX96: bigintString, liquidity: bigintString }),
-  /** Market A's own weekend pool on testnet; absent where A dumps into the vault's pool (local). */
+  /** Market A's own weekend pool; absent on deployments where A dumps into the vault's pool. */
   thinPool: z.object({ price: z.number(), sqrtPriceX96: bigintString, liquidity: bigintString }).optional(),
+  /** The vault pool's hook; null on deployments without one, or while its HyperCore reads fail. */
+  hook: hookSnapshotSchema.nullable().default(null),
   marketOpen: z.boolean(),
   activity: z.array(activityEventSchema),
   operations: z.array(operationSchema).default([]),
@@ -173,3 +188,4 @@ export type BorrowerRow = z.infer<typeof borrowerRowSchema>;
 export type MarketLiquidation = z.infer<typeof marketLiquidationSchema>;
 export type HedgeOrder = z.infer<typeof hedgeOrderSchema>;
 export type Operation = z.infer<typeof operationSchema>;
+export type HookSnapshot = z.infer<typeof hookSnapshotSchema>;

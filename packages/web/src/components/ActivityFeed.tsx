@@ -1,5 +1,5 @@
 import type { ActivityEvent } from "@afterbell/shared";
-import { coreSize, nvdax, usd } from "@/lib/format";
+import { coreSize, nvdax, price, usd } from "@/lib/format";
 import { OpBadge } from "./OperationCard";
 import { Panel, TxLink } from "./ui";
 
@@ -26,6 +26,11 @@ export function describe(e: Pick<ActivityEvent, "type" | "args">, szDecimals: nu
       return { text: `Sold ${nvdax(String(a.chunk)).toFixed(4)} NVDAx into Uniswap v4 for ${usd(String(a.usdcOut), 2)}`, tone: "text-evm" };
     case "MarginMoved":
       return { text: `${usd(String(a.amount), 2)} margin ${a.toCore ? "to" : "back from"} HyperCore`, tone: "text-muted" };
+    case "InventoryFill":
+      return {
+        text: `A buyer took ${nvdax(String(a.nvdaxOut)).toFixed(4)} NVDAx from the vault at ${price(Number(a.ask) / 1e6)} (v4 hook${a.marketOpen ? "" : ", after hours"})`,
+        tone: "text-up",
+      };
   }
 }
 
@@ -36,6 +41,7 @@ const KIND: Record<ActivityEvent["type"], string> = {
   HedgeStuck: "stuck",
   Unwound: "unwind",
   MarginMoved: "margin",
+  InventoryFill: "fill",
 };
 
 export function ActivityFeed({

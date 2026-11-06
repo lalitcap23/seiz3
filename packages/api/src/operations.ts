@@ -13,7 +13,8 @@ export interface CoreFill {
 const DUST = 10n ** 12n;
 
 /**
- * Liquidations and unwinds, numbered and linked. Each LiquidationTaken or Unwound transaction starts an operation; the
+ * Liquidations and unwinds, numbered and linked. Each LiquidationTaken or Unwound transaction starts an operation (an
+ * Unwound with the hook's InventoryFill beside it is a buyer filled from the vault, otherwise a keeper push); the
  * vault keeps one hedge in flight at a time, so every HedgeSent and HedgeConfirmed after it, until it's confirmed,
  * belongs to it (retries included). Unwinds sell the vault's stock first in, first out, so each one says whose stock
  * it sold, and each liquidation how much of it is still held. Stock already there before the first scanned block is
@@ -73,6 +74,8 @@ export function buildOperations(
         confirmed: null,
         lots: [],
         held: "0",
+        // the hook's InventoryFill rides in the same transaction as the vault's Unwound
+        soldTo: isLiq ? null : group.some((e) => e.type === "InventoryFill") ? "buyer" : "pool",
       };
       operations.push(current);
     }
@@ -107,6 +110,7 @@ export function buildOperations(
       confirmed: null,
       lots: [],
       held: "0",
+      soldTo: null,
     };
     operations.unshift(zero);
     lots.push({ op: zero, left: before });

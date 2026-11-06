@@ -75,6 +75,8 @@ const deploymentSchema = z.object({
   /** Block the markets were created in: where borrower discovery starts. */
   startBlock: z.union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)]).optional(),
   hypercore: z.object({ szDecimals: z.number().int().min(0).max(6), perpAsset: z.number().int().positive() }).optional(),
+  /** AfterbellHook on the vault's pool: buyers can take stock between ticks. */
+  hook: addressSchema.optional(),
 });
 
 function toBig(value: number | string): bigint {
@@ -110,6 +112,7 @@ function parseDeploymentsJson(raw: string): DeploymentInfo {
     })),
     ...(d.startBlock === undefined ? {} : { startBlock: toBig(d.startBlock) }),
     ...(d.hypercore === undefined ? {} : { szDecimals: d.hypercore.szDecimals, perpAsset: d.hypercore.perpAsset }),
+    ...(d.hook === undefined ? {} : { hook: d.hook as Address }),
   };
 }
 

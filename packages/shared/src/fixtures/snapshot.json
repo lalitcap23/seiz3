@@ -74,6 +74,14 @@
     "explorerUrl": "https://app.hyperliquid.xyz/explorer/address/0x00000000000000000000000000000000000000ab"
   },
   "pool": { "price": 151.2, "sqrtPriceX96": "0", "liquidity": "0" },
+  "hook": {
+    "address": "0x0000000000000000000000000000000000002088",
+    "ask": 202.02,
+    "capacity": "0",
+    "fee": 10000,
+    "open": false,
+    "fillsEnabled": true
+  },
   "marketOpen": false,
   "activity": [
     {

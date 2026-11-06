@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { parseAbiItem, toHex, type AbiEvent, type Address, type PublicClient } from "viem";
-import { afterbellVaultAbi, naiveLiquidatorAbi } from "@afterbell/shared/abis";
+import { afterbellHookAbi, afterbellVaultAbi, naiveLiquidatorAbi } from "@afterbell/shared/abis";
 import type { ActivityEvent, MarketLiquidation, MarketName } from "@afterbell/shared";
 import { MARKETS } from "./chain.js";
 import type { DeploymentFile } from "@afterbell/shared/node";
@@ -12,6 +12,7 @@ const ACTIVITY: readonly string[] = [
   "HedgeStuck",
   "Unwound",
   "MarginMoved",
+  "InventoryFill",
 ] satisfies ActivityEvent["type"][];
 const ACTIVITY_KEPT = 50;
 
@@ -24,6 +25,10 @@ const morphoBorrow = parseAbiItem(
 const vaultEvents = afterbellVaultAbi.filter(
   (item): item is Extract<(typeof afterbellVaultAbi)[number], { type: "event" }> =>
     item.type === "event" && ACTIVITY.includes(item.name),
+);
+const hookFill = afterbellHookAbi.find(
+  (item): item is Extract<(typeof afterbellHookAbi)[number], { type: "event"; name: "InventoryFill" }> =>
+    item.type === "event" && item.name === "InventoryFill",
 );
 const shortfall = naiveLiquidatorAbi.find(
   (item): item is Extract<(typeof naiveLiquidatorAbi)[number], { type: "event"; name: "Shortfall" }> =>
@@ -135,8 +140,19 @@ export class LogScanner {
   ) {
     this.logsClient = opts.logsClient ?? client;
     this.marketById = new Map(MARKETS.map((m) => [dep.markets[m].id.toLowerCase(), m]));
-    this.addresses = [dep.vault, dep.morpho, ...(dep.naiveLiquidator ? [dep.naiveLiquidator] : [])];
-    this.events = [...vaultEvents, morphoLiquidate, morphoBorrow, ...(shortfall ? [shortfall] : [])] as AbiEvent[];
+    this.addresses = [
+      dep.vault,
+      dep.morpho,
+      ...(dep.naiveLiquidator ? [dep.naiveLiquidator] : []),
+      ...(dep.hook ? [dep.hook] : []),
+    ];
+    this.events = [
+      ...vaultEvents,
+      morphoLiquidate,
+      morphoBorrow,
+      ...(shortfall ? [shortfall] : []),
+      ...(dep.hook && hookFill ? [hookFill] : []),
+    ] as AbiEvent[];
   }
 
   /** Reads the new blocks up to `head` (the snapshot's block). Throws when neither RPC answers; the next poll retries. */

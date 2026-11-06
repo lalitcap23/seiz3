@@ -23,6 +23,8 @@ export const deploymentSchema = z.object({
   nvdax: address,
   riskParams: address,
   vault: address,
+  /** AfterbellHook on the vault's pool (Deploy.s.sol since the hook); absent in older deployments. */
+  hook: address.optional(),
   poolKey: z.object({
     currency0: address,
     currency1: address,

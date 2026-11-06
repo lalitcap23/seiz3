@@ -107,7 +107,9 @@ export function OperationCard({ op, szDecimals, me }: { op: Operation; szDecimal
           <Step lane="EVM" tone="text-evm" tx={op.txHash}>
             {liq
               ? `Bought ${nvda(op.nvdax)} NVDAx of collateral from Morpho, repaying ${usd(op.usdc, 2)} of debt`
-              : `Sold ${nvda(op.nvdax)} NVDAx into Uniswap v4 for ${usd(op.usdc, 2)}`}
+              : op.soldTo === "buyer"
+                ? `A buyer took ${nvda(op.nvdax)} NVDAx from the vault through the v4 hook for ${usd(op.usdc, 2)}`
+                : `Sold ${nvda(op.nvdax)} NVDAx into Uniswap v4 for ${usd(op.usdc, 2)}`}
           </Step>
         )}
         {op.orders.map((o) => (

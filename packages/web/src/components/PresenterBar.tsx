@@ -9,7 +9,8 @@ const STEPS = [
   { step: "marketA", label: "2 · Market A" },
   { step: "marketB", label: "3 · Market B" },
   { step: "marketC", label: "4 · Market C" },
-  { step: "monday", label: "5 · Monday" },
+  { step: "buyers", label: "5 · Weekend buyers" },
+  { step: "monday", label: "6 · Monday" },
 ] as const;
 
 const noSubscribe = () => () => {};

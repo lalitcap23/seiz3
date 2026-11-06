@@ -222,6 +222,17 @@ export class Collector {
       hyperliquid,
       pool: poolOut(chain.pool),
       ...(chain.thinPool ? { thinPool: poolOut(chain.thinPool) } : {}),
+      hook:
+        chain.hook && this.dep.hook
+          ? {
+              address: this.dep.hook,
+              ask: Number(chain.hook.ask) / 1e6,
+              capacity: chain.hook.capacity.toString(),
+              fee: chain.hook.fee,
+              open: chain.hook.open,
+              fillsEnabled: chain.hook.fillsEnabled,
+            }
+          : null,
       marketOpen: chain.marketOpen,
       activity: this.logs.activity.map((e) => {
         const opId = opOf.get(e);

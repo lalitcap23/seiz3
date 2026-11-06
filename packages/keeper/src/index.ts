@@ -29,7 +29,7 @@ import {
 } from "./riskEngine.js";
 import { readState } from "./state.js";
 import { readWatchlist } from "./watchlist.js";
-import { buyNeeded, checkBuyLiquidity } from "./liquidityGate.js";
+import { buyNeeded, checkBuyLiquidity, keepStandingAsk } from "./liquidityGate.js";
 import { StartupError, runStartup } from "./startup.js";
 import type { Action, Address, Config, RiskDecision, ScanReport, VaultState } from "./types.js";
 
@@ -166,6 +166,10 @@ async function main(): Promise<void> {
       logger.line({ event: "chain-rewound", from: lastBlock, to: state.blockNumber });
     }
     lastBlock = state.blockNumber;
+    // buyers can take stock through the pool's hook at any moment, and that buy-back can't wait for an ask
+    if (cfg.deployments.hook && cfg.hlInfoUrl !== null) {
+      keepStandingAsk(cfg.askRequestFile, state, cfg.deployments.szDecimals ?? 3, nowMs);
+    }
     // The vault times orders with block.timestamp, so the keeper decides on the same clock.
     const now = state.blockTimestamp;
     telemetry.tick(state.blockNumber, state);

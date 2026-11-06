@@ -31,6 +31,7 @@ export const env = z
     DROP_USD: z.coerce.number().positive().default(205), // the scene's weekend gap on the local stack
     MONDAY_USDC: z.coerce.number().positive().optional(), // deep liquidity monday adds (local default 1M)
     SHOW_NVDAX: z.coerce.number().positive().default(0.5), // testnet setup: collateral per demo borrower
+    BUYERS: z.coerce.number().int().positive().default(3), // buyers step: hook fills to play
     KILL_SWITCH_FILE: z.string().default(`${DEPLOYMENTS_DIR}KILL`),
     HOLD_FILE: z.string().default(`${DEPLOYMENTS_DIR}BOTS_HOLD`), // packages/bots stands still while it exists
   })
