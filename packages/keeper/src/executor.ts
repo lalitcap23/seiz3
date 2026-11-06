@@ -1,8 +1,8 @@
 import type { PublicClient, WalletClient } from "viem";
 import type { PrivateKeyAccount } from "viem/accounts";
+import { afterbellVaultAbi, iMorphoAbi } from "@afterbell/shared/abis";
 
-import { vaultAbi } from "./abi.js";
-import { guards } from "./riskCalc.js";
+import { PAUSE_HEDGE, PAUSE_MARGIN, guards } from "./riskCalc.js";
 import { describeError } from "./riskEngine.js";
 import type { SingleNonceManager } from "./clients.js";
 import type { Action, Config, VaultState } from "./types.js";
@@ -91,7 +91,7 @@ async function simulate(
   cfg: Config,
   account: PrivateKeyAccount,
 ) {
-  const base = { address: cfg.vault, abi: vaultAbi, account } as const;
+  const base = { address: cfg.vault, abi: afterbellVaultAbi, account } as const;
   switch (action.kind) {
     case "syncHedge":
       return publicClient.simulateContract({ ...base, functionName: "syncHedge" });
@@ -109,12 +109,20 @@ async function simulate(
         functionName: "withdrawMargin",
         args: [action.amount],
       });
-    case "liquidate":
+    case "liquidate": {
+      // The vault takes Morpho's MarketParams, not the id; Morpho maps one to the other.
+      const params = await publicClient.readContract({
+        address: cfg.morpho,
+        abi: iMorphoAbi,
+        functionName: "idToMarketParams",
+        args: [action.marketId],
+      });
       return publicClient.simulateContract({
         ...base,
         functionName: "liquidate",
-        args: [action.marketId, action.borrower, action.seizedAssets],
+        args: [params, action.borrower, action.seizedAssets],
       });
+    }
   }
 }
 
@@ -126,6 +134,19 @@ export interface VerifyResult {
 export function verifyEffect(before: VaultState, after: VaultState, action: Action): VerifyResult {
   switch (action.kind) {
     case "syncHedge": {
+      if (before.pendingHedge.delta === 0n) {
+        // a sync sent to clear a pause; it may also have found drift and re-sent a hedge
+        const unpaused = (after.pauseFlags & (PAUSE_HEDGE | PAUSE_MARGIN)) === 0n;
+        const resent = after.pendingHedge.delta !== 0n;
+        return {
+          ok: unpaused || resent,
+          detail: unpaused
+            ? "pause cleared"
+            : resent
+              ? `drift found, hedge ${after.pendingHedge.delta} sent`
+              : `still paused (flags ${after.pauseFlags})`,
+        };
+      }
       const cleared = after.pendingHedge.delta === 0n;
       const retried = after.pendingHedge.tries > before.pendingHedge.tries;
       return {
@@ -153,18 +174,15 @@ export function verifyEffect(before: VaultState, after: VaultState, action: Acti
       };
     }
     case "topUpMargin": {
-      const moved = after.coreUsdc > before.coreUsdc;
+      // The EVM side is immediate; HyperCore credits the deposit from the next block.
+      const moved = after.idleUsdc < before.idleUsdc;
       return {
         ok: moved,
-        detail: `coreUsdc ${before.coreUsdc} -> ${after.coreUsdc}`,
+        detail: `idleUsdc ${before.idleUsdc} -> ${after.idleUsdc}`,
       };
     }
-    case "withdrawMargin": {
-      const moved = after.coreUsdc < before.coreUsdc;
-      return {
-        ok: moved,
-        detail: `coreUsdc ${before.coreUsdc} -> ${after.coreUsdc}`,
-      };
-    }
+    case "withdrawMargin":
+      // Only CoreWriter actions: nothing changes on the EVM until HyperCore runs them after this block.
+      return { ok: true, detail: `sent; coreUsdc ${after.coreUsdc} until HyperCore pays out` };
   }
 }

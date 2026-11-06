@@ -43,13 +43,23 @@ describe("startup: validateConfig", () => {
     );
   });
 
-  it("rejects negative reserves and cooldowns", () => {
+  it("rejects negative reserves", () => {
     expect(validateConfig(makeConfig({ idleReserveUsdc: -1n }))).toContain(
-      "USDC reserves and topUpUsdc must be >= 0",
+      "USDC reserves must be >= 0",
     );
-    expect(validateConfig(makeConfig({ unwindCooldownOpenSec: -1n }))).toContain(
-      "unwindCooldownOpenSec must be >= 0",
+    expect(validateConfig(makeConfig({ coreReserveUsdc: -1n }))).toContain(
+      "USDC reserves must be >= 0",
     );
+  });
+
+  it("rejects a missing market id (env-only config without MARKET_ID)", () => {
+    const cfg = makeConfig();
+    const errors = validateConfig({
+      ...cfg,
+      deployments: { ...cfg.deployments, marketId: `0x${"0".repeat(64)}` },
+    });
+
+    expect(errors).toContain("marketId is required");
   });
 
   it("rejects the vault being used as the Morpho address", () => {

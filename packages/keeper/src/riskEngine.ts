@@ -1,3 +1,4 @@
+import { BaseError, ContractFunctionRevertedError } from "viem";
 import { z } from "zod";
 import type {
   Action,
@@ -50,13 +51,13 @@ export function buildRiskRequest(
       pendingHedge: state.pendingHedge,
       inventory: state.inventory,
       confirmedShort: state.confirmedShort,
-      paused: state.paused,
+      pauseFlags: state.pauseFlags,
       lastUnwindAt: state.lastUnwindAt,
       idleUsdc: state.idleUsdc,
       coreUsdc: state.coreUsdc,
-      marginRatioBps: state.marginRatioBps,
+      marginShortfall: state.marginShortfall,
+      marginTarget: state.marginTarget,
       marketOpen: state.marketOpen,
-      poolPriceInBand: state.poolPriceInBand,
       risk: state.risk,
       market: state.market,
       borrowers: scan.borrowers,
@@ -64,8 +65,6 @@ export function buildRiskRequest(
     keeper: {
       idleReserveUsdc: cfg.idleReserveUsdc,
       coreReserveUsdc: cfg.coreReserveUsdc,
-      topUpUsdc: cfg.topUpUsdc,
-      unwindCooldownOpenSec: cfg.unwindCooldownOpenSec,
       now,
     },
   };
@@ -81,8 +80,6 @@ export function policyConfigFromRequest(request: RiskRequest): PolicyConfig {
   return {
     idleReserveUsdc: request.keeper.idleReserveUsdc,
     coreReserveUsdc: request.keeper.coreReserveUsdc,
-    topUpUsdc: request.keeper.topUpUsdc,
-    unwindCooldownOpenSec: request.keeper.unwindCooldownOpenSec,
   };
 }
 
@@ -90,17 +87,18 @@ export function stateFromRiskRequest(request: RiskRequest): VaultState {
   const s = request.state;
   return {
     blockNumber: request.blockNumber,
+    blockTimestamp: request.keeper.now,
     vault: request.vault,
     pendingHedge: s.pendingHedge,
     inventory: s.inventory,
     confirmedShort: s.confirmedShort,
-    paused: s.paused,
+    pauseFlags: s.pauseFlags,
     lastUnwindAt: s.lastUnwindAt,
     idleUsdc: s.idleUsdc,
     coreUsdc: s.coreUsdc,
-    marginRatioBps: s.marginRatioBps,
+    marginShortfall: s.marginShortfall,
+    marginTarget: s.marginTarget,
     marketOpen: s.marketOpen,
-    poolPriceInBand: s.poolPriceInBand,
     risk: s.risk,
     market: s.market,
     borrowers: s.borrowers.map((b) => ({
@@ -241,7 +239,14 @@ export function describeError(error: unknown): string {
   if (error instanceof Error) {
     const maybe = error as Error & { shortMessage?: string; cause?: unknown };
     if (typeof maybe.shortMessage === "string" && maybe.shortMessage.length > 0) {
-      return maybe.shortMessage;
+      // viem's short message drops the decoded custom error (e.g. OracleBand); keep it in the log
+      const revert = error instanceof BaseError
+        ? error.walk((e) => e instanceof ContractFunctionRevertedError)
+        : null;
+      const name = revert instanceof ContractFunctionRevertedError
+        ? (revert.data?.errorName ?? revert.reason ?? revert.signature)
+        : undefined;
+      return name === undefined ? maybe.shortMessage : `${maybe.shortMessage} [${name}]`;
     }
     if (maybe.cause !== undefined && maybe.cause instanceof Error) {
       return `${error.message}: ${maybe.cause.message}`;
@@ -267,14 +272,20 @@ const pendingSchema = z.object({
 
 const riskSchema = z.object({
   maxLiquidation: zUint,
-  hedgeLeverage: zUint,
+  maxUnhedged: zUint,
+  leverage: zUint,
   marginBufferBps: zUint,
-  maxUnhedgedBps: zUint,
-  maxSlippageBps: zUint,
+  minDiscountBps: zUint,
   oracleBandBps: zUint,
+  hedgeCapBps: zUint,
+  maxSlippageBps: zUint,
   maxTries: zUint,
   orderDelaySec: zUint,
-  unwindCooldownSec: zUint,
+  cooldownOpenSec: zUint,
+  cooldownClosedSec: zUint,
+  withdrawReserve: zUint,
+  maxImpactBps: zUint,
+  transitBlocks: zUint,
 });
 
 const marketSchema = z.object({ id: zHex32, price: zUint, lltv: zUint });
@@ -302,13 +313,13 @@ const requestSchema = z.object({
     pendingHedge: pendingSchema,
     inventory: zUint,
     confirmedShort: zBig,
-    paused: z.boolean(),
+    pauseFlags: zUint,
     lastUnwindAt: zUint,
     idleUsdc: zUint,
     coreUsdc: zUint,
-    marginRatioBps: zUint,
+    marginShortfall: zUint,
+    marginTarget: zUint,
     marketOpen: z.boolean(),
-    poolPriceInBand: z.boolean(),
     risk: riskSchema,
     market: marketSchema,
     borrowers: z.array(reportSchema),
@@ -316,8 +327,6 @@ const requestSchema = z.object({
   keeper: z.object({
     idleReserveUsdc: zUint,
     coreReserveUsdc: zUint,
-    topUpUsdc: zUint,
-    unwindCooldownOpenSec: zUint,
     now: zUint,
   }),
 });

@@ -37,16 +37,17 @@ export class Logger {
 export function stateSnapshot(state: VaultState): Record<string, unknown> {
   return {
     blockNumber: state.blockNumber,
+    blockTimestamp: state.blockTimestamp,
     pendingHedge: state.pendingHedge,
     inventory: state.inventory,
     confirmedShort: state.confirmedShort,
-    paused: state.paused,
+    pauseFlags: state.pauseFlags,
     lastUnwindAt: state.lastUnwindAt,
     idleUsdc: state.idleUsdc,
     coreUsdc: state.coreUsdc,
-    marginRatioBps: state.marginRatioBps,
+    marginShortfall: state.marginShortfall,
+    marginTarget: state.marginTarget,
     marketOpen: state.marketOpen,
-    poolPriceInBand: state.poolPriceInBand,
     risk: state.risk,
     market: state.market,
     borrowers: state.borrowers,
@@ -127,7 +128,7 @@ export class Telemetry {
   tick(blockNumber: bigint | null, state: VaultState | null = null): void {
     this.lastTickAtMs = Date.now();
     this.lastTickBlock = blockNumber;
-    if (state !== null) this.paused = state.paused;
+    if (state !== null) this.paused = state.pauseFlags !== 0n;
   }
 
   setSnapshot(value: string | null): void {

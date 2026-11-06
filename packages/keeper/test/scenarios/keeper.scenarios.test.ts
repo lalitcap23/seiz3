@@ -1,73 +1,113 @@
-import { createWalletClient, http, parseAbi, type WalletClient } from "viem";
-import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
+/**
+ * The keeper against the real contracts on a local anvil: real Morpho Blue and Uniswap v4 bytecode, the
+ * AfterbellVault the deploy scripts put there, and MockHyperCore copied over the HyperCore precompiles.
+ *
+ *   anvil
+ *   scripts/local-stack.sh up
+ *   pnpm --filter @afterbell/keeper risk-engine:stub
+ *   pnpm --filter @afterbell/keeper test:scenarios
+ *
+ * Don't run `local-stack.sh tick` alongside: HyperCore moves only when a test calls `coreProcess()`.
+ * Every test starts from the same anvil snapshot.
+ */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import { createTestClient, createWalletClient, http, type Abi, type Address, type Hex } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { demoOracleAbi, riskParamsAbi } from "@afterbell/shared/abis";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { makeChain, makeClients, SingleNonceManager, type KeeperClients } from "../../src/clients.js";
+import { makeChain, makeClients, SingleNonceManager } from "../../src/clients.js";
 import { loadConfig } from "../../src/config.js";
-import { executeAction, type ExecuteResult } from "../../src/executor.js";
+import { executeAction, verifyEffect, type ExecuteResult } from "../../src/executor.js";
+import { PAUSE_HEDGE } from "../../src/riskCalc.js";
 import { RiskEngineClient, buildRiskRequest } from "../../src/riskEngine.js";
 import { readState } from "../../src/state.js";
-import type { Action, Config, RiskDecision, ScanReport, VaultState } from "../../src/types.js";
+import type { Action, ActionKind, Config, RiskDecision, ScanReport, VaultState } from "../../src/types.js";
 
-const USDC = 1_000_000n;
-const NVDAX = 10n ** 18n;
-const MAX_LIQUIDATION = 1000n * USDC;
+const root = (path: string) => fileURLToPath(new URL(`../../../../${path}`, import.meta.url));
+const json = (path: string) => JSON.parse(readFileSync(root(path), "utf8")) as Record<string, unknown>;
 
-const cfg = loadConfig();
-const keeper: KeeperClients = makeClients(cfg);
-const riskEngine = new RiskEngineClient(cfg);
+// anvil's default accounts, as scripts/local-stack.sh uses them
+const DEPLOYER_PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const KEEPER_PK = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+const TICKER_PK = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";
 
-const deployerPk = (process.env["DEPLOYER_PK"] ?? "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80") as `0x${string}`;
-const deployer: PrivateKeyAccount = privateKeyToAccount(deployerPk);
-const admin: WalletClient = createWalletClient({
-  account: deployer,
-  chain: makeChain(cfg),
-  transport: http(cfg.rpcUrl),
+const cfg = loadConfig({
+  RPC_URL: "http://127.0.0.1:8545",
+  KEEPER_PK,
+  DEPLOYMENTS_PATH: root("deployments/local.json"),
+  RISK_ENGINE_URL: "http://127.0.0.1:8081",
+  ...process.env,
 });
+const keeper = makeClients(cfg);
+const riskEngine = new RiskEngineClient(cfg);
+const chain = makeChain(cfg);
+const transport = http(cfg.rpcUrl);
+const admin = createWalletClient({ account: privateKeyToAccount(DEPLOYER_PK), chain, transport });
+const ticker = createWalletClient({ account: privateKeyToAccount(TICKER_PK), chain, transport });
+const anvil = createTestClient({ mode: "anvil", chain, transport });
 
-const vaultAdminAbi = parseAbi([
-  "function setState(uint256 inventory, int64 confirmedShort, uint256 idleUsdc, uint256 coreUsdc, uint256 marginRatioBps, bool paused)",
-  "function clearPending()",
-  "function setPending(int64 delta, uint64 sentBlock, uint64 sentAt, uint8 tries)",
-  "function setRevertAll(bool revert)",
-  "function setFillMode(uint8 mode)",
-  "function setPoolPriceInBand(bool inBand)",
-  "function setMarketOpen(bool open)",
-  "function setLastUnwindAt(uint64 timestamp)",
-  "function setPaused(bool paused)",
-  "function setRisk((uint256 maxLiquidation, uint32 hedgeLeverage, uint32 marginBufferBps, uint32 maxUnhedgedBps, uint32 maxSlippageBps, uint32 oracleBandBps, uint8 maxTries, uint32 orderDelaySec, uint32 unwindCooldownSec))",
-]);
+const deployment = json("deployments/local.json") as {
+  riskParams: Address;
+  markets: { C_afterbell: { oracle: Address } };
+  borrowers: { address: Address }[];
+};
+const core = (json("deployments/local-chain.json") as { core: Address }).core;
+// The mock's test knobs, straight from forge's build output.
+const coreAbi = (json("contracts/out/MockHyperCore.sol/MockHyperCore.json") as { abi: Abi }).abi;
+const borrower = deployment.borrowers[0]?.address as Address;
 
-const morphoAdminAbi = parseAbi([
-  "function setBorrower(address borrower, uint256 collateral, uint256 borrowAssets)",
-]);
+const NVDAX = 10n ** 18n;
+const START_USD6 = 217_000000n;
+const DROP_USD6 = 205_000000n; // the 76% LTV borrower is at 80.4%, over the 77% LLTV
 
-const borrowerA = cfg.deployments.borrowers[0]?.address;
-const borrowerB = cfg.deployments.borrowers[1]?.address;
-if (borrowerA === undefined || borrowerB === undefined) {
-  throw new Error("deployments.json must include two borrowers");
+async function mined(hash: Hex): Promise<void> {
+  const receipt = await keeper.publicClient.waitForTransactionReceipt({ hash });
+  if (receipt.status !== "success") throw new Error(`admin tx ${hash} reverted`);
 }
 
-const defaultRisk = {
-  maxLiquidation: MAX_LIQUIDATION,
-  hedgeLeverage: 3,
-  marginBufferBps: 1000,
-  maxUnhedgedBps: 200,
-  maxSlippageBps: 100,
-  oracleBandBps: 200,
-  maxTries: 3,
-  orderDelaySec: 0,
-  unwindCooldownSec: 10,
-};
+async function coreCall(functionName: string, args: readonly unknown[] = []): Promise<void> {
+  // Fixed gas: processBlock runs each action in try/catch, so an estimated limit just big enough for
+  // the outer call starves the actions and they're dropped silently.
+  await mined(
+    await ticker.writeContract({ address: core, abi: coreAbi, functionName, args, gas: 5_000_000n }),
+  );
+}
 
-async function adminWrite(
-  address: `0x${string}`,
-  abi: typeof vaultAdminAbi | typeof morphoAdminAbi,
-  functionName: string,
-  args: readonly unknown[],
-): Promise<void> {
-  const hash = await admin.writeContract({ address, abi, functionName, args } as never);
-  await keeper.publicClient.waitForTransactionReceipt({ hash });
+/** HyperCore runs the deposits and CoreWriter actions queued in blocks mined so far. */
+async function coreProcess(): Promise<void> {
+  await coreCall("processBlock");
+}
+
+/** Moves market C's lending oracle and HyperCore's oracle/mark (raw px, 3 decimals at szDecimals 3). */
+async function setPrice(usd6: bigint, { coreToo = true } = {}): Promise<void> {
+  await mined(
+    await admin.writeContract({
+      address: deployment.markets.C_afterbell.oracle,
+      abi: demoOracleAbi,
+      functionName: "setPrice",
+      args: [usd6 * 10n ** 18n],
+    }),
+  );
+  if (coreToo) await coreCall("setPx", [usd6 / 1000n]);
+}
+
+async function setRisk(patch: Partial<{ leverage: number; maxLiquidation: bigint }>): Promise<void> {
+  const current = await keeper.publicClient.readContract({
+    address: deployment.riskParams,
+    abi: riskParamsAbi,
+    functionName: "get",
+  });
+  await mined(
+    await admin.writeContract({
+      address: deployment.riskParams,
+      abi: riskParamsAbi,
+      functionName: "setParams",
+      args: [{ ...current, ...patch }],
+    }),
+  );
 }
 
 async function control(body: Record<string, unknown>): Promise<void> {
@@ -79,48 +119,31 @@ async function control(body: Record<string, unknown>): Promise<void> {
   if (!response.ok) throw new Error(`control failed: ${response.status} ${await response.text()}`);
 }
 
-async function clearControl(): Promise<void> {
-  await fetch(`${cfg.riskEngineUrl}/control`, { method: "DELETE" });
-}
-
-async function reset(): Promise<void> {
-  await clearControl();
-  await adminWrite(cfg.vault, vaultAdminAbi, "clearPending", []);
-  await adminWrite(cfg.vault, vaultAdminAbi, "setRevertAll", [false]);
-  await adminWrite(cfg.vault, vaultAdminAbi, "setFillMode", [2]);
-  await adminWrite(cfg.vault, vaultAdminAbi, "setPoolPriceInBand", [true]);
-  await adminWrite(cfg.vault, vaultAdminAbi, "setMarketOpen", [true]);
-  await adminWrite(cfg.vault, vaultAdminAbi, "setLastUnwindAt", [0n]);
-  await adminWrite(cfg.vault, vaultAdminAbi, "setRisk", [defaultRisk]);
-  await adminWrite(cfg.vault, vaultAdminAbi, "setState", [
-    0n,
-    0n,
-    100_000n * USDC,
-    0n,
-    5000n,
-    false,
-  ]);
-  await adminWrite(cfg.morpho, morphoAdminAbi, "setBorrower", [borrowerA, 10n * NVDAX, 900n * USDC]);
-  await adminWrite(cfg.morpho, morphoAdminAbi, "setBorrower", [borrowerB, 10n * NVDAX, 700n * USDC]);
-}
-
 async function snapshot(): Promise<{ state: VaultState; scan: ScanReport }> {
-  return readState(keeper.publicClient, cfg, BigInt(Math.floor(Date.now() / 1000)));
+  return readState(keeper.publicClient, cfg);
 }
 
 async function decide(): Promise<{ state: VaultState; scan: ScanReport; decision: RiskDecision }> {
   const snap = await snapshot();
-  const now = BigInt(Math.floor(Date.now() / 1000));
-  const result = await riskEngine.decide(buildRiskRequest(snap.state, snap.scan, now, cfg));
+  const result = await riskEngine.decide(buildRiskRequest(snap.state, snap.scan, snap.state.blockTimestamp, cfg));
   if (!result.ok) throw new Error(`risk engine failed: ${result.error}`);
   return { ...snap, decision: result.decision };
 }
 
-async function execute(
-  action: Action,
-  state: VaultState,
-  config: Config = cfg,
-): Promise<ExecuteResult> {
+/** Polls until the engine picks `kind` (blocks keep coming every second), e.g. a sync after the order delay. */
+async function decideUntil(kind: ActionKind, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const next = await decide();
+    if (next.decision.action?.kind === kind) return next;
+    if (Date.now() > deadline) {
+      throw new Error(`no ${kind} decision; last: ${next.decision.reason}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+}
+
+async function execute(action: Action, state: VaultState, config: Config = cfg): Promise<ExecuteResult> {
   return executeAction({
     publicClient: keeper.publicClient,
     walletClient: keeper.walletClient,
@@ -129,139 +152,180 @@ async function execute(
     cfg: config,
     action,
     state,
-    now: BigInt(Math.floor(Date.now() / 1000)),
+    now: state.blockTimestamp,
   });
 }
 
-async function waitOneBlock(after: bigint): Promise<void> {
-  for (let i = 0; i < 30; i += 1) {
-    if ((await keeper.publicClient.getBlockNumber()) > after) {
-      await sleep(200);
-      return;
-    }
-    await sleep(500);
-  }
-  throw new Error(`no block after ${after}`);
+/** One full keeper step: decide, send, re-read and check the effect, as the tick loop does. */
+async function step(kind: ActionKind): Promise<VaultState> {
+  const { state, decision } = await decideUntil(kind);
+  const action = decision.action as Action;
+  const result = await execute(action, state);
+  expect(result, JSON.stringify(result, (_k, v: unknown) => (typeof v === "bigint" ? `${v}` : v))).toMatchObject({
+    status: "sent",
+  });
+  const after = (await snapshot()).state;
+  expect(verifyEffect(state, after, action)).toMatchObject({ ok: true });
+  return after;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+/** Core size units for an 18-dec NVDAx amount (szDecimals 3). */
+const coreUnits = (nvdax: bigint) => nvdax / 10n ** 15n;
 
+let snapshotId: Hex | undefined;
 beforeEach(async () => {
-  await reset();
-}, 60_000);
+  await fetch(`${cfg.riskEngineUrl}/control`, { method: "DELETE" });
+  if (snapshotId !== undefined) await anvil.revert({ id: snapshotId });
+  snapshotId = await anvil.snapshot();
+}, 30_000);
 
-describe("keeper scenarios", () => {
-  it("liquidates, hedges, unwinds, then idles", async () => {
-    const first = await decide();
-    expect(first.decision.action).toMatchObject({ kind: "liquidate", borrower: borrowerA });
+describe("keeper scenarios on the real contracts", () => {
+  it("starts idle, holding the margin the next liquidation needs", async () => {
+    const { state, decision } = await decide();
 
-    const liquidation = await execute(first.decision.action as Action, first.state);
-    expect(liquidation.status).toBe("sent");
+    expect(state.borrowers.map((b) => b.address)).toEqual([borrower]);
+    expect(state.coreUsdc).toBeGreaterThanOrEqual(state.marginTarget);
+    expect(decision).toEqual({ action: null, reason: "core-at-reserve" });
+  });
 
-    let snap = await snapshot();
-    expect(snap.state.inventory).toBe(10n * NVDAX);
-    expect(snap.state.pendingHedge.delta).not.toBe(0n);
+  it("liquidates, hedges, waits out a pool/oracle gap, then unwinds against the short", async () => {
+    await setPrice(DROP_USD6);
 
-    await waitOneBlock(snap.state.blockNumber);
-    const sync = await decide();
-    expect(sync.decision.action).toEqual({ kind: "syncHedge" });
-    expect((await execute(sync.decision.action as Action, sync.state)).status).toBe("sent");
+    // 1. buy the collateral; the vault sends the IOC short in the same tx
+    const taken = await step("liquidate");
+    expect(taken.inventory).toBeGreaterThan(80n * NVDAX); // capped by the debt, not the 100 NVDAx posted
+    expect(taken.pendingHedge.delta).toBe(-coreUnits(taken.inventory));
 
-    snap = await snapshot();
-    expect(snap.state.pendingHedge.delta).toBe(0n);
-    expect(snap.state.inventory).toBe(10n * NVDAX);
+    // 2. HyperCore fills it; a sync in a later block confirms the short
+    await coreProcess();
+    const hedged = await step("syncHedge");
+    expect(hedged.pendingHedge.delta).toBe(0n);
+    expect(hedged.confirmedShort).toBe(-coreUnits(taken.inventory));
 
-    const unwind = await decide();
-    expect(unwind.decision.action).toEqual({ kind: "unwindStep" });
-    expect((await execute(unwind.decision.action as Action, unwind.state)).status).toBe("sent");
+    // 3. the pool still trades at $217: unwindStep reverts on the band check, and the keeper only skips it
+    const blocked = await decideUntil("unwindStep");
+    const skip = await execute(blocked.decision.action as Action, blocked.state);
+    expect(skip.status).toBe("simulation-reverted");
+    expect(skip).toMatchObject({ reason: expect.stringContaining("OracleBand") });
 
-    snap = await snapshot();
-    expect(snap.state.inventory).toBe(0n);
-    expect(snap.state.confirmedShort).toBe(0n);
-    expect((await decide()).decision.action).toBeNull();
-  }, 30_000);
+    // 4. Monday: the price is back. Sell one chunk, then the reduce-only buy brings the short down with it
+    await setPrice(START_USD6);
+    const unwound = await step("unwindStep");
+    expect(unwound.inventory).toBeLessThan(taken.inventory);
+    expect(unwound.pendingHedge.delta).toBeGreaterThan(0n);
+    await coreProcess();
+    const rehedged = await step("syncHedge");
+    expect(rehedged.confirmedShort).toBe(-coreUnits(unwound.inventory));
+  }, 90_000);
 
-  it("retries a partial hedge before a full fill", async () => {
-    await adminWrite(cfg.vault, vaultAdminAbi, "setFillMode", [1]);
-    const block = await keeper.publicClient.getBlockNumber();
-    await adminWrite(cfg.vault, vaultAdminAbi, "setPending", [-1000n, block - 1n, 0n, 0n]);
+  it("re-sends the rest of a partial fill until the short matches", async () => {
+    await coreCall("setFillBps", [5000]);
+    await setPrice(DROP_USD6);
+    const taken = await step("liquidate");
 
-    const partial = await decide();
-    expect(partial.decision.action).toEqual({ kind: "syncHedge" });
-    expect((await execute(partial.decision.action as Action, partial.state)).status).toBe("sent");
+    await coreProcess();
+    const retried = await step("syncHedge");
+    expect(retried.pendingHedge.tries).toBe(2n);
+    expect(retried.pendingHedge.delta).toBeLessThan(0n);
 
-    let snap = await snapshot();
-    expect(snap.state.pendingHedge.delta).toBe(-500n);
-    expect(snap.state.pendingHedge.tries).toBe(1n);
+    await coreCall("setFillBps", [10_000]);
+    await coreProcess();
+    const hedged = await step("syncHedge");
+    expect(hedged.pendingHedge.delta).toBe(0n);
+    expect(hedged.confirmedShort).toBe(-coreUnits(taken.inventory));
+  }, 90_000);
 
-    await adminWrite(cfg.vault, vaultAdminAbi, "setFillMode", [2]);
-    await waitOneBlock(snap.state.blockNumber);
-    const full = await decide();
-    expect(full.decision.action).toEqual({ kind: "syncHedge" });
-    expect((await execute(full.decision.action as Action, full.state)).status).toBe("sent");
+  it("pauses after maxTries dropped orders, refuses new risk, and recovers on its own", async () => {
+    await coreCall("setDropNext", [100]);
+    await setPrice(DROP_USD6);
+    await step("liquidate");
 
-    snap = await snapshot();
-    expect(snap.state.pendingHedge.delta).toBe(0n);
-    expect(snap.state.confirmedShort).toBe(-1000n);
-  }, 30_000);
-
-  it("pauses after max retries and refuses new risk", async () => {
-    await adminWrite(cfg.vault, vaultAdminAbi, "setRisk", [{ ...defaultRisk, maxTries: 2 }]);
-    await adminWrite(cfg.vault, vaultAdminAbi, "setFillMode", [0]);
-    const block = await keeper.publicClient.getBlockNumber();
-    await adminWrite(cfg.vault, vaultAdminAbi, "setPending", [-1000n, block - 1n, 0n, 1n]);
-
-    const retry = await decide();
-    expect(retry.decision.action).toEqual({ kind: "syncHedge" });
-    expect((await execute(retry.decision.action as Action, retry.state)).status).toBe("sent");
-
-    const stuck = await snapshot();
-    expect(stuck.state.paused).toBe(true);
-    expect(stuck.state.pendingHedge.delta).toBe(-1000n);
+    for (let i = 0; i < 3; i += 1) {
+      await coreProcess();
+      await step("syncHedge");
+    }
+    const stuck = (await snapshot()).state;
+    expect(stuck.pauseFlags & PAUSE_HEDGE).toBe(PAUSE_HEDGE);
+    expect(stuck.pendingHedge.delta).toBeLessThan(0n);
 
     await control({
       forceDecision: {
         action: {
           kind: "liquidate",
           marketId: cfg.deployments.marketId,
-          borrower: borrowerA,
-          seizedAssets: (10n * NVDAX).toString(),
+          borrower,
+          seizedAssets: (1n * NVDAX).toString(),
         },
         reason: "forced-liquidate",
       },
     });
     const forced = await decide();
-    const result = await execute(forced.decision.action as Action, forced.state);
-    expect(result).toEqual({ status: "skipped", reason: "vault-paused" });
-  }, 30_000);
+    expect(await execute(forced.decision.action as Action, forced.state)).toEqual({
+      status: "skipped",
+      reason: "vault-paused",
+    });
+    await fetch(`${cfg.riskEngineUrl}/control`, { method: "DELETE" });
 
-  it("surfaces a risk-engine 500 after retries", async () => {
-    await control({ failMode: "500" });
-    const snap = await snapshot();
-    const now = BigInt(Math.floor(Date.now() / 1000));
-    const result = await riskEngine.decide(buildRiskRequest(snap.state, snap.scan, now, cfg));
+    await coreCall("setDropNext", [0]);
+    await coreProcess();
+    const recovered = await step("syncHedge");
+    expect(recovered.pauseFlags).toBe(0n);
+    expect(recovered.pendingHedge.delta).toBe(0n);
+  }, 120_000);
 
-    expect(result).toMatchObject({ ok: false, retriable: true, attempts: cfg.riskEngineRetries + 1 });
-  }, 30_000);
+  it("tops up margin when the vault reports a shortfall", async () => {
+    await setPrice(DROP_USD6);
+    await step("liquidate");
+    await coreProcess();
+    await step("syncHedge");
 
-  it("rejects malformed risk-engine JSON without retrying", async () => {
-    await control({ failMode: "garbage" });
-    const snap = await snapshot();
-    const now = BigInt(Math.floor(Date.now() / 1000));
-    const result = await riskEngine.decide(buildRiskRequest(snap.state, snap.scan, now, cfg));
+    await setRisk({ leverage: 1 }); // the same short now needs 3× the margin
+    const short = (await snapshot()).state;
+    expect(short.marginShortfall).toBeGreaterThan(0n);
 
-    expect(result).toMatchObject({ ok: false, retriable: false, attempts: 1 });
-  }, 30_000);
+    const { decision } = await decideUntil("topUpMargin");
+    expect(decision.action).toEqual({
+      kind: "topUpMargin",
+      amount: short.marginShortfall + short.marginShortfall / 10n,
+    });
+    await step("topUpMargin");
+    await coreProcess();
+    expect((await snapshot()).state.marginShortfall).toBe(0n);
+  }, 90_000);
 
-  it("honours a forced no-action decision", async () => {
-    await control({ forceDecision: { action: null, reason: "forced-idle" } });
-    const snap = await decide();
+  it("sends back Core margin above what the next liquidation needs", async () => {
+    await setRisk({ maxLiquidation: 20_000_000000n }); // marginTarget 20k → 8k
+    const before = (await snapshot()).state;
+    const excess = before.coreUsdc - before.marginTarget - cfg.coreReserveUsdc;
 
-    expect(snap.decision.action).toBeNull();
-    expect(snap.decision.reason).toBe("forced-idle");
-  }, 30_000);
+    const { decision } = await decideUntil("withdrawMargin");
+    expect(decision.action).toEqual({ kind: "withdrawMargin", amount: excess });
+    await step("withdrawMargin");
+    await coreProcess();
+
+    const after = (await snapshot()).state;
+    expect(after.coreUsdc).toBe(before.coreUsdc - excess);
+    expect(after.idleUsdc).toBe(before.idleUsdc + excess);
+  }, 90_000);
+
+  it("skips a liquidation the vault would refuse: lending oracle out of band with HyperCore", async () => {
+    await setPrice(DROP_USD6, { coreToo: false });
+    const { state, decision } = await decideUntil("liquidate");
+
+    const result = await execute(decision.action as Action, state);
+    expect(result.status).toBe("simulation-reverted");
+    expect(result).toMatchObject({ reason: expect.stringContaining("OracleBand") });
+    expect((await snapshot()).state.inventory).toBe(0n);
+  }, 60_000);
+
+  it("simulates but does not send in dry-run mode", async () => {
+    await setPrice(DROP_USD6);
+    const { state, decision } = await decideUntil("liquidate");
+
+    const result = await execute(decision.action as Action, state, { ...cfg, dryRun: true });
+    expect(result.status).toBe("dry-run");
+    expect((await snapshot()).state.inventory).toBe(0n);
+  }, 60_000);
 
   it("skips an unsafe forced liquidation of a healthy borrower", async () => {
     await control({
@@ -269,124 +333,40 @@ describe("keeper scenarios", () => {
         action: {
           kind: "liquidate",
           marketId: cfg.deployments.marketId,
-          borrower: borrowerB,
-          seizedAssets: (10n * NVDAX).toString(),
+          borrower,
+          seizedAssets: (1n * NVDAX).toString(),
         },
         reason: "forced-healthy",
       },
     });
     const forced = await decide();
-    const result = await execute(forced.decision.action as Action, forced.state);
 
-    expect(result).toEqual({ status: "skipped", reason: "borrower-healthy" });
+    expect(await execute(forced.decision.action as Action, forced.state)).toEqual({
+      status: "skipped",
+      reason: "borrower-healthy",
+    });
   }, 30_000);
 
-  it("simulates but does not send in dry-run mode", async () => {
-    await control({
-      forceDecision: {
-        action: {
-          kind: "liquidate",
-          marketId: cfg.deployments.marketId,
-          borrower: borrowerA,
-          seizedAssets: (10n * NVDAX).toString(),
-        },
-        reason: "forced-liquidate",
-      },
-    });
-    const forced = await decide();
-    const before = forced.state;
-    const result = await execute(forced.decision.action as Action, before, { ...cfg, dryRun: true });
-
-    expect(result.status).toBe("dry-run");
-    const after = await snapshot();
-    expect(after.state.inventory).toBe(before.inventory);
-    expect(after.state.pendingHedge.delta).toBe(0n);
-  }, 30_000);
-
-  it("tops up margin when the buffer is breached", async () => {
-    await adminWrite(cfg.vault, vaultAdminAbi, "setState", [
-      0n,
-      0n,
-      100_000n * USDC,
-      0n,
-      500n,
-      false,
-    ]);
-
-    const decision = await decide();
-    expect(decision.decision.action).toMatchObject({
-      kind: "topUpMargin",
-      amount: cfg.topUpUsdc,
-    });
-    expect((await execute(decision.decision.action as Action, decision.state)).status).toBe("sent");
-
+  it("surfaces a risk-engine 500 after retries", async () => {
+    await control({ failMode: "500" });
     const snap = await snapshot();
-    expect(snap.state.coreUsdc).toBe(cfg.topUpUsdc);
-    expect(snap.state.marginRatioBps).toBe(1500n);
+    const result = await riskEngine.decide(buildRiskRequest(snap.state, snap.scan, snap.state.blockTimestamp, cfg));
+
+    expect(result).toMatchObject({ ok: false, retriable: true, attempts: cfg.riskEngineRetries + 1 });
   }, 30_000);
 
-  it("withdraws margin down to the configured reserve", async () => {
-    await adminWrite(cfg.morpho, morphoAdminAbi, "setBorrower", [borrowerA, 10n * NVDAX, 0n]);
-    await adminWrite(cfg.vault, vaultAdminAbi, "setState", [
-      0n,
-      0n,
-      100_000n * USDC,
-      5000n * USDC,
-      5000n,
-      false,
-    ]);
-
-    const decision = await decide();
-    expect(decision.decision.action).toMatchObject({
-      kind: "withdrawMargin",
-      amount: 5000n * USDC - cfg.coreReserveUsdc,
-    });
-    expect((await execute(decision.decision.action as Action, decision.state)).status).toBe("sent");
-
+  it("rejects malformed risk-engine JSON without retrying", async () => {
+    await control({ failMode: "garbage" });
     const snap = await snapshot();
-    expect(snap.state.coreUsdc).toBe(cfg.coreReserveUsdc);
+    const result = await riskEngine.decide(buildRiskRequest(snap.state, snap.scan, snap.state.blockTimestamp, cfg));
+
+    expect(result).toMatchObject({ ok: false, retriable: false, attempts: 1 });
   }, 30_000);
 
-  it("blocks unwinds while the pool is out of band", async () => {
-    await adminWrite(cfg.morpho, morphoAdminAbi, "setBorrower", [borrowerA, 10n * NVDAX, 0n]);
-    await adminWrite(cfg.vault, vaultAdminAbi, "setState", [
-      10n * NVDAX,
-      -1000n,
-      100_000n * USDC,
-      0n,
-      5000n,
-      false,
-    ]);
-    await adminWrite(cfg.vault, vaultAdminAbi, "setPoolPriceInBand", [false]);
+  it("honours a forced no-action decision", async () => {
+    await control({ forceDecision: { action: null, reason: "forced-idle" } });
+    const { decision } = await decide();
 
-    const blocked = await decide();
-    expect(blocked.decision.action).toBeNull();
-    expect(blocked.decision.reason).toBe("pool-out-of-band");
-
-    await adminWrite(cfg.vault, vaultAdminAbi, "setPoolPriceInBand", [true]);
-    const allowed = await decide();
-    expect(allowed.decision.action).toEqual({ kind: "unwindStep" });
-  }, 30_000);
-
-  it("waits for a later block and the order delay", async () => {
-    const block = await keeper.publicClient.getBlockNumber();
-    await adminWrite(cfg.vault, vaultAdminAbi, "setPending", [
-      -1000n,
-      block + 100n,
-      BigInt(Math.floor(Date.now() / 1000)),
-      1n,
-    ]);
-
-    const sameBlock = await decide();
-    expect(sameBlock.decision).toEqual({ action: null, reason: "wait-same-block" });
-
-    await adminWrite(cfg.vault, vaultAdminAbi, "setPending", [
-      -1000n,
-      block - 1n,
-      BigInt(Math.floor(Date.now() / 1000)) + 3600n,
-      1n,
-    ]);
-    const delayed = await decide();
-    expect(delayed.decision).toEqual({ action: null, reason: "wait-order-delay" });
+    expect(decision).toEqual({ action: null, reason: "forced-idle" });
   }, 30_000);
 });

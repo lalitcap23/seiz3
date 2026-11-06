@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { verifyEffect } from "../../src/executor.js";
+import { PAUSE_MARGIN } from "../../src/riskCalc.js";
 import type { Action } from "../../src/types.js";
 import {
   BORROWER_A,
@@ -10,6 +11,13 @@ import {
   makeState,
   readyPending,
 } from "./fixtures.js";
+
+const liquidation: Action = {
+  kind: "liquidate",
+  marketId: MARKET_ID,
+  borrower: BORROWER_A,
+  seizedAssets: NVDAX(9),
+};
 
 describe("executor: verifyEffect", () => {
   it("accepts a cleared pending hedge", () => {
@@ -37,30 +45,28 @@ describe("executor: verifyEffect", () => {
     expect(verifyEffect(state, state, { kind: "syncHedge" }).ok).toBe(false);
   });
 
+  it("accepts a sync that clears a margin pause, and flags one that doesn't", () => {
+    const before = makeState({ pauseFlags: PAUSE_MARGIN });
+
+    expect(verifyEffect(before, makeState(), { kind: "syncHedge" })).toEqual({
+      ok: true,
+      detail: "pause cleared",
+    });
+    expect(verifyEffect(before, before, { kind: "syncHedge" }).ok).toBe(false);
+  });
+
   it("accepts a liquidation that adds inventory and sends a hedge", () => {
     const before = makeState();
-    const after = makeState({ inventory: NVDAX(10), pendingHedge: readyPending() });
-    const action: Action = {
-      kind: "liquidate",
-      marketId: MARKET_ID,
-      borrower: BORROWER_A,
-      seizedAssets: NVDAX(10),
-    };
+    const after = makeState({ inventory: NVDAX(9), pendingHedge: readyPending() });
 
-    expect(verifyEffect(before, after, action).ok).toBe(true);
+    expect(verifyEffect(before, after, liquidation).ok).toBe(true);
   });
 
   it("rejects a liquidation with no inventory change", () => {
     const before = makeState();
     const after = makeState({ pendingHedge: readyPending() });
-    const action: Action = {
-      kind: "liquidate",
-      marketId: MARKET_ID,
-      borrower: BORROWER_A,
-      seizedAssets: NVDAX(10),
-    };
 
-    expect(verifyEffect(before, after, action).ok).toBe(false);
+    expect(verifyEffect(before, after, liquidation).ok).toBe(false);
   });
 
   it("accepts an unwind that reduces inventory", () => {
@@ -71,13 +77,17 @@ describe("executor: verifyEffect", () => {
     expect(verifyEffect(after, before, { kind: "unwindStep" }).ok).toBe(false);
   });
 
-  it("accepts a margin top-up and withdrawal", () => {
-    const before = makeState({ coreUsdc: USDC(10) });
-    const after = makeState({ coreUsdc: USDC(110) });
-    const later = makeState({ coreUsdc: USDC(5) });
+  it("checks a top-up on the EVM side, where it lands in the same block", () => {
+    const before = makeState({ idleUsdc: USDC(1000) });
+    const after = makeState({ idleUsdc: USDC(900) });
 
     expect(verifyEffect(before, after, { kind: "topUpMargin", amount: USDC(100) }).ok).toBe(true);
-    expect(verifyEffect(after, later, { kind: "withdrawMargin", amount: USDC(105) }).ok).toBe(true);
     expect(verifyEffect(before, before, { kind: "topUpMargin", amount: USDC(100) }).ok).toBe(false);
+  });
+
+  it("accepts a withdrawal whose Core debit hasn't landed yet", () => {
+    const state = makeState({ coreUsdc: USDC(500) });
+
+    expect(verifyEffect(state, state, { kind: "withdrawMargin", amount: USDC(90) }).ok).toBe(true);
   });
 });

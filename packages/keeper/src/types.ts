@@ -23,22 +23,29 @@ export interface PendingHedge {
   readonly tries: bigint;
 }
 
-/** Mirrors IAfterbellVault.Risk. */
+/** Mirrors RiskParams.Params, read with `RiskParams.get()`. */
 export interface Risk {
-  readonly maxLiquidation: bigint;
-  readonly hedgeLeverage: bigint;
+  readonly maxLiquidation: bigint; // max seized notional per liquidation, USDC 6 dec
+  readonly maxUnhedged: bigint; // Core size units; also caps the unwind chunk
+  readonly leverage: bigint;
   readonly marginBufferBps: bigint;
-  readonly maxUnhedgedBps: bigint;
-  readonly maxSlippageBps: bigint;
+  readonly minDiscountBps: bigint;
   readonly oracleBandBps: bigint;
+  readonly hedgeCapBps: bigint;
+  readonly maxSlippageBps: bigint;
   readonly maxTries: bigint;
   readonly orderDelaySec: bigint;
-  readonly unwindCooldownSec: bigint;
+  readonly cooldownOpenSec: bigint;
+  readonly cooldownClosedSec: bigint;
+  readonly withdrawReserve: bigint; // USDC 6 dec
+  readonly maxImpactBps: bigint;
+  readonly transitBlocks: bigint;
 }
 
 export interface BorrowerState {
   readonly address: Address;
   readonly collateral: bigint;
+  /** Borrow shares converted to assets, rounded up the way Morpho's health check does. */
   readonly borrowAssets: bigint;
 }
 
@@ -50,17 +57,25 @@ export interface MarketState {
 
 export interface VaultState {
   readonly blockNumber: bigint;
+  /** The contract's clock. Every timing check compares against this, not the keeper's wall clock. */
+  readonly blockTimestamp: bigint;
   readonly vault: Address;
   readonly pendingHedge: PendingHedge;
   readonly inventory: bigint;
   readonly confirmedShort: bigint;
-  readonly paused: boolean;
+  /** vault.pauseFlags(): 1 hedge stuck, 2 margin low, 4 owner. 0 = not paused. */
+  readonly pauseFlags: bigint;
   readonly lastUnwindAt: bigint;
+  /** usdc.balanceOf(vault) */
   readonly idleUsdc: bigint;
+  /** vault.coreUsdc(): xyz account value (incl. the short's uPnL) + Core spot USDC */
   readonly coreUsdc: bigint;
-  readonly marginRatioBps: bigint;
+  /** vault.marginShortfall(): USDC missing to hold the target short with buffer */
+  readonly marginShortfall: bigint;
+  /** vault.marginTarget(): margin for the target short plus one max-size liquidation */
+  readonly marginTarget: bigint;
+  /** RiskParams.marketOpen() */
   readonly marketOpen: boolean;
-  readonly poolPriceInBand: boolean;
   readonly risk: Risk;
   readonly market: MarketState;
   readonly borrowers: readonly BorrowerState[];
@@ -107,23 +122,17 @@ export type ActionKind = Action["kind"];
 
 export interface DeploymentBorrower {
   readonly address: Address;
-  readonly collateral: bigint;
-  readonly borrowAssets: bigint;
   readonly label?: string;
 }
 
-/** Parsed /shared/deployments.json. */
+/** What the keeper takes from deployments/<network>.json (Deploy.s.sol + CreateMarkets.s.sol). */
 export interface DeploymentInfo {
   readonly chainId: bigint;
   readonly vault: Address;
   readonly morpho: Address;
+  /** markets.C_afterbell.id: the one market the vault allow-lists */
   readonly marketId: Hex;
-  readonly lltv: bigint;
-  readonly price: bigint;
-  readonly szDecimals: bigint;
-  readonly orderDelaySec: bigint;
-  readonly unwindCooldownOpenSec: bigint;
-  readonly keeperAddress?: Address;
+  /** Morpho can't enumerate a market's borrowers; setup scripts list the ones they opened. */
   readonly borrowers: readonly DeploymentBorrower[];
 }
 
@@ -159,8 +168,8 @@ export interface Config {
 
   // money buffers, 6 dec
   readonly idleReserveUsdc: bigint;
+  /** Slack kept on Core above the vault's marginTarget before margin is sent back. */
   readonly coreReserveUsdc: bigint;
-  readonly topUpUsdc: bigint;
 
   // safety
   readonly maxActionsPerMinute: number;
@@ -168,15 +177,9 @@ export interface Config {
   readonly minSignerBalanceWei: bigint;
   readonly gasLimitCap: bigint;
   readonly gasLimitMarginBps: bigint;
-
-  // unwind
-  readonly unwindCooldownOpenSec: bigint;
 }
 
-export type PolicyConfig = Pick<
-  Config,
-  "idleReserveUsdc" | "coreReserveUsdc" | "topUpUsdc" | "unwindCooldownOpenSec"
->;
+export type PolicyConfig = Pick<Config, "idleReserveUsdc" | "coreReserveUsdc">;
 
 /** What the keeper sends to the risk engine. BigInt-safe on the wire. */
 export interface RiskRequest {
@@ -189,13 +192,13 @@ export interface RiskRequest {
     readonly pendingHedge: PendingHedge;
     readonly inventory: bigint;
     readonly confirmedShort: bigint;
-    readonly paused: boolean;
+    readonly pauseFlags: bigint;
     readonly lastUnwindAt: bigint;
     readonly idleUsdc: bigint;
     readonly coreUsdc: bigint;
-    readonly marginRatioBps: bigint;
+    readonly marginShortfall: bigint;
+    readonly marginTarget: bigint;
     readonly marketOpen: boolean;
-    readonly poolPriceInBand: boolean;
     readonly risk: Risk;
     readonly market: MarketState;
     readonly borrowers: readonly BorrowerReport[];
@@ -203,8 +206,7 @@ export interface RiskRequest {
   readonly keeper: {
     readonly idleReserveUsdc: bigint;
     readonly coreReserveUsdc: bigint;
-    readonly topUpUsdc: bigint;
-    readonly unwindCooldownOpenSec: bigint;
+    /** The block timestamp the state was read at. */
     readonly now: bigint;
   };
 }
@@ -221,14 +223,12 @@ export type DecisionReason =
   | "sync-ready"
   | "wait-same-block"
   | "wait-order-delay"
+  | "clear-pause"
   | "paused"
   | "topup-ready"
-  | "margin-healthy"
   | "liquidate-ready"
-  | "no-liquidatable-borrower"
   | "unwind-ready"
   | "unwind-cooldown"
-  | "pool-out-of-band"
   | "withdraw-ready"
   | "position-open"
   | "core-at-reserve"
@@ -246,7 +246,8 @@ export type GuardReason =
   | "no-pending-hedge"
   | "same-block"
   | "order-delay"
-  | "margin-above-buffer"
+  | "no-margin-shortfall"
+  | "topup-above-shortfall"
   | "amount-zero"
   | "insufficient-idle"
   | "market-mismatch"
@@ -255,8 +256,9 @@ export type GuardReason =
   | "zero-size"
   | "size-exceeds-collateral"
   | "size-exceeds-max-liquidation"
+  | "size-exceeds-debt"
+  | "size-exceeds-cash"
   | "no-inventory"
-  | "pool-out-of-band"
   | "cooldown-active"
   | "position-open"
   | "insufficient-core";

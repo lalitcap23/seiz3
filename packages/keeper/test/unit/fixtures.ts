@@ -22,16 +22,25 @@ export const LLTV_80 = 8000n * 10n ** 14n;
 export const USDC = (whole: number) => BigInt(whole) * 1_000000n;
 export const NVDAX = (whole: number) => BigInt(whole) * 10n ** 18n;
 
+export const NOW = 1_700_000_000n;
+
+/** DeployHelpers.defaultRisk() with a small maxLiquidation so caps are easy to hit. */
 export const baseRisk: Risk = {
   maxLiquidation: USDC(1000),
-  hedgeLeverage: 3n,
-  marginBufferBps: 1000n,
-  maxUnhedgedBps: 200n,
+  maxUnhedged: 2000n,
+  leverage: 3n,
+  marginBufferBps: 2000n,
+  minDiscountBps: 300n,
+  oracleBandBps: 150n,
+  hedgeCapBps: 100n,
   maxSlippageBps: 100n,
-  oracleBandBps: 200n,
   maxTries: 3n,
   orderDelaySec: 5n,
-  unwindCooldownSec: 300n,
+  cooldownOpenSec: 30n,
+  cooldownClosedSec: 300n,
+  withdrawReserve: USDC(500),
+  maxImpactBps: 50n,
+  transitBlocks: 1n,
 };
 
 export const baseMarket: MarketState = {
@@ -59,14 +68,9 @@ export const baseConfig: Config = {
     vault: VAULT,
     morpho: MORPHO,
     marketId: MARKET_ID,
-    lltv: LLTV_80,
-    price: PRICE_100,
-    szDecimals: 2n,
-    orderDelaySec: 5n,
-    unwindCooldownOpenSec: 30n,
     borrowers: [
-      { address: BORROWER_A, collateral: NVDAX(10), borrowAssets: USDC(900), label: "liquidatable" },
-      { address: BORROWER_B, collateral: NVDAX(10), borrowAssets: USDC(700), label: "healthy" },
+      { address: BORROWER_A, label: "liquidatable" },
+      { address: BORROWER_B, label: "healthy" },
     ],
   },
   riskEngineUrl: "http://localhost:8081",
@@ -85,28 +89,28 @@ export const baseConfig: Config = {
   killSwitchEnv: false,
   idleReserveUsdc: USDC(10),
   coreReserveUsdc: USDC(10),
-  topUpUsdc: USDC(1000),
   maxActionsPerMinute: 6,
   maxConsecutiveReverts: 3,
   minSignerBalanceWei: 10n ** 15n,
   gasLimitCap: 3_000_000n,
   gasLimitMarginBps: 2500n,
-  unwindCooldownOpenSec: 30n,
 };
 
+/** Idle vault: no stock, no short, margin exactly at target (1000 × 1.2 / 3 = 400 USDC). */
 export const baseState: VaultState = {
   blockNumber: 1000n,
+  blockTimestamp: NOW,
   vault: VAULT,
   pendingHedge: basePending,
   inventory: 0n,
   confirmedShort: 0n,
-  paused: false,
+  pauseFlags: 0n,
   lastUnwindAt: 0n,
   idleUsdc: USDC(100_000),
-  coreUsdc: 0n,
-  marginRatioBps: 5000n,
+  coreUsdc: USDC(400),
+  marginShortfall: 0n,
+  marginTarget: USDC(400),
   marketOpen: true,
-  poolPriceInBand: true,
   risk: baseRisk,
   market: baseMarket,
   borrowers: [],
@@ -121,6 +125,13 @@ export function liquidatableBorrower(address: Address = BORROWER_A): BorrowerSta
 export function healthyBorrower(address: Address = BORROWER_B): BorrowerState {
   return { address, collateral: NVDAX(10), borrowAssets: USDC(700) };
 }
+
+/**
+ * Morpho repays seized × price / LIF, LIF = 1 / (1 − 0.3 × 0.2) at 80% LLTV, so seizing all
+ * 10 NVDAx of borrower A would repay 940 USDC against 900 owed. The most it can take:
+ * floor(899.999999 × 1.0638…) = 957.446807 USDC of collateral → 9.57446807 NVDAx.
+ */
+export const BORROWER_A_MAX_SEIZE = 9_574_468_070_000_000_000n;
 
 type StateOverrides = Omit<Partial<VaultState>, "risk" | "market" | "pendingHedge"> & {
   risk?: Partial<Risk>;
@@ -144,12 +155,10 @@ export function makeConfig(overrides: Partial<Config> = {}): Config {
   return { ...baseConfig, ...overrides };
 }
 
-export const NOW = 1_700_000_000n;
-
 /** A pending hedge that is ready to sync (earlier block, delay elapsed). */
 export function readyPending(overrides: Partial<PendingHedge> = {}): PendingHedge {
   return {
-    delta: -NVDAX(10),
+    delta: -10_000n,
     sentBlock: 999n,
     sentAt: NOW - 10n,
     tries: 1n,

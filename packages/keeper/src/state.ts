@@ -1,13 +1,24 @@
-import type { PublicClient } from "viem";
+import {
+  erc20Abi,
+  type Abi,
+  type ContractFunctionArgs,
+  type ContractFunctionName,
+  type PublicClient,
+  type ReadContractParameters,
+} from "viem";
+import {
+  afterbellVaultAbi,
+  demoOracleAbi,
+  iMorphoAbi,
+  riskParamsAbi,
+} from "@afterbell/shared/abis";
 
-import { morphoAbi, vaultAbi } from "./abi.js";
-import { buildReports, mergeCandidates } from "./riskCalc.js";
+import { borrowAssetsOf, buildReports, mergeCandidates } from "./riskCalc.js";
 import { describeError } from "./riskEngine.js";
 import type {
   Address,
   BorrowerState,
   Config,
-  Hex,
   MarketState,
   PendingHedge,
   Risk,
@@ -32,109 +43,128 @@ export interface ReadStateResult {
   readonly scan: ScanReport;
 }
 
+/**
+ * One tick's view of the chain, all at the latest block. Every read goes through `read()`, so the
+ * function names and args are checked against the wagmi-generated ABIs at compile time.
+ */
 export async function readState(
   publicClient: PublicClient,
   cfg: Config,
-  now: bigint,
   extraBorrowers: readonly Address[] = [],
 ): Promise<ReadStateResult> {
-  const blockNumber = await publicClient.getBlockNumber();
+  const block = await publicClient.getBlock();
+  const blockNumber = block.number;
+  const marketId = cfg.deployments.marketId;
+  const candidates = mergeCandidates(cfg.deployments.borrowers, extraBorrowers).slice(0, MAX_BORROWERS);
 
-  const statics = await multiCall(publicClient, blockNumber, [
-      { address: cfg.vault, abi: vaultAbi, functionName: "pendingHedge" },
-      { address: cfg.vault, abi: vaultAbi, functionName: "inventory" },
-      { address: cfg.vault, abi: vaultAbi, functionName: "confirmedShort" },
-      { address: cfg.vault, abi: vaultAbi, functionName: "paused" },
-      { address: cfg.vault, abi: vaultAbi, functionName: "lastUnwindAt" },
-      { address: cfg.vault, abi: vaultAbi, functionName: "idleUsdc" },
-      { address: cfg.vault, abi: vaultAbi, functionName: "coreUsdc" },
-      { address: cfg.vault, abi: vaultAbi, functionName: "marginRatioBps" },
-      { address: cfg.vault, abi: vaultAbi, functionName: "marketOpen" },
-      { address: cfg.vault, abi: vaultAbi, functionName: "risk" },
-      { address: cfg.vault, abi: vaultAbi, functionName: "marketId" },
-      { address: cfg.vault, abi: vaultAbi, functionName: "poolPriceInBand" },
-      { address: cfg.morpho, abi: morphoAbi, functionName: "price" },
-      { address: cfg.morpho, abi: morphoAbi, functionName: "lltv" },
-      { address: cfg.morpho, abi: morphoAbi, functionName: "borrowerCount" },
-    ]);
-
-  const pendingRaw = requireResult(statics[0], "vault.pendingHedge");
-  const riskRaw = requireResult(statics[9], "vault.risk");
-  const price = asBigInt(requireResult(statics[12], "morpho.price"), "morpho.price");
-  const lltv = asBigInt(requireResult(statics[13], "morpho.lltv"), "morpho.lltv");
-  const borrowerCount = asBigInt(requireResult(statics[14], "morpho.borrowerCount"), "borrowerCount");
-
-  const pendingHedge: PendingHedge = {
-    delta: tupleBig(pendingRaw, 0, "delta"),
-    sentBlock: tupleBig(pendingRaw, 1, "sentBlock"),
-    sentAt: tupleBig(pendingRaw, 2, "sentAt"),
-    tries: tupleBig(pendingRaw, 3, "tries"),
-  };
-
-  const risk: Risk = {
-    maxLiquidation: tupleBig(riskRaw, 0, "maxLiquidation"),
-    hedgeLeverage: tupleBig(riskRaw, 1, "hedgeLeverage"),
-    marginBufferBps: tupleBig(riskRaw, 2, "marginBufferBps"),
-    maxUnhedgedBps: tupleBig(riskRaw, 3, "maxUnhedgedBps"),
-    maxSlippageBps: tupleBig(riskRaw, 4, "maxSlippageBps"),
-    oracleBandBps: tupleBig(riskRaw, 5, "oracleBandBps"),
-    maxTries: tupleBig(riskRaw, 6, "maxTries"),
-    orderDelaySec: tupleBig(riskRaw, 7, "orderDelaySec"),
-    unwindCooldownSec: tupleBig(riskRaw, 8, "unwindCooldownSec"),
-  };
-
-  const onchainBorrowers = await readBorrowerAddresses(
-    publicClient,
-    cfg,
-    blockNumber,
-    borrowerCount,
-  );
-  const candidates = mergeCandidates(cfg.deployments.borrowers, [
-    ...onchainBorrowers,
-    ...extraBorrowers,
+  const vault = (functionName: Parameters<typeof vaultRead>[1]) => vaultRead(cfg.vault, functionName);
+  const [
+    pendingRaw,
+    inventory,
+    confirmedShort,
+    pauseFlags,
+    lastUnwindAt,
+    coreUsdc,
+    marginShortfall,
+    marginTarget,
+    riskAddress,
+    usdcAddress,
+    paramsRaw,
+    marketRaw,
+    ...positions
+  ] = await multiCall(publicClient, blockNumber, [
+    vault("pendingHedge"),
+    vault("inventory"),
+    vault("confirmedShort"),
+    vault("pauseFlags"),
+    vault("lastUnwindAt"),
+    vault("coreUsdc"),
+    vault("marginShortfall"),
+    vault("marginTarget"),
+    vault("risk"),
+    vault("usdc"),
+    read({ address: cfg.morpho, abi: iMorphoAbi, functionName: "idToMarketParams", args: [marketId] }),
+    read({ address: cfg.morpho, abi: iMorphoAbi, functionName: "market", args: [marketId] }),
+    ...candidates.map((c) =>
+      read({ address: cfg.morpho, abi: iMorphoAbi, functionName: "position", args: [marketId, c.address] }),
+    ),
   ]);
-  const labels = new Map(
-    cfg.deployments.borrowers
-      .filter((b) => b.label !== undefined)
-      .map((b) => [b.address.toLowerCase(), b.label as string]),
-  );
-  const borrowers = await readBorrowers(
-    publicClient,
-    cfg,
-    blockNumber,
-    candidates.map((c) => c.address),
-  );
+
+  const risk = asAddress(requireResult(riskAddress, "vault.risk"), "vault.risk");
+  const usdc = asAddress(requireResult(usdcAddress, "vault.usdc"), "vault.usdc");
+  const params = requireResult(paramsRaw, "morpho.idToMarketParams");
+  const oracle = asAddress(tupleValue(params, 2, "oracle"), "market oracle");
+
+  const [riskRaw, marketOpen, idleUsdc, price] = await multiCall(publicClient, blockNumber, [
+    read({ address: risk, abi: riskParamsAbi, functionName: "get" }),
+    read({ address: risk, abi: riskParamsAbi, functionName: "marketOpen" }),
+    read({ address: usdc, abi: erc20Abi, functionName: "balanceOf", args: [cfg.vault] }),
+    // Any Morpho IOracle; the demo markets use DemoOracle, whose ABI carries the same price().
+    read({ address: oracle, abi: demoOracleAbi, functionName: "price" }),
+  ]);
+
+  const pending = requireResult(pendingRaw, "vault.pendingHedge");
+  const pendingHedge: PendingHedge = {
+    delta: tupleBig(pending, 0, "delta"),
+    sentBlock: tupleBig(pending, 1, "sentBlock"),
+    sentAt: tupleBig(pending, 2, "sentAt"),
+    tries: tupleBig(pending, 3, "tries"),
+  };
 
   const market: MarketState = {
-    id: optionalResult(statics[10], cfg.deployments.marketId) as Hex,
-    price,
-    lltv,
+    id: marketId,
+    price: asBigInt(requireResult(price, "market oracle price"), "price"),
+    lltv: tupleBig(params, 4, "lltv"),
   };
+
+  const totals = requireResult(marketRaw, "morpho.market");
+  const totalBorrowAssets = tupleBig(totals, 2, "totalBorrowAssets");
+  const totalBorrowShares = tupleBig(totals, 3, "totalBorrowShares");
+  const borrowers: BorrowerState[] = [];
+  candidates.forEach((candidate, i) => {
+    const position = positions[i];
+    if (position === undefined || position.status !== "success") return;
+    borrowers.push({
+      address: candidate.address,
+      collateral: tupleBig(position.result, 2, "collateral"),
+      borrowAssets: borrowAssetsOf(
+        tupleBig(position.result, 1, "borrowShares"),
+        totalBorrowAssets,
+        totalBorrowShares,
+      ),
+    });
+  });
 
   const state: VaultState = {
     blockNumber,
+    blockTimestamp: block.timestamp,
     vault: cfg.vault,
     pendingHedge,
-    inventory: asBigInt(requireResult(statics[1], "vault.inventory"), "inventory"),
-    confirmedShort: asSigned(requireResult(statics[2], "vault.confirmedShort"), "confirmedShort"),
-    paused: asBool(requireResult(statics[3], "vault.paused"), "paused"),
-    lastUnwindAt: asBigInt(requireResult(statics[4], "vault.lastUnwindAt"), "lastUnwindAt"),
-    idleUsdc: asBigInt(requireResult(statics[5], "vault.idleUsdc"), "idleUsdc"),
-    coreUsdc: asBigInt(requireResult(statics[6], "vault.coreUsdc"), "coreUsdc"),
-    marginRatioBps: asBigInt(requireResult(statics[7], "vault.marginRatioBps"), "marginRatioBps"),
-    marketOpen: asBool(requireResult(statics[8], "vault.marketOpen"), "marketOpen"),
-    poolPriceInBand: asBool(optionalResult(statics[11], true), "poolPriceInBand"),
-    risk,
+    inventory: asBigInt(requireResult(inventory, "vault.inventory"), "inventory"),
+    confirmedShort: asBigInt(requireResult(confirmedShort, "vault.confirmedShort"), "confirmedShort"),
+    pauseFlags: asBigInt(requireResult(pauseFlags, "vault.pauseFlags"), "pauseFlags"),
+    lastUnwindAt: asBigInt(requireResult(lastUnwindAt, "vault.lastUnwindAt"), "lastUnwindAt"),
+    idleUsdc: asBigInt(requireResult(idleUsdc, "usdc.balanceOf(vault)"), "idleUsdc"),
+    coreUsdc: asBigInt(requireResult(coreUsdc, "vault.coreUsdc"), "coreUsdc"),
+    marginShortfall: asBigInt(requireResult(marginShortfall, "vault.marginShortfall"), "marginShortfall"),
+    marginTarget: asBigInt(requireResult(marginTarget, "vault.marginTarget"), "marginTarget"),
+    marketOpen: asBool(requireResult(marketOpen, "risk.marketOpen"), "marketOpen"),
+    risk: parseRisk(requireResult(riskRaw, "risk.get")),
     market,
     borrowers,
   };
 
-  const reports = buildReports(borrowers, market, risk, labels);
+  const labels = new Map(
+    candidates
+      .filter((c) => c.label !== undefined)
+      .map((c) => [c.address.toLowerCase(), c.label as string]),
+  );
+  const reports = buildReports(state, labels);
   const scan: ScanReport = {
-    ts: now,
+    ts: block.timestamp,
     blockNumber,
     morpho: cfg.morpho,
-    marketId: market.id,
+    marketId,
     price: market.price,
     lltv: market.lltv,
     borrowers: reports,
@@ -144,72 +174,61 @@ export async function readState(
   return { state, scan };
 }
 
-async function readBorrowerAddresses(
-  publicClient: PublicClient,
-  cfg: Config,
-  blockNumber: bigint,
-  count: bigint,
-): Promise<Address[]> {
-  const capped = count > BigInt(MAX_BORROWERS) ? BigInt(MAX_BORROWERS) : count;
-  if (capped === 0n) return [];
-  const indexes = Array.from({ length: Number(capped) }, (_v, i) => BigInt(i));
-  const results = await multiCall(
-    publicClient,
-    blockNumber,
-    indexes.map((index) => ({
-      address: cfg.morpho,
-      abi: morphoAbi,
-      functionName: "borrowerAt" as const,
-      args: [index] as const,
-    })),
-  );
-
-  const addresses: Address[] = [];
-  for (const result of results) {
-    if (result.status !== "success") continue;
-    if (typeof result.result === "string" && /^0x[0-9a-fA-F]{40}$/.test(result.result)) {
-      addresses.push(result.result as Address);
-    }
-  }
-  return addresses;
-}
-
-async function readBorrowers(
-  publicClient: PublicClient,
-  cfg: Config,
-  blockNumber: bigint,
-  addresses: readonly Address[],
-): Promise<BorrowerState[]> {
-  if (addresses.length === 0) return [];
-  const results = await multiCall(
-    publicClient,
-    blockNumber,
-    addresses.map((address) => ({
-      address: cfg.morpho,
-      abi: morphoAbi,
-      functionName: "getBorrower" as const,
-      args: [address] as const,
-    })),
-  );
-
-  const borrowers: BorrowerState[] = [];
-  for (let i = 0; i < results.length; i += 1) {
-    const result = results[i];
-    if (result === undefined || result.status !== "success") continue;
-    const collateral = tupleBig(result.result, 0, "collateral");
-    const borrowAssets = tupleBig(result.result, 1, "borrowAssets");
-    const address = addresses[i];
-    if (address === undefined) continue;
-    borrowers.push({ address, collateral, borrowAssets });
-  }
-  return borrowers;
+/** RiskParams.Params, in struct order. */
+function parseRisk(raw: unknown): Risk {
+  return {
+    maxLiquidation: tupleBig(raw, 0, "maxLiquidation"),
+    maxUnhedged: tupleBig(raw, 1, "maxUnhedged"),
+    leverage: tupleBig(raw, 2, "leverage"),
+    marginBufferBps: tupleBig(raw, 3, "marginBufferBps"),
+    minDiscountBps: tupleBig(raw, 4, "minDiscountBps"),
+    oracleBandBps: tupleBig(raw, 5, "oracleBandBps"),
+    hedgeCapBps: tupleBig(raw, 6, "hedgeCapBps"),
+    maxSlippageBps: tupleBig(raw, 7, "maxSlippageBps"),
+    maxTries: tupleBig(raw, 8, "maxTries"),
+    orderDelaySec: tupleBig(raw, 9, "orderDelaySec"),
+    cooldownOpenSec: tupleBig(raw, 10, "cooldownOpenSec"),
+    cooldownClosedSec: tupleBig(raw, 11, "cooldownClosedSec"),
+    withdrawReserve: tupleBig(raw, 12, "withdrawReserve"),
+    maxImpactBps: tupleBig(raw, 13, "maxImpactBps"),
+    transitBlocks: tupleBig(raw, 14, "transitBlocks"),
+  };
 }
 
 interface ReadCall {
   readonly address: Address;
-  readonly abi: readonly unknown[];
+  readonly abi: Abi;
   readonly functionName: string;
   readonly args?: readonly unknown[];
+}
+
+/** Type-checks one read against its ABI (same signature as viem's readContract), then erases it for batching. */
+function read<
+  const abi extends Abi,
+  functionName extends ContractFunctionName<abi, "pure" | "view">,
+  const args extends ContractFunctionArgs<abi, "pure" | "view", functionName>,
+>(call: ReadContractParameters<abi, functionName, args>): ReadCall {
+  return call as unknown as ReadCall;
+}
+
+/** Argument-free vault views. */
+function vaultRead(
+  address: Address,
+  functionName: Extract<
+    ContractFunctionName<typeof afterbellVaultAbi, "pure" | "view">,
+    | "pendingHedge"
+    | "inventory"
+    | "confirmedShort"
+    | "pauseFlags"
+    | "lastUnwindAt"
+    | "coreUsdc"
+    | "marginShortfall"
+    | "marginTarget"
+    | "risk"
+    | "usdc"
+  >,
+): ReadCall {
+  return read({ address, abi: afterbellVaultAbi, functionName });
 }
 
 async function multiCall(
@@ -227,7 +246,7 @@ async function multiCall(
       return batched;
     }
   } catch {
-    // fall through to individual calls
+    // fall through to individual calls (e.g. no Multicall3 on a local anvil)
   }
 
   {
@@ -255,11 +274,6 @@ function requireResult(result: CallResult | undefined, name: string): unknown {
   return result.result;
 }
 
-function optionalResult<T>(result: CallResult | undefined, fallback: T): T {
-  if (result === undefined || result.status !== "success") return fallback;
-  return result.result as T;
-}
-
 function tupleValue(raw: unknown, index: number, key: string): unknown {
   if (Array.isArray(raw)) return raw[index];
   if (raw !== null && typeof raw === "object" && key in raw) {
@@ -279,11 +293,12 @@ function asBigInt(value: unknown, name: string): bigint {
   throw new Error(`${name} is not an integer`);
 }
 
-function asSigned(value: unknown, name: string): bigint {
-  return asBigInt(value, name);
-}
-
 function asBool(value: unknown, name: string): boolean {
   if (typeof value === "boolean") return value;
   throw new Error(`${name} is not a boolean`);
+}
+
+function asAddress(value: unknown, name: string): Address {
+  if (typeof value === "string" && /^0x[0-9a-fA-F]{40}$/.test(value)) return value as Address;
+  throw new Error(`${name} is not an address`);
 }

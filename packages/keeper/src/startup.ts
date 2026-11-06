@@ -1,6 +1,9 @@
-import { vaultAbi } from "./abi.js";
+import { afterbellVaultAbi } from "@afterbell/shared/abis";
+
 import type { KeeperClients } from "./clients.js";
+import { sameAddress } from "./riskCalc.js";
 import { describeError } from "./riskEngine.js";
+import { readState } from "./state.js";
 import type { Config } from "./types.js";
 
 export interface StartupCheck {
@@ -39,10 +42,10 @@ export function validateConfig(cfg: Config): string[] {
   if (cfg.gasLimitMarginBps < 0n || cfg.gasLimitMarginBps > 10_000n) {
     errors.push("gasLimitMarginBps must be between 0 and 10000");
   }
-  if (cfg.idleReserveUsdc < 0n || cfg.coreReserveUsdc < 0n || cfg.topUpUsdc < 0n) {
-    errors.push("USDC reserves and topUpUsdc must be >= 0");
+  if (cfg.idleReserveUsdc < 0n || cfg.coreReserveUsdc < 0n) {
+    errors.push("USDC reserves must be >= 0");
   }
-  if (cfg.unwindCooldownOpenSec < 0n) errors.push("unwindCooldownOpenSec must be >= 0");
+  if (/^0x0{64}$/.test(cfg.deployments.marketId)) errors.push("marketId is required");
   if (cfg.chainId <= 0n) errors.push("chainId must be > 0");
   if (cfg.healthPort < 1 || cfg.healthPort > 65_535) errors.push("healthPort is invalid");
   if (cfg.riskEngineUrl.trim() === "") errors.push("riskEngineUrl is required");
@@ -99,15 +102,34 @@ export async function runStartup(
     add("contract-code", false, describeError(error));
   }
 
+  // The deployment file and the chain must agree: same Morpho, and a market the vault will liquidate.
   try {
-    const paused = await clients.publicClient.readContract({
-      address: cfg.vault,
-      abi: vaultAbi,
-      functionName: "paused",
-    });
-    add("abi-probe", typeof paused === "boolean", `vault.paused() -> ${String(paused)}`);
+    const vault = { address: cfg.vault, abi: afterbellVaultAbi } as const;
+    const [morpho, allowed] = await Promise.all([
+      clients.publicClient.readContract({ ...vault, functionName: "morpho" }),
+      clients.publicClient.readContract({
+        ...vault,
+        functionName: "marketAllowed",
+        args: [cfg.deployments.marketId],
+      }),
+    ]);
+    add("vault-morpho", sameAddress(morpho, cfg.morpho), `vault.morpho() -> ${morpho}`);
+    add("market-allowed", allowed, `vault.marketAllowed(${cfg.deployments.marketId}) -> ${allowed}`);
   } catch (error) {
-    add("abi-probe", false, describeError(error));
+    add("vault-wiring", false, describeError(error));
+  }
+
+  // One full tick's reads: every ABI the keeper uses, against the live contracts and HyperCore reads.
+  try {
+    const { state } = await readState(clients.publicClient, cfg);
+    add(
+      "state-read",
+      true,
+      `block ${state.blockNumber}: inventory ${state.inventory}, pauseFlags ${state.pauseFlags}, ` +
+        `${state.borrowers.length} borrower(s)`,
+    );
+  } catch (error) {
+    add("state-read", false, describeError(error));
   }
 
   try {

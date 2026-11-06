@@ -13,6 +13,7 @@ import {
 import type { ScanReport } from "../../src/types.js";
 import {
   BORROWER_A,
+  BORROWER_A_MAX_SEIZE,
   NOW,
   OTHER_MARKET_ID,
   USDC,
@@ -25,7 +26,7 @@ import {
 const cfg = makeConfig();
 
 function scanFor(state = makeState({ borrowers: [liquidatableBorrower()] })): ScanReport {
-  const reports = buildReports(state.borrowers, state.market, state.risk);
+  const reports = buildReports(state);
   return {
     ts: NOW,
     blockNumber: state.blockNumber,
@@ -52,7 +53,7 @@ describe("riskEngine: request builder", () => {
       address: BORROWER_A,
       liquidatable: true,
       ltvBps: 9000n,
-      maxSeizedAssets: NVDAX(10),
+      maxSeizedAssets: BORROWER_A_MAX_SEIZE,
     });
   });
 
@@ -70,8 +71,10 @@ describe("riskEngine: request builder", () => {
   it("round-trips through parseRiskRequest", () => {
     const state = makeState({
       inventory: NVDAX(3),
-      confirmedShort: -NVDAX(3),
+      confirmedShort: -3000n,
+      pauseFlags: 2n,
       coreUsdc: USDC(500),
+      marginShortfall: USDC(25),
       borrowers: [liquidatableBorrower()],
     });
     const original = buildRiskRequest(state, scanFor(state), NOW, cfg);
@@ -91,6 +94,7 @@ describe("riskEngine: request builder", () => {
       borrowAssets: state.borrowers[0]?.borrowAssets,
     });
     expect(rebuilt.blockNumber).toBe(state.blockNumber);
+    expect(rebuilt.blockTimestamp).toBe(NOW);
   });
 
   it("extracts the policy config", () => {
@@ -100,8 +104,6 @@ describe("riskEngine: request builder", () => {
     expect(policyConfigFromRequest(request)).toEqual({
       idleReserveUsdc: cfg.idleReserveUsdc,
       coreReserveUsdc: cfg.coreReserveUsdc,
-      topUpUsdc: cfg.topUpUsdc,
-      unwindCooldownOpenSec: cfg.unwindCooldownOpenSec,
     });
   });
 

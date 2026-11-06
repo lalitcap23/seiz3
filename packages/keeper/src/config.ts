@@ -38,40 +38,33 @@ const envSchema = z.object({
   KILL_SWITCH_FILE: z.string().min(1).default("/shared/KILL"),
   IDLE_RESERVE_USDC: z.string().default("10"),
   CORE_RESERVE_USDC: z.string().default("10"),
-  TOPUP_USDC: z.string().default("1000"),
   MAX_ACTIONS_PER_MINUTE: z.coerce.number().int().positive().default(6),
   MAX_CONSECUTIVE_REVERTS: z.coerce.number().int().positive().default(3),
   MIN_SIGNER_BALANCE_WEI: z.string().default("1000000000000000"),
   GAS_LIMIT_CAP: z.coerce.number().int().positive().default(3_000_000),
   GAS_LIMIT_MARGIN_BPS: z.coerce.number().int().min(0).max(10_000).default(2500),
-  UNWIND_COOLDOWN_OPEN_SEC: z.string().optional(),
 });
 
 const borrowerSchema = z.object({
   address: addressSchema,
-  collateral: z.string().regex(/^\d+$/),
-  borrowAssets: z.string().regex(/^\d+$/),
   label: z.string().optional(),
 });
 
+/**
+ * deployments/<network>.json as Deploy.s.sol writes it and CreateMarkets.s.sol extends it. Only the
+ * fields the keeper needs are checked; everything else (pool key, HyperCore ids, ...) is ignored.
+ */
 const deploymentSchema = z.object({
   chainId: z.union([z.number().int().positive(), z.string().regex(/^\d+$/)]),
   vault: addressSchema,
   morpho: addressSchema,
-  marketId: hex32Schema,
-  lltv: z.string().regex(/^\d+$/),
-  price: z.string().regex(/^\d+$/),
-  szDecimals: z.union([z.number().int().min(0).max(18), z.string().regex(/^\d+$/)]),
-  orderDelaySec: z.union([z.number().int().min(0), z.string().regex(/^\d+$/)]),
-  unwindCooldownOpenSec: z.union([z.number().int().min(0), z.string().regex(/^\d+$/)]),
-  keeperAddress: addressSchema.optional(),
-  borrowers: z.array(borrowerSchema),
+  markets: z.object({ C_afterbell: z.object({ id: hex32Schema }) }),
+  borrowers: z.array(borrowerSchema).default([]),
 });
 
 function toBig(value: number | string): bigint {
   return BigInt(value);
 }
-
 
 function parseDeploymentsJson(raw: string): DeploymentInfo {
   let json: unknown;
@@ -95,17 +88,9 @@ function parseDeploymentsJson(raw: string): DeploymentInfo {
     chainId: toBig(d.chainId),
     vault: d.vault as Address,
     morpho: d.morpho as Address,
-    marketId: d.marketId as Hex,
-    lltv: BigInt(d.lltv),
-    price: BigInt(d.price),
-    szDecimals: toBig(d.szDecimals),
-    orderDelaySec: toBig(d.orderDelaySec),
-    unwindCooldownOpenSec: toBig(d.unwindCooldownOpenSec),
-    ...(d.keeperAddress === undefined ? {} : { keeperAddress: d.keeperAddress as Address }),
+    marketId: d.markets.C_afterbell.id as Hex,
     borrowers: d.borrowers.map((b) => ({
       address: b.address as Address,
-      collateral: BigInt(b.collateral),
-      borrowAssets: BigInt(b.borrowAssets),
       ...(b.label === undefined ? {} : { label: b.label }),
     })),
   };
@@ -123,11 +108,6 @@ function envDeployment(e: z.infer<typeof envSchema>): DeploymentInfo {
     vault: e.VAULT as Address,
     morpho: e.MORPHO as Address,
     marketId: (e.MARKET_ID ?? `0x${"0".repeat(64)}`) as Hex,
-    lltv: 0n,
-    price: 0n,
-    szDecimals: 0n,
-    orderDelaySec: 0n,
-    unwindCooldownOpenSec: BigInt(e.UNWIND_COOLDOWN_OPEN_SEC ?? "0"),
     borrowers: [],
   };
 }
@@ -189,10 +169,6 @@ export function loadConfig(
     }
   };
 
-  const unwindOpen = e.UNWIND_COOLDOWN_OPEN_SEC === undefined
-    ? deployment.unwindCooldownOpenSec
-    : BigInt(e.UNWIND_COOLDOWN_OPEN_SEC);
-
   const gasLimitCap = BigInt(e.GAS_LIMIT_CAP);
   if (gasLimitCap <= 0n || gasLimitCap > 30_000_000n) {
     throw new ConfigError("GAS_LIMIT_CAP must be between 1 and 30,000,000");
@@ -228,12 +204,10 @@ export function loadConfig(
     killSwitchEnv: boolEnv(e.KILL_SWITCH),
     idleReserveUsdc: checkUsdc("IDLE_RESERVE_USDC", e.IDLE_RESERVE_USDC),
     coreReserveUsdc: checkUsdc("CORE_RESERVE_USDC", e.CORE_RESERVE_USDC),
-    topUpUsdc: checkUsdc("TOPUP_USDC", e.TOPUP_USDC),
     maxActionsPerMinute: e.MAX_ACTIONS_PER_MINUTE,
     maxConsecutiveReverts: e.MAX_CONSECUTIVE_REVERTS,
     minSignerBalanceWei: minBalance,
     gasLimitCap,
     gasLimitMarginBps: BigInt(e.GAS_LIMIT_MARGIN_BPS),
-    unwindCooldownOpenSec: unwindOpen,
   };
 }

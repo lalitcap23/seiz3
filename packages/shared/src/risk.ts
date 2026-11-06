@@ -11,7 +11,7 @@ import { z } from "zod";
  * strings (the schemas accept either so both sides can share one definition).
  */
 
-export const POLL_EXPORT_SCHEMA_VERSION = 1;
+export const POLL_EXPORT_SCHEMA_VERSION = 2;
 
 const addressSchema = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
 const hex32Schema = z.string().regex(/^0x[0-9a-fA-F]{64}$/);
@@ -28,16 +28,23 @@ const pendingHedgeSchema = z.object({
   tries: bigintSchema,
 });
 
+/** RiskParams.Params */
 const riskConfigSchema = z.object({
   maxLiquidation: bigintSchema,
-  hedgeLeverage: bigintSchema,
+  maxUnhedged: bigintSchema,
+  leverage: bigintSchema,
   marginBufferBps: bigintSchema,
-  maxUnhedgedBps: bigintSchema,
-  maxSlippageBps: bigintSchema,
+  minDiscountBps: bigintSchema,
   oracleBandBps: bigintSchema,
+  hedgeCapBps: bigintSchema,
+  maxSlippageBps: bigintSchema,
   maxTries: bigintSchema,
   orderDelaySec: bigintSchema,
-  unwindCooldownSec: bigintSchema,
+  cooldownOpenSec: bigintSchema,
+  cooldownClosedSec: bigintSchema,
+  withdrawReserve: bigintSchema,
+  maxImpactBps: bigintSchema,
+  transitBlocks: bigintSchema,
 });
 
 const marketStateSchema = z.object({
@@ -54,17 +61,18 @@ const borrowerStateSchema = z.object({
 
 export const vaultStateSchema = z.object({
   blockNumber: bigintSchema,
+  blockTimestamp: bigintSchema,
   vault: addressSchema,
   pendingHedge: pendingHedgeSchema,
   inventory: bigintSchema,
   confirmedShort: bigintSchema,
-  paused: z.boolean(),
+  pauseFlags: bigintSchema, // 1 hedge stuck, 2 margin low, 4 owner
   lastUnwindAt: bigintSchema,
   idleUsdc: bigintSchema,
   coreUsdc: bigintSchema,
-  marginRatioBps: bigintSchema,
+  marginShortfall: bigintSchema,
+  marginTarget: bigintSchema,
   marketOpen: z.boolean(),
-  poolPriceInBand: z.boolean(),
   risk: riskConfigSchema,
   market: marketStateSchema,
   borrowers: z.array(borrowerStateSchema),

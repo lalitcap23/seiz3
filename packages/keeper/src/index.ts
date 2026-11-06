@@ -115,8 +115,6 @@ async function main(): Promise<void> {
   async function tick(): Promise<void> {
     metrics.inc("afterbell_keeper_ticks_total");
     const nowMs = Date.now();
-    const now = BigInt(Math.floor(nowMs / 1000));
-
     if (killSwitchActive(cfg)) {
       telemetry.tick(null);
       telemetry.decision(null, "kill-switch");
@@ -132,7 +130,9 @@ async function main(): Promise<void> {
     }
 
     const apiBorrowers = await morphoApiBorrowers(nowMs);
-    const { state, scan } = await readState(clients.publicClient, cfg, now, apiBorrowers);
+    const { state, scan } = await readState(clients.publicClient, cfg, apiBorrowers);
+    // The vault times orders with block.timestamp, so the keeper decides on the same clock.
+    const now = state.blockTimestamp;
     telemetry.tick(state.blockNumber, state);
     logScan(scan);
     telemetry.setSnapshot(serializePollExport(buildPollExport(state, scan, morphoApiSnapshot, cfg)));
@@ -198,6 +198,19 @@ async function main(): Promise<void> {
         metrics.inc("afterbell_keeper_actions_skipped_total", { reason: execution.reason });
         telemetry.decision(decision.action.kind, execution.reason);
         logDecision(state, scan, decision, execution.reason, null, {
+          latencyMs: result.latencyMs,
+          engineVersion: decision.engineVersion,
+          confidenceBps: decision.confidenceBps,
+        });
+        return;
+      }
+      case "simulation-reverted": {
+        // Nothing was sent: the contract's own checks said no (pool out of band, low Core margin, ...).
+        // The spec says skip, so this doesn't count toward the breaker.
+        metrics.inc("afterbell_keeper_simulation_reverts_total", { action: decision.action.kind });
+        telemetry.decision(decision.action.kind, "simulation-reverted");
+        logDecision(state, scan, decision, "simulation-reverted", null, {
+          reason: execution.reason,
           latencyMs: result.latencyMs,
           engineVersion: decision.engineVersion,
           confidenceBps: decision.confidenceBps,
@@ -314,7 +327,7 @@ async function main(): Promise<void> {
     action: Action,
   ): Promise<{ ok: boolean; detail: string }> {
     try {
-      const after = await readState(clients.publicClient, cfg, BigInt(Math.floor(Date.now() / 1000)));
+      const after = await readState(clients.publicClient, cfg);
       return verifyEffect(before, after.state, action);
     } catch (error) {
       return { ok: false, detail: `state re-read failed: ${describeError(error)}` };
