@@ -1,25 +1,51 @@
 {
   "chainId": 998,
-  "usdc": "0x2B3370eE501B4a559b57D449569354196457D8Ab",
-  "morpho": "0x0000000000000000000000000000000000000000",
-  "poolManager": "0x0000000000000000000000000000000000000000",
-  "nvdax": "0x0000000000000000000000000000000000000000",
-  "riskParams": "0x0000000000000000000000000000000000000000",
-  "vault": "0x0000000000000000000000000000000000000000",
   "coreDepositWallet": "0x0B80659a4076E9E93C7DbE0f10675A16a3e5C206",
-  "naiveLiquidator": "0x0000000000000000000000000000000000000000",
-  "poolSeeder": "0x0000000000000000000000000000000000000000",
-  "poolKey": {
-    "currency0": "0x0000000000000000000000000000000000000000",
-    "currency1": "0x0000000000000000000000000000000000000000",
-    "fee": 3000,
-    "tickSpacing": 60,
-    "hooks": "0x0000000000000000000000000000000000000000"
+  "hypercore": {
+    "perpAsset": 750002,
+    "perpDexIndex": 65,
+    "perpIndex": 650002,
+    "szDecimals": 3
   },
-  "hypercore": { "perpAsset": 0, "perpIndex": 0, "perpDexIndex": 0, "szDecimals": 0 },
   "markets": {
-    "A_naive": {"id": "0x", "oracle": "0x0000000000000000000000000000000000000000", "lltv": "770000000000000000"},
-    "B_conservative": {"id": "0x", "oracle": "0x0000000000000000000000000000000000000000", "lltv": "385000000000000000"},
-    "C_afterbell": {"id": "0x", "oracle": "0x0000000000000000000000000000000000000000", "lltv": "770000000000000000"}
+    "A_naive": {
+      "id": "0x4fd9fd57c70b8ce4f570ee55745205d5e9d892051fb0bfc8a7c664710b12aef6",
+      "lltv": "770000000000000000",
+      "oracle": "0x8c7640c402bF467148a273d498AbD2ae0ead2e83"
+    },
+    "B_conservative": {
+      "id": "0xed66abe23351f5584a227d950ae050e1ce36367a3bddd604264c400b232ad407",
+      "lltv": "385000000000000000",
+      "oracle": "0xe10583a50704f6B536305B948264Cc7DfC96Ec06"
+    },
+    "C_afterbell": {
+      "id": "0xd88d29a5a9d3dafa56d2594f3798659ce1113c265fcb3a8677965e4c480a5014",
+      "lltv": "770000000000000000",
+      "oracle": "0x00c87446f85d3D27889B9378b7B6D9B30Cc4Acc1"
+    }
+  },
+  "morpho": "0xbE54b050F303Aa1a4CD1d354c20b341071632AB0",
+  "naiveLiquidator": "0x4efaf9213f10a54792c498c0330385d8ebc16939",
+  "nvdax": "0xdD5e0E5f23bD7Ca0a0933E11B253Ad1A3A5eE8a6",
+  "poolKey": {
+    "currency0": "0x2B3370eE501B4a559b57D449569354196457D8Ab",
+    "currency1": "0xdD5e0E5f23bD7Ca0a0933E11B253Ad1A3A5eE8a6",
+    "fee": 3000,
+    "hooks": "0x0000000000000000000000000000000000000000",
+    "tickSpacing": 60
+  },
+  "poolManager": "0xce19e7C888D3b4c3a6E2e55e2C516b1A8e2d0990",
+  "poolSeeder": "0x0c272737539225309688ada1eDd19891Dc504f61",
+  "riskParams": "0x9557cd78f2332fb661eBd0017eE057cD4A086c20",
+  "usdc": "0x2B3370eE501B4a559b57D449569354196457D8Ab",
+  "vault": "0x6c6496fB365AAC734F55F99aAE51357906d73D9C",
+  "borrowers": [
+    {
+      "address": "0x7Ea067328338D368038Fc677A7Fb17C9770D3F54",
+      "label": "C_afterbell"
+    }
+  ],
+  "demo": {
+    "borrowPriceUsd6": "212030000"
   }
 }

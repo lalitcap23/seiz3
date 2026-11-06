@@ -80,13 +80,40 @@ Yes, that order still holds. I'd change one thing: do the ETHGlobal rules check 
 
 ### 3. Testnet deploy and first real hedge (go/no-go)
 
-- [ ] Run Deploy, CreateMarkets and SeedPool.
+All through `scripts/testnet-stack.sh` (README, "Testnet end to end"). Scaled to a 1 NVDAx liquidation.
 
-- [ ] Fund the hedge account.
+- [x] Fund the deployer (0.05 HYPE + 450 USDC on HyperEVM, HyperCore account) and the keeper (0.02 HYPE).
 
-- [ ] Point the keeper at testnet.
+- [x] Rehearse infra → deploy → markets → actors on a local fork of testnet.
 
-- [ ] Trigger one liquidate → syncHedge.
+- [x] `big-blocks on` (deployer).
+
+- [x] `infra`: Morpho `0xbE54b050F303Aa1a4CD1d354c20b341071632AB0`, IRM `0xc21aA4331F5EF75625004bC4AcA14480247e1b4F`, PoolManager `0xce19e7C888D3b4c3a6E2e55e2C516b1A8e2d0990`.
+
+- [x] `deploy`: **vault `0x6c6496fB365AAC734F55F99aAE51357906d73D9C`** (all addresses in `deployments/testnet.json`).
+
+- [x] `big-blocks off`
+
+- [x] `markets`: A, B, C created; C allow-listed on the vault.
+
+- [x] `actors`: vault 209 USDC idle, market C 180 supplied / 162.84 borrowed against 1 NVDAx at $212.03, coreFunded on.
+
+- [x] **You:** Send 120 USDC (spot) to the vault's address on app.hyperliquid-testnet.xyz.
+
+- [x] `sweep`: vault spot → xyz margin (120 USDC, landed in ~3 s).
+
+- [x] **You:** post a buy (limit) for ≥ 1 NVDA on xyz:NVDA about 0.3% under the oracle (1.0 @ 211.70).
+
+- [x] Risk engine + `keeper` in their own terminals.
+
+- [x] `crash` → the keeper liquidates → the vault shorts → `syncHedge` confirms.
+
+- → **Result: GO.** Market C $209.52 vs HyperCore $212.49:
+  - Liquidation + short in one tx, block 67683370: `0xeebcd35f0eed9376c63339fe6cd5cfd6f83e2d7c7d16f117395044933de242cd`. Seized 0.8348 NVDAx, repaid ~162.84 USDC.
+  - Hyperliquid fills, one order (oid 63489304041): SELL 0.101 @ 220.31 + 0.733 @ 211.70 = **-0.834 NVDA**.
+  - `syncHedge` confirmed 10 blocks later: `0x9ae57047b1276d869210043910b308ea72bd3f0bee49647bd2a840e185fcb607`. confirmedShort -834 = target.
+  - Vault now: 0.8348 NVDAx inventory, short -0.834 (entry 212.74, liq. price $347.91), xyz account 120.27 USDC, 46.16 USDC idle.
+  - Not done on testnet yet: the unwind (needs a seeded pool + an ask near the oracle) → step 7.
 
 - ✅ **Go:** a short opens on Core and the vault reads it back.
 - ❌ **No-go:** show the simulator in the Afterbell column instead.

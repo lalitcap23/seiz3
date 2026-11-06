@@ -113,6 +113,27 @@ scripts/local-stack.sh price 217                   # "Monday": unwind in 10 NVDA
 
 Locally nothing arbitrages the pool, so after a few chunks its price sags more than `maxSlippageBps` under the Core oracle and the vault refuses further unwinds (`Slippage`); the keeper skips them and the position stays hedged. Don't run `tick` during `test:scenarios`.
 
+## Testnet end to end (keeper ↔ contracts ↔ real HyperCore)
+
+`scripts/testnet-stack.sh` runs the same flow on HyperEVM testnet, scaled to a 1 NVDAx liquidation (~650 testnet USDC in all). Keys come from `.env.local` (`DEPLOYER_PRIVATE_KEY`, `KEEPER_PRIVATE_KEY`); the big-blocks switch needs `pip install hyperliquid-python-sdk` (point `PYTHON` at that interpreter).
+
+```bash
+scripts/testnet-stack.sh big-blocks on   # the vault and PoolManager only fit in 30M-gas blocks
+scripts/testnet-stack.sh infra           # our own Morpho + IRM + v4 PoolManager (testnet has neither)
+scripts/testnet-stack.sh deploy
+scripts/testnet-stack.sh big-blocks off
+scripts/testnet-stack.sh markets         # priced at HyperCore's live NVDA oracle
+scripts/testnet-stack.sh actors          # LP deposit, lender, borrower at 76.8% LTV, coreFunded flag (costs 1 USDC)
+# by hand: Send 120 USDC (spot) to the vault on HyperCore; post a bid ≥ 1 NVDA on xyz:NVDA near the oracle
+scripts/testnet-stack.sh sweep           # spot → xyz margin
+pnpm --filter @afterbell/keeper risk-engine:stub   # own terminal
+scripts/testnet-stack.sh keeper                    # own terminal
+scripts/testnet-stack.sh crash           # market C 1.4% under HyperCore's oracle → liquidate → hedge
+scripts/testnet-stack.sh status
+```
+
+HyperCore's oracle can't be moved on testnet, so market C's price follows it and `crash` stays inside the vault's 1.5% oracle band. The keeper runs with top-ups switched off (testnet's CoreDepositWallet would lose the USDC) and without Morpho's API (it doesn't index our Morpho copy). No pool is seeded, so `unwindStep` reverts with `OracleBand` and the keeper skips it; seed one with `SeedPool.s.sol` for the unwind.
+
 ## Keeper notes
 
 - **ABIs come from the contracts.** Every call goes through the wagmi-generated ABIs in `@afterbell/shared/abis`, so a renamed function or changed argument list is a type error. Run `pnpm codegen` after changing a contract.
