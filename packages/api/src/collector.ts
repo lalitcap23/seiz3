@@ -10,7 +10,7 @@ import {
 import { readChain, type ChainRead, type MarketRead } from "./chain.js";
 import type { DeploymentFile } from "@afterbell/shared/node";
 import { panelFromApi, panelFromCore } from "./hyperliquid.js";
-import { LogScanner } from "./logs.js";
+import { LogScanner, type LogScannerOptions } from "./logs.js";
 import { buildOperations, type CoreFill } from "./operations.js";
 
 const HISTORY_KEPT = 3600;
@@ -23,10 +23,8 @@ export interface CollectorOptions {
   hlInfoUrl: string | null;
   explorerUrl: string;
   fromBlock: bigint | null;
-  /** eth_getLogs client when it isn't the main one (Alchemy's HyperEVM testnet has no eth_getLogs). */
-  logsClient?: PublicClient;
-  /** Minimum gap between log scans: a public logs RPC allows ~100 requests a minute. */
-  logScanMs?: number;
+  /** The activity feed's history reader, cache and anvil rewinds (logs.ts); the new blocks come from the main client. */
+  logs?: LogScannerOptions;
   /** Testers to read positions for besides the deployment's (the API's watch list). */
   extraBorrowers?: () => readonly Address[];
 }
@@ -36,8 +34,7 @@ const MAX_BORROWERS = 100;
 /** The operations the snapshot carries (plus LIQ-0): the feed and /try only need the recent ones. */
 const OPERATIONS_KEPT = 40;
 const FILLS_EVERY_MS = 5_000;
-
-const LOGS_RPC_LAG = 2n;
+const INFO_TIMEOUT_MS = 5_000;
 
 /** Polls HyperEVM (one multicall) + Hyperliquid info API every second; keeps latest snapshot in memory. */
 export class Collector {
@@ -53,10 +50,9 @@ export class Collector {
     private dep: DeploymentFile,
     private readonly opts: CollectorOptions,
   ) {
-    this.logs = new LogScanner(opts.logsClient ?? client, dep, opts.fromBlock);
+    this.logs = new LogScanner(client, dep, opts.fromBlock, opts.logs);
   }
 
-  private nextLogScanAt = 0;
   private fills: CoreFill[] = [];
   private nextFillsAt = 0;
 
@@ -67,7 +63,8 @@ export class Collector {
   /** After the replay's setup redeploys: new addresses, so a fresh feed and history. */
   reload(dep: DeploymentFile) {
     this.dep = dep;
-    this.logs = new LogScanner(this.opts.logsClient ?? this.client, dep, this.opts.fromBlock);
+    this.logs.stop();
+    this.logs = new LogScanner(this.client, dep, this.opts.fromBlock, this.opts.logs);
     this.history = [];
     this.latest = null;
   }
@@ -89,12 +86,20 @@ export class Collector {
 
   private async poll() {
     try {
-      const chain = await readChain(this.client, this.dep, this.borrowers());
-      await this.refreshFills();
-      if (this.latest !== null && chain.blockNumber < BigInt(this.latest.blockNumber)) this.history = []; // anvil revert
-      // a separate logs RPC can sit a block behind the main one, and refuses a range past its own head
-      await this.scanLogs(chain.blockNumber - LOGS_RPC_LAG);
-      const snapshot = snapshotSchema.parse(this.build(chain, await this.panel(chain)));
+      const [chain, latest] = await Promise.all([
+        readChain(this.client, this.dep, this.borrowers()),
+        this.client.getBlockNumber({ cacheTime: 0 }).catch(() => null),
+      ]);
+      if (this.latest !== null && chain.blockNumber < BigInt(this.latest.blockNumber)) {
+        // HyperEVM never goes back: a load-balanced RPC's lagging node answered, and the page keeps the newer snapshot
+        if (!this.opts.logs?.chainRewinds) return;
+        this.history = []; // anvil revert
+      }
+      // HyperEVM runs eth_call in the next block's context (block.number = latest + 1), and eth_getLogs refuses a block
+      // that isn't there yet: the logs go up to the latest one, so a new unwind lands with the stock it sold
+      const head = latest === null ? chain.blockNumber - 1n : latest < chain.blockNumber ? latest : chain.blockNumber;
+      const [hyperliquid] = await Promise.all([this.panel(chain), this.refreshFills(), this.followLogs(head)]);
+      const snapshot = snapshotSchema.parse(this.build(chain, hyperliquid));
       this.latest = snapshot;
       this.history.push({
         t: snapshot.updatedAt,
@@ -133,6 +138,7 @@ export class Collector {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ type: "userFills", user: this.dep.vault }),
+        signal: AbortSignal.timeout(INFO_TIMEOUT_MS),
       });
       if (res.ok) this.fills = (await res.json()) as CoreFill[];
     } catch {
@@ -140,12 +146,10 @@ export class Collector {
     }
   }
 
-  /** A failed eth_getLogs (public RPCs rate-limit them) leaves the feed a poll behind instead of failing the snapshot. */
-  private async scanLogs(head: bigint) {
-    if (Date.now() < this.nextLogScanAt) return;
-    this.nextLogScanAt = Date.now() + (this.opts.logScanMs ?? 0);
+  /** A failed eth_getLogs leaves the feed a poll behind (the snapshot says so) instead of failing the snapshot. */
+  private async followLogs(head: bigint) {
     try {
-      await this.logs.scan(head);
+      await this.logs.follow(head);
       if (this.logError !== null) console.log("[api] log scan recovered");
       this.logError = null;
     } catch (err) {
@@ -224,6 +228,7 @@ export class Collector {
         return opId === undefined ? e : { ...e, opId };
       }),
       operations: [...zero, ...kept],
+      feed: this.logs.status(),
     };
   }
 

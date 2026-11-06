@@ -22,6 +22,7 @@ deployments/local-chain.json
 deployments/KILL
 deployments/BOTS_HOLD
 deployments/watch.json
+deployments/feed-cache.*.json
 deployments/ASK_REQUEST.json
 
 # generated

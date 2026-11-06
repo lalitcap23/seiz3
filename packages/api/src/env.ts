@@ -9,8 +9,11 @@ export const env = z
     HL_INFO_API_URL: z.string().url().optional(), // unused on local: the panel reads MockHyperCore's precompiles
     POLL_MS: z.coerce.number().int().min(250).default(1000),
     FROM_BLOCK: z.coerce.bigint().optional(), // first block of the activity / bad-debt log scan
-    LOGS_RPC_URL: z.string().url().optional(), // eth_getLogs only; default RPC_URL (Alchemy's testnet has none)
-    LOG_SCAN_MS: z.coerce.number().int().min(0).default(0), // gap between log scans; 3000 keeps a public RPC happy
+    // the activity feed's history (eth_getLogs); new blocks are read on RPC_URL, 10 at a time (Alchemy's free tier)
+    LOGS_RPC_URL: z.string().url().optional(),
+    LOG_PAGE: z.coerce.bigint().default(500n), // blocks per history call: thirdweb serves 1000, the public RPC 500
+    LOG_SCAN_MS: z.coerce.number().int().min(0).default(0), // gap between history calls (keyless RPCs rate-limit)
+    FEED_CACHE_FILE: z.string().optional(), // default deployments/feed-cache.<NETWORK>.json; none on local
     REPLAY_TOKEN: z.string().default("change-me"),
     // testnet faucet relay (POST /faucet): the key Faucet.setOperator allowed; unset → the route answers 503
     FAUCET_OPERATOR_PRIVATE_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),

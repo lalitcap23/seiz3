@@ -114,7 +114,23 @@ function precompile(name: string, address: Address, inputs: string, outputs: str
   };
 }
 
-/** Everything the snapshot needs from HyperEVM and HyperCore, in one eth_call at one block. */
+/** Multicall3's aggregate3 in one eth_call: each result is the call's return data, or null where it reverted. */
+async function aggregate(client: PublicClient, calls: readonly Call[], blockNumber?: bigint): Promise<(Hex | null)[]> {
+  const data = await client.call({
+    to: MULTICALL3,
+    data: encodeFunctionData({
+      abi: multicall3Abi,
+      functionName: "aggregate3",
+      args: [calls.map((c) => ({ target: c.target, allowFailure: true, callData: c.callData }))],
+    }),
+    ...(blockNumber === undefined ? {} : { blockNumber }),
+  });
+  if (data.data === undefined) throw new Error(`no Multicall3 at ${MULTICALL3}`);
+  const results = decodeFunctionResult({ abi: multicall3Abi, functionName: "aggregate3", data: data.data });
+  return results.map((r) => (r.success ? r.returnData : null));
+}
+
+/** Everything the snapshot needs from HyperEVM and HyperCore, in one eth_call at one block (plus one for the IRMs). */
 export async function readChain(
   client: PublicClient,
   dep: DeploymentFile,
@@ -175,25 +191,16 @@ export async function readChain(
     );
   }
 
-  const data = await client.call({
-    to: MULTICALL3,
-    data: encodeFunctionData({
-      abi: multicall3Abi,
-      functionName: "aggregate3",
-      args: [calls.map((c) => ({ target: c.target, allowFailure: true, callData: c.callData }))],
-    }),
-  });
-  if (data.data === undefined) throw new Error(`no Multicall3 at ${MULTICALL3}`);
-  const results = decodeFunctionResult({ abi: multicall3Abi, functionName: "aggregate3", data: data.data });
+  const results = await aggregate(client, calls);
 
   let i = 0;
   const next = (): unknown => {
     const call = calls[i];
     const result = results[i++];
-    if (call === undefined || result === undefined || !result.success) {
+    if (call === undefined || result === undefined || result === null) {
       throw new Error(`read ${call?.name ?? i} failed`);
     }
-    return call.decode(result.returnData);
+    return call.decode(result);
   };
   const optional = (): unknown => {
     try {
@@ -253,20 +260,20 @@ export async function readChain(
     const positions = borrowers.map((address) => ({ address, ...(next() as { borrowShares: bigint; collateral: bigint }) }));
     return { name, market, price, borrower, position, params, positions };
   });
-  // the rate Morpho would accrue at, from each market's IRM (Morpho passes it the stored market, as here)
-  const rates = await Promise.all(
-    raw.map(({ params, market }) =>
-      params.irm === "0x0000000000000000000000000000000000000000"
-        ? 0n
-        : (client.readContract({
-            address: params.irm,
-            abi: irmAbi,
-            functionName: "borrowRateView",
-            args: [params, market],
-            blockNumber,
-          }) as Promise<bigint>).catch(() => 0n),
-    ),
+  // the rate Morpho would accrue at, from each market's IRM (Morpho passes it the stored market, as here), at the
+  // same block; a failed read accrues nothing this poll
+  const irmCalls = raw.map(({ name, params, market }) =>
+    contract(`${name}.rate`, params.irm, irmAbi, "borrowRateView", [params, market]),
   );
+  const rateData = await aggregate(client, irmCalls, blockNumber).catch(() => irmCalls.map(() => null));
+  const rates = rateData.map((d, k) => {
+    if (d === null || raw[k]!.params.irm === "0x0000000000000000000000000000000000000000") return 0n;
+    try {
+      return irmCalls[k]!.decode(d) as bigint;
+    } catch {
+      return 0n; // no IRM code at that address: empty return data
+    }
+  });
   const markets = raw.map(({ name, market, price, borrower, position, positions }, i): MarketRead => ({
     name,
     lltv: BigInt(dep.markets[name].lltv),

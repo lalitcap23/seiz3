@@ -25,7 +25,9 @@ const dep = loadDeployment(env.NETWORK, env.DEPLOYMENTS_PATH);
 const remote = env.NETWORK === "local" ? null : env.NETWORK; // HyperEVM + Hyperliquid's info API
 const chain = remote ? chains[remote] : foundry;
 const rpcUrl = env.RPC_URL ?? (remote ? rpcUrlFor(remote) : "http://127.0.0.1:8545");
-const client = createPublicClient({ chain, transport: http(rpcUrl) }) as PublicClient;
+// viem's default (10 s, 3 retries) lets one stuck call hold the 1 s poll for 40 s; the next poll is the retry
+const transport = (url: string | undefined) => http(url, { timeout: 8_000, retryCount: 1 });
+const client = createPublicClient({ chain, transport: transport(rpcUrl) }) as PublicClient;
 
 const chainId = await client.getChainId();
 if (chainId !== dep.chainId) {
@@ -39,10 +41,22 @@ const collector = new Collector(client, dep, {
   hlInfoUrl: remote ? (env.HL_INFO_API_URL ?? HL_INFO_API[remote]) : null,
   explorerUrl: EXPLORER[env.NETWORK] && `${EXPLORER[env.NETWORK]}${dep.vault}`,
   fromBlock: env.FROM_BLOCK ?? (remote ? null : 0n),
-  ...(env.LOGS_RPC_URL
-    ? { logsClient: createPublicClient({ chain, transport: http(env.LOGS_RPC_URL) }) as PublicClient }
-    : {}),
-  logScanMs: env.LOG_SCAN_MS,
+  logs: {
+    ...(env.LOGS_RPC_URL
+      ? {
+          // no retry: on a rate limit an instant one only doubles the count; the backfill backs off instead
+          logsClient: createPublicClient({
+            chain,
+            transport: http(env.LOGS_RPC_URL, { timeout: 8_000, retryCount: 0 }),
+          }) as PublicClient,
+        }
+      : {}),
+    backfillPage: env.LOG_PAGE,
+    backfillGapMs: env.LOG_SCAN_MS,
+    // anvil's reverts would make a cache lie; HyperEVM's blocks are final
+    ...(remote ? { cacheFile: env.FEED_CACHE_FILE ?? `${DEPLOYMENTS_DIR}feed-cache.${env.NETWORK}.json` } : {}),
+    chainRewinds: !remote,
+  },
   extraBorrowers: () => watchlist.list(),
 });
 collector.start(env.POLL_MS);
@@ -59,6 +73,7 @@ app.get("/health", (c) =>
     updatedAt: collector.latest?.updatedAt ?? null,
     lastError: collector.lastError,
     logError: collector.logError, // activity feed behind while set
+    feed: collector.latest?.feed ?? null,
   }),
 );
 
@@ -73,6 +88,9 @@ app.get("/history", (c) => {
   return c.json(collector.history.filter((p) => p.t >= from));
 });
 
+/** The page's whole feed: every snapshot, and a heartbeat that says why none came (the API's own reads failing). */
+const HEARTBEAT_MS = 5_000;
+
 app.get("/stream", (c) =>
   streamSSE(c, async (stream) => {
     if (collector.latest !== null) {
@@ -82,7 +100,13 @@ app.get("/stream", (c) =>
       (s) => void stream.writeSSE({ event: "snapshot", data: JSON.stringify(s) }),
     );
     stream.onAbort(() => void unsubscribe());
-    while (!stream.aborted) await stream.sleep(30_000);
+    while (!stream.aborted) {
+      await stream.sleep(HEARTBEAT_MS);
+      await stream.writeSSE({
+        event: "health",
+        data: JSON.stringify({ lastError: collector.lastError, updatedAt: collector.latest?.updatedAt ?? null }),
+      });
+    }
   }),
 );
 

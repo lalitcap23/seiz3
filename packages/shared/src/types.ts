@@ -144,6 +144,14 @@ export const snapshotSchema = z.object({
   marketOpen: z.boolean(),
   activity: z.array(activityEventSchema),
   operations: z.array(operationSchema).default([]),
+  /** How current `activity` and `operations` are: they come from logs, read apart from the state above. */
+  feed: z
+    .object({
+      behind: z.number(), // blocks between the head and the newest scanned block
+      historyLeft: z.number(), // blocks of history still loading
+      error: z.string().nullable(),
+    })
+    .optional(),
 });
 
 export const historyPointSchema = z.object({

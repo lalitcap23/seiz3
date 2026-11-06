@@ -8,6 +8,7 @@ async function info<T>(url: string, body: Record<string, unknown>): Promise<T> {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10_000), // a hung request would stall whichever loop awaits it
   });
   if (!res.ok) throw new Error(`HL info ${body.type} → ${res.status}`);
   return (await res.json()) as T;

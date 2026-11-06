@@ -9,9 +9,11 @@
 # Keys come straight from .env.local: DEPLOYER_PRIVATE_KEY, KEEPER_PRIVATE_KEY, FAUCET_OPERATOR_PRIVATE_KEY,
 # HL_MM_PRIVATE_KEY + HL_MM_ACCOUNT, RPC_URL (private, e.g. Alchemy; the public one rate-limits ~100 requests a minute
 # per IP). Optional there: REPLAY_TOKEN (turns the presenter bar on), ALERT_WEBHOOK_URL.
-# eth_getLogs goes to thirdweb's keyless RPC (LOGS_RPC_URL): Alchemy's HyperEVM testnet doesn't serve it, and the
-# public one rate-limits this IP along with the browser and the wallet.
-# deployments/ is shared with the host: testnet.json, the keeper's KILL switch, the bots' BOTS_HOLD.
+# eth_getLogs: Alchemy's free tier serves 10 blocks a call, so the API reads new blocks there (same head as its
+# snapshot) and only loads history through thirdweb's keyless RPC (LOGS_RPC_URL), which rate-limits most calls; the
+# keeper's borrower scan uses thirdweb too. The public RPC rate-limits this IP along with the browser and the wallet.
+# deployments/ is shared with the host: testnet.json, the keeper's KILL switch, the bots' BOTS_HOLD, the API's
+# feed-cache.testnet.json (scanned history, so a restart doesn't reload it).
 name: afterbell-testnet
 
 x-logs-rpc: &logs-rpc https://998.rpc.thirdweb.com
@@ -61,7 +63,9 @@ services:
       BORROWER_SCAN_INTERVAL_MS: "4000"
       # buy-back liquidity gate: no unwind until HyperCore has an ask for the buy-back (the bots post it on request)
       HL_INFO_API_URL: https://api.hyperliquid-testnet.xyz/info
-      BORROWER_SCAN_FROM_BLOCK: "68013191" # the vault's deploy (2026-10-27): no one borrowed before it
+      # 2026-10-29 session start: thirdweb serves 1000 blocks a call and rate-limits, so a backfill from the vault's
+      # deploy (68013191) took 20+ min. Testers who connect on /try are watched through watch.json regardless.
+      BORROWER_SCAN_FROM_BLOCK: "68197000"
 
   api:
     <<: *service
@@ -69,9 +73,10 @@ services:
     ports: ["8787:8787"]
     environment:
       NETWORK: testnet
-      FROM_BLOCK: "68013191" # activity feed from the vault's deploy: caught up within a minute of a restart
-      LOGS_RPC_URL: *logs-rpc
-      LOG_SCAN_MS: "1000"
+      FROM_BLOCK: "68197000" # activity feed from the 2026-10-29 session (the vault's deploy, 68013191, is 185k blocks back)
+      LOGS_RPC_URL: *logs-rpc # history only; new blocks come from RPC_URL
+      LOG_PAGE: "1000" # thirdweb's cap
+      LOG_SCAN_MS: "1000" # between history calls; a rate limit backs off up to 30 s
       KILL_SWITCH_FILE: /app/deployments/KILL
       HOLD_FILE: /app/deployments/BOTS_HOLD
       # Docker Desktop shows every local request as one IP, so the per-IP limit would allow one drip an hour in
@@ -89,10 +94,9 @@ services:
       # the rebalancer recycles the deployer's own LP shares (it owns the vault); keep ~3 tester liquidations of cash
       VAULT_FLOOR_USDC: "60"
       USDC_TOPUP: "30"
-      # the market maker's account is short ~3 NVDA on ~$32 of margin (liq. ~3% away): its asks only sell the vault
-      # back what its bid bought from the hedge, so allow them down to 3% (default 8%) and keep them just over the need
-      MM_MIN_LIQ_DISTANCE: "0.03"
-      MM_ASK_BUFFER: "0.02"
+      # the market maker's account holds ~$236 against a ~2 NVDA short (liq. ~$330), so the default 8% distance holds;
+      # 6 NVDA of short covers 5–10 back-to-back tester unwinds before its own bids buy it back
+      MM_VAULT_MAX_SHORT: "6"
 
   web:
     build:
@@ -104,4 +108,4 @@ services:
     image: afterbell-web:testnet
     restart: unless-stopped
     depends_on: [api]
-    ports: ["3000:3000"]
+    ports: ["${WEB_PORT:-3000}:3000"] # WEB_PORT=3001 pnpm testnet:up when 3000 is taken
