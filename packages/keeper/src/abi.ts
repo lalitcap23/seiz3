@@ -35,5 +35,15 @@ export const morphoAbi = parseAbi([
   "function getBorrower(address borrower) view returns (uint256 collateral, uint256 borrowAssets)",
 ] as const);
 
+export const morphoBlueAbi = parseAbi([
+  "function idToMarketParams(bytes32 id) view returns (address loanToken, address collateralToken, address oracle, address irm, uint256 lltv)",
+  "function market(bytes32 id) view returns (uint128 totalSupplyAssets, uint128 totalSupplyShares, uint128 totalBorrowAssets, uint128 totalBorrowShares, uint128 lastUpdate, uint128 fee)",
+  "function position(bytes32 id, address user) view returns (uint256 supplyShares, uint128 borrowShares, uint128 collateral)",
+] as const);
+
+export const oracleAbi = parseAbi([
+  "function price() view returns (uint256)",
+] as const);
+
 export type VaultAbi = typeof vaultAbi;
 export type MorphoAbi = typeof morphoAbi;
