@@ -66,6 +66,7 @@ abstract contract AfterbellBase is Test {
     address internal lp = makeAddr("lp");
     address internal lp2 = makeAddr("lp2");
     address internal keeper = makeAddr("keeper");
+    address internal creForwarder = makeAddr("creForwarder"); // delivers Chainlink CRE reports to RiskParams
     address internal lender = makeAddr("lender");
     address internal borrower = makeAddr("borrower");
 
@@ -101,7 +102,7 @@ abstract contract AfterbellBase is Test {
         depositWallet = core.install(vm);
         core.setPx(_raw(START_PX));
 
-        risk = new RiskParams(owner, DeployHelpers.defaultRisk());
+        risk = new RiskParams(owner, creForwarder, DeployHelpers.defaultRisk());
         vault = _newVault();
         vm.startPrank(owner);
         hook.setVault(vault); // the hook's pool can only be initialised once it knows its vault

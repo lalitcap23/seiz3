@@ -277,6 +277,27 @@ contract HookFillTest is AfterbellBase {
         assertApproxEqRel(closedOut, openOut * 9900 / 9970, 0.0005e18, "1% vs 0.3%");
     }
 
+    function test_fee_followsTheCreMarketStatus() public {
+        vm.prank(owner);
+        risk.setMarketOpen(true);
+        vm.prank(creForwarder);
+        risk.onReport("", abi.encode(false, uint256(50_000e6), uint64(block.timestamp)));
+        (,, uint24 fee, bool open) = hook.quote();
+        assertFalse(open, "the Data Streams status replaces the owner's flag");
+        assertEq(fee, 10_000);
+
+        vm.prank(creForwarder);
+        risk.onReport("", abi.encode(true, uint256(50_000e6), uint64(block.timestamp + 1)));
+        (,, fee, open) = hook.quote();
+        assertTrue(open);
+        assertEq(fee, 3000);
+
+        vm.warp(block.timestamp + risk.maxReportAge() + 2);
+        (,, fee, open) = hook.quote();
+        assertFalse(open, "a stale report prices as after hours");
+        assertEq(fee, 10_000);
+    }
+
     function test_unwindStep_paysTheOpenFeeEvenAfterTheBell() public {
         _alignPool(CRASH_PX); // market still closed
         uint256 idle = usdc.balanceOf(address(vault));

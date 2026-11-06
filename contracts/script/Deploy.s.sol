@@ -43,6 +43,7 @@ contract Deploy is Script {
         uint8 szDecimals;
         uint256 seed;
         uint256 activation;
+        address creForwarder; // 0 → DeployHelpers.creForwarder
     }
 
     function run() external {
@@ -52,7 +53,8 @@ contract Deploy is Script {
         (, address deployer,) = vm.readCallers(); // the broadcasting account, however run() was invoked
 
         address nvdax = c.nvdax != address(0) ? c.nvdax : address(new MockNVDAx(deployer));
-        RiskParams risk = new RiskParams(deployer, DeployHelpers.defaultRisk());
+        address forwarder = c.creForwarder != address(0) ? c.creForwarder : DeployHelpers.creForwarder(deployer);
+        RiskParams risk = new RiskParams(deployer, forwarder, DeployHelpers.defaultRisk());
         // the vault's pool key names the hook, and the hook trusts only that vault: hook first, vault, then bind
         AfterbellHook hook = _deployHook(IPoolManager(c.poolManager), deployer);
         PoolKey memory key = DeployHelpers.poolKey(c.usdc, nvdax, address(hook));
@@ -118,6 +120,7 @@ contract Deploy is Script {
         c.seed = vm.envOr("SEED_DEPOSIT", uint256(10e6));
         c.activation = vm.envOr("CORE_ACTIVATION", block.chainid == 998 ? 0 : uint256(2e6));
         require(c.activation <= c.seed, "activation comes out of the seed deposit");
+        c.creForwarder = vm.envOr("CRE_FORWARDER", address(0));
     }
 
     function _write(
@@ -130,11 +133,13 @@ contract Deploy is Script {
     ) internal {
         string memory o = "deployment";
         vm.serializeUint(o, "chainId", block.chainid);
+        vm.serializeUint(o, "startBlock", block.number); // where log scans (keeper borrowers, API feed) begin
         vm.serializeAddress(o, "usdc", address(vault.usdc()));
         vm.serializeAddress(o, "morpho", address(vault.morpho()));
         vm.serializeAddress(o, "poolManager", address(vault.poolManager()));
         vm.serializeAddress(o, "nvdax", address(vault.nvdax()));
         vm.serializeAddress(o, "riskParams", address(vault.risk()));
+        vm.serializeAddress(o, "creForwarder", vault.risk().getForwarderAddress());
         vm.serializeAddress(o, "vault", address(vault));
         vm.serializeAddress(o, "hook", address(hook));
         vm.serializeAddress(o, "coreDepositWallet", vault.coreDepositWallet());

@@ -93,6 +93,27 @@ contract LiquidationTest is AfterbellBase {
         _liquidate(SEIZE); // ~$7.8k
     }
 
+    /// @dev The Chainlink CRE report lowers the cap to what HyperCore's book can absorb, and a stale one stops
+    ///      liquidations; the vault itself is unchanged, it reads both through `risk.get()`.
+    function test_liquidate_cappedByTheCreHedgeCapacity() public {
+        _setPrice(CRASH_PX);
+        vm.prank(creForwarder);
+        risk.onReport("", abi.encode(false, uint256(5000e6), uint64(block.timestamp)));
+
+        uint256 snap = vm.snapshotState();
+        vm.expectRevert(IAfterbellVault.OverCap.selector);
+        _liquidate(SEIZE); // ~$7.8k into a book that takes $5k
+
+        vm.revertToState(snap);
+        _liquidate(SEIZE / 2);
+        assertEq(vault.inventory(), SEIZE / 2);
+
+        vm.revertToState(snap);
+        vm.warp(block.timestamp + risk.maxReportAge() + 1);
+        vm.expectRevert(IAfterbellVault.OverCap.selector);
+        _liquidate(SEIZE / 2);
+    }
+
     function test_liquidate_revertsWhenLendingOracleDisagreesWithCore() public {
         _setPrice(CRASH_PX);
         core.setPx(_raw(CRASH_PX * 102 / 100)); // Core 2% above Morpho, band is 1.5%

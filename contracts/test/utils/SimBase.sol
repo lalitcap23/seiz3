@@ -44,6 +44,7 @@ abstract contract SimBase is Test {
     address lp = makeAddr("lp");
     address lender = makeAddr("lender");
     address borrower = makeAddr("borrower");
+    address creForwarder = makeAddr("creForwarder");
 
     HyperCore hyperCore;
     IERC20 usdc;
@@ -75,7 +76,7 @@ abstract contract SimBase is Test {
         _deployMorpho();
         _deployPool();
 
-        risk = new RiskParams(owner, DeployHelpers.defaultRisk());
+        risk = new RiskParams(owner, creForwarder, DeployHelpers.defaultRisk());
         vault = new AfterbellVault(
             owner,
             AfterbellVault.Wiring({

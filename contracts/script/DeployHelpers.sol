@@ -37,6 +37,15 @@ library DeployHelpers {
         });
     }
 
+    /// @notice The Chainlink forwarder that delivers CRE reports to RiskParams (docs.chain.link/cre, forwarder
+    ///         directory). HyperEVM testnet gets the simulation forwarder, which `cre workflow simulate --broadcast`
+    ///         writes through. Chains without one (anvil) use `fallback_`, which can then post reports itself.
+    function creForwarder(address fallback_) internal view returns (address) {
+        if (block.chainid == 999) return 0x9eF6468C5f37b976E57d52054c693269479A784d; // KeystoneForwarder
+        if (block.chainid == 998) return 0xB27fA1c28288c50542527F64BCda22C9FbAc24CB; // MockKeystoneForwarder
+        return fallback_;
+    }
+
     /// @notice The vault's NVDAx/USDC pool every script agrees on: AfterbellHook with a dynamic fee (the hook sets
     ///         it per swap: 0.3% while the market is open, wider after the bell).
     function poolKey(address usdc, address nvdax, address hook) internal pure returns (PoolKey memory) {
