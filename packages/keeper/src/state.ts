@@ -1,6 +1,6 @@
 import type { PublicClient } from "viem";
 
-import { morphoAbi, vaultAbi } from "./abi.js";
+import { morphoAbi, morphoBlueAbi, oracleAbi, vaultAbi } from "./abi.js";
 import { buildReports, mergeCandidates } from "./riskCalc.js";
 import { describeError } from "./riskEngine.js";
 import type {
@@ -53,17 +53,13 @@ export async function readState(
       { address: cfg.vault, abi: vaultAbi, functionName: "risk" },
       { address: cfg.vault, abi: vaultAbi, functionName: "marketId" },
       { address: cfg.vault, abi: vaultAbi, functionName: "poolPriceInBand" },
-      { address: cfg.morpho, abi: morphoAbi, functionName: "price" },
-      { address: cfg.morpho, abi: morphoAbi, functionName: "lltv" },
-      { address: cfg.morpho, abi: morphoAbi, functionName: "borrowerCount" },
     ]);
+
+  const marketId = optionalResult(statics[10], cfg.deployments.marketId) as Hex;
+  const marketRead = await readMarket(publicClient, blockNumber, cfg, marketId);
 
   const pendingRaw = requireResult(statics[0], "vault.pendingHedge");
   const riskRaw = requireResult(statics[9], "vault.risk");
-  const price = asBigInt(requireResult(statics[12], "morpho.price"), "morpho.price");
-  const lltv = asBigInt(requireResult(statics[13], "morpho.lltv"), "morpho.lltv");
-  const borrowerCount = asBigInt(requireResult(statics[14], "morpho.borrowerCount"), "borrowerCount");
-
   const pendingHedge: PendingHedge = {
     delta: tupleBig(pendingRaw, 0, "delta"),
     sentBlock: tupleBig(pendingRaw, 1, "sentBlock"),
@@ -83,12 +79,10 @@ export async function readState(
     unwindCooldownSec: tupleBig(riskRaw, 8, "unwindCooldownSec"),
   };
 
-  const onchainBorrowers = await readBorrowerAddresses(
-    publicClient,
-    cfg,
-    blockNumber,
-    borrowerCount,
-  );
+  const onchainBorrowers =
+    marketRead.mode === "mock"
+      ? await readBorrowerAddresses(publicClient, cfg, blockNumber)
+      : [];
   const candidates = mergeCandidates(cfg.deployments.borrowers, [
     ...onchainBorrowers,
     ...extraBorrowers,
@@ -98,17 +92,24 @@ export async function readState(
       .filter((b) => b.label !== undefined)
       .map((b) => [b.address.toLowerCase(), b.label as string]),
   );
-  const borrowers = await readBorrowers(
-    publicClient,
-    cfg,
-    blockNumber,
-    candidates.map((c) => c.address),
-  );
+  const borrowerAddresses = candidates.map((c) => c.address);
+  const borrowers =
+    marketRead.mode === "real"
+      ? await readBorrowersBlue(
+          publicClient,
+          blockNumber,
+          cfg,
+          marketId,
+          marketRead.totalBorrowAssets,
+          marketRead.totalBorrowShares,
+          borrowerAddresses,
+        )
+      : await readBorrowersMock(publicClient, cfg, blockNumber, borrowerAddresses);
 
   const market: MarketState = {
-    id: optionalResult(statics[10], cfg.deployments.marketId) as Hex,
-    price,
-    lltv,
+    id: marketId,
+    price: marketRead.price,
+    lltv: marketRead.lltv,
   };
 
   const state: VaultState = {
@@ -144,12 +145,108 @@ export async function readState(
   return { state, scan };
 }
 
+interface RealMarketRead {
+  readonly mode: "real";
+  readonly price: bigint;
+  readonly lltv: bigint;
+  readonly totalBorrowAssets: bigint;
+  readonly totalBorrowShares: bigint;
+}
+
+interface MockMarketRead {
+  readonly mode: "mock";
+  readonly price: bigint;
+  readonly lltv: bigint;
+}
+
+type MarketRead = RealMarketRead | MockMarketRead;
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const ZERO_MARKET_ID = `0x${"0".repeat(64)}`;
+const BORROW_VIRTUAL_SHARES = 1_000_000n;
+const BORROW_VIRTUAL_ASSETS = 1n;
+
+async function readMarket(
+  publicClient: PublicClient,
+  blockNumber: bigint,
+  cfg: Config,
+  marketId: Hex,
+): Promise<MarketRead> {
+  if (marketId.toLowerCase() !== ZERO_MARKET_ID) {
+    const [paramsResult, marketResult] = await multiCall(publicClient, blockNumber, [
+      {
+        address: cfg.morpho,
+        abi: morphoBlueAbi,
+        functionName: "idToMarketParams",
+        args: [marketId],
+      },
+      {
+        address: cfg.morpho,
+        abi: morphoBlueAbi,
+        functionName: "market",
+        args: [marketId],
+      },
+    ]);
+
+    if (paramsResult?.status === "success" && marketResult?.status === "success") {
+      const oracle = tupleValue(paramsResult.result, 2, "oracle");
+      const lltv = tupleBig(paramsResult.result, 4, "lltv");
+      if (typeof oracle === "string" && oracle.toLowerCase() !== ZERO_ADDRESS && lltv > 0n) {
+        const priceResult = await multiCall(publicClient, blockNumber, [
+          { address: oracle as Address, abi: oracleAbi, functionName: "price" },
+        ]);
+        if (priceResult[0]?.status === "success") {
+          const price = asBigInt(priceResult[0].result, "oracle.price");
+          if (price > 0n) {
+            return {
+              mode: "real",
+              price,
+              lltv,
+              totalBorrowAssets: tupleBig(marketResult.result, 2, "totalBorrowAssets"),
+              totalBorrowShares: tupleBig(marketResult.result, 3, "totalBorrowShares"),
+            };
+          }
+        }
+      }
+    }
+  }
+
+  const [priceResult, lltvResult] = await multiCall(publicClient, blockNumber, [
+    { address: cfg.morpho, abi: morphoAbi, functionName: "price" },
+    { address: cfg.morpho, abi: morphoAbi, functionName: "lltv" },
+  ]);
+  if (priceResult?.status !== "success" || lltvResult?.status !== "success") {
+    throw new Error(
+      "cannot read market: set MARKET_ID for real Morpho Blue, or use a mock exposing price()/lltv()",
+    );
+  }
+  return {
+    mode: "mock",
+    price: asBigInt(priceResult.result, "morpho.price"),
+    lltv: asBigInt(lltvResult.result, "morpho.lltv"),
+  };
+}
+
+function borrowSharesToAssets(
+  shares: bigint,
+  totalAssets: bigint,
+  totalShares: bigint,
+): bigint {
+  if (shares <= 0n || totalAssets <= 0n) return 0n;
+  const denominator = totalShares + BORROW_VIRTUAL_SHARES;
+  const numerator = shares * (totalAssets + BORROW_VIRTUAL_ASSETS);
+  return (numerator + denominator - 1n) / denominator;
+}
+
 async function readBorrowerAddresses(
   publicClient: PublicClient,
   cfg: Config,
   blockNumber: bigint,
-  count: bigint,
 ): Promise<Address[]> {
+  const countResult = await multiCall(publicClient, blockNumber, [
+    { address: cfg.morpho, abi: morphoAbi, functionName: "borrowerCount" },
+  ]);
+  const count = asBigInt(optionalResult(countResult[0], 0n), "borrowerCount");
   const capped = count > BigInt(MAX_BORROWERS) ? BigInt(MAX_BORROWERS) : count;
   if (capped === 0n) return [];
   const indexes = Array.from({ length: Number(capped) }, (_v, i) => BigInt(i));
@@ -174,7 +271,7 @@ async function readBorrowerAddresses(
   return addresses;
 }
 
-async function readBorrowers(
+async function readBorrowersMock(
   publicClient: PublicClient,
   cfg: Config,
   blockNumber: bigint,
@@ -201,6 +298,46 @@ async function readBorrowers(
     const address = addresses[i];
     if (address === undefined) continue;
     borrowers.push({ address, collateral, borrowAssets });
+  }
+  return borrowers;
+}
+
+async function readBorrowersBlue(
+  publicClient: PublicClient,
+  blockNumber: bigint,
+  cfg: Config,
+  marketId: Hex,
+  totalBorrowAssets: bigint,
+  totalBorrowShares: bigint,
+  addresses: readonly Address[],
+): Promise<BorrowerState[]> {
+  if (addresses.length === 0) return [];
+  const results = await multiCall(
+    publicClient,
+    blockNumber,
+    addresses.map((address) => ({
+      address: cfg.morpho,
+      abi: morphoBlueAbi,
+      functionName: "position" as const,
+      args: [marketId, address] as const,
+    })),
+  );
+
+  const borrowers: BorrowerState[] = [];
+  for (let i = 0; i < results.length; i += 1) {
+    const result = results[i];
+    if (result === undefined || result.status !== "success") continue;
+    const address = addresses[i];
+    if (address === undefined) continue;
+    borrowers.push({
+      address,
+      collateral: tupleBig(result.result, 2, "collateral"),
+      borrowAssets: borrowSharesToAssets(
+        tupleBig(result.result, 1, "borrowShares"),
+        totalBorrowAssets,
+        totalBorrowShares,
+      ),
+    });
   }
   return borrowers;
 }
