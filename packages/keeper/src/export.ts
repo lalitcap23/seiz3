@@ -1,6 +1,5 @@
 import {
   POLL_EXPORT_SCHEMA_VERSION,
-  parsePollExport,
   serializePollExport,
   type PollExport,
 } from "@afterbell/shared/risk";
@@ -10,9 +9,7 @@ import type { Config, ScanReport, VaultState } from "./types.js";
 
 /**
  * Builds the single polled-data export the keeper serves on GET /snapshot.
- *
- * The wire schema lives in @afterbell/shared/risk so a future risk engine
- * (outside this package) imports the same contract instead of copying it.
+ * The wire schema lives in @afterbell/shared/risk.
  */
 export function buildPollExport(
   state: VaultState,
@@ -46,5 +43,4 @@ export function buildPollExport(
   };
 }
 
-export { POLL_EXPORT_SCHEMA_VERSION, parsePollExport, serializePollExport };
-export type { PollExport };
+export { serializePollExport };

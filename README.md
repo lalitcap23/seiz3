@@ -2,7 +2,7 @@
 
 A vault that buys seized stock collateral from Morpho, shorts the same stock on HyperCore in the same transaction, then sells the stock through Uniswap v4 while closing the short: buyers on the vault's pool are filled from its hedged stock by a v4 hook, and the keeper pushes whatever nobody buys. A Chainlink CRE workflow tells the contracts whether the stock market is open and how much HyperCore's book can hedge.
 
-The full design is in `../Afterbell system architecture.md`.
+The full design is in [`Afterbell system architecture.md`](Afterbell%20system%20architecture.md).
 
 ## Layout
 
@@ -16,7 +16,7 @@ afterbell/
 │                        sim/ (ring 2, hyper-evm-lib CoreSimulator) · fork/ (ring 3) · utils/
 ├─ packages/
 │  ├─ shared/            wagmi-generated ABIs, deployments loader, Snapshot types, unit converters, HL info client
-│  ├─ keeper/            Node + viem tick loop (`--replay` for the demo)
+│  ├─ keeper/            Node + viem tick loop
 │  ├─ api/               Hono: GET /snapshot, GET /stream (SSE), GET /history, POST /replay/:step
 │  ├─ replay/            scripted 3-market demo, one step per click
 │  ├─ cre/               Chainlink CRE workflow: market status + hedge capacity → RiskParams
@@ -36,7 +36,7 @@ The vault's NVDAx/USDC pool carries [`AfterbellHook`](contracts/src/AfterbellHoo
 | The fill: price, size, settle, return the delta | [`beforeSwap` 192–217](contracts/src/AfterbellHook.sol#L192-L217), [`_fill` 221–246](contracts/src/AfterbellHook.sol#L221-L246) |
 | What one buy can take, at what ask (also the dashboard's quote) | [`quote` 144–158](contracts/src/AfterbellHook.sol#L144-L158), [`_capacity` 162–181](contracts/src/AfterbellHook.sol#L162-L181) |
 | The vault's side: send the stock, queue the buy-back | [`AfterbellVault.onHookFill` 398–414](contracts/src/AfterbellVault.sol#L398-L414) |
-| Address mining and deploy order (hook → vault → `setVault`) | [`Deploy.s.sol` 101–106](contracts/script/Deploy.s.sol#L101-L106), [`DeployHelpers.mineHookSalt` 62–78](contracts/script/DeployHelpers.sol#L62-L78) |
+| Address mining and deploy order (hook → vault → `setVault`) | [`Deploy.s.sol` 59–77](contracts/script/Deploy.s.sol#L59-L77), [`_deployHook` 101–109](contracts/script/Deploy.s.sol#L101-L109), [`DeployHelpers.mineHookSalt` 67–87](contracts/script/DeployHelpers.sol#L67-L87) |
 | Tests | [`HookFill.t.sol`](contracts/test/integration/HookFill.t.sol), hook buys in [`HedgeInvariant.t.sol`](contracts/test/integration/HedgeInvariant.t.sol), `test_sim_hookFill_buyBackLandsOnCore` (CoreSimulator), `test_hookFill_onTheDeployedPoolManager` (mainnet fork) |
 
 Rules:
@@ -54,13 +54,19 @@ Deploying needs the CREATE2 deployer `0x4e59b44847b379578588920cA78FbF26c0B4956C
 
 ## Chainlink CRE workflow (market feed)
 
-Two facts the vault needs but can't read on-chain come from a CRE workflow ([`packages/cre`](packages/cre)). First, is the US stock market open: Chainlink Data Streams' `marketStatus`. Second, how much NVDA HyperCore's xyz book can absorb: bids within the vault's hedge band, from Hyperliquid's `l2Book`. Every node fetches both. The DON requires the same status from all of them, takes the median capacity, and signs one report to `RiskParams`. The vault caps each liquidation at that capacity, and the hook prices from that status. Neither the vault nor the hook changed: they already read `risk.get()` and `risk.marketOpen()`.
+Two facts the vault needs but can't read on-chain come from a CRE workflow ([`packages/cre`](packages/cre)). First, is the US stock market open. Second, how much NVDA HyperCore's xyz book can absorb: bids within the vault's hedge band, from Hyperliquid's `l2Book`. Every node fetches the book; the DON takes the median and signs one report to `RiskParams`. The vault caps each liquidation at that capacity, and the hook prices from that status. Neither the vault nor the hook changed: they already read `risk.get()` and `risk.marketOpen()`.
+
+The market status has two sources, picked by `marketStatus` in the workflow config. `dataStreams` reads Chainlink Data Streams' `marketStatus` for NVDA (every node must agree). `marketHours` computes the exchange's regular session from the DON's clock, with the session times and holiday calendar in the config. The testnet config uses `marketHours` until our Data Streams key is authorized for the NVDA feed; everything else is live data. The workflow also reads Chainlink's free **NVDA/USD Data Feed** on Ethereum and compares it with HyperCore's oracle: outside the vault's oracle band, the report carries zero capacity (enforced on mainnet; observed on testnet, where HyperCore's oracle isn't the real price).
+
+First report on HyperEVM testnet, through the CRE CLI's simulation forwarder: [`0xdc8546e8…c5a2cd`](https://app.hyperliquid-testnet.xyz/explorer/tx/0xdc8546e8c5a86200bed442f594a1473aeb3e4cc771e682bedb4501544cd5c2cd) (decoded at `http://localhost:3000/tx/<hash>` while the API runs). `scripts/testnet-stack.sh cre-loop` keeps reporting every minute, as a DON would.
 
 | What | Where |
 | --- | --- |
-| The workflow: EVM read → two consensus rounds → signed write | [`workflow.ts` `onCronTrigger` 61–104](packages/cre/src/workflow.ts#L61-L104) |
-| Data Streams: HMAC auth, v8/v11 `marketStatus` | [`datastreams.ts` 35–119](packages/cre/src/datastreams.ts#L35-L119) |
-| Hedge capacity from the book | [`hyperliquid.ts` `readHedgeCapacity` 53–67](packages/cre/src/hyperliquid.ts#L53-L67), [`book.ts` 37–45](packages/cre/src/book.ts#L37-L45) |
+| The workflow: EVM read → book consensus → market status → Data Feed check → signed write | [`workflow.ts` `onCronTrigger` 102–153](packages/cre/src/workflow.ts#L102-L153) |
+| Market status source: Data Streams or market hours | [`workflow.ts` `readMarket` 86–100](packages/cre/src/workflow.ts#L86-L100), [`marketHours.ts` 29–52](packages/cre/src/marketHours.ts#L29-L52) |
+| Data Streams: HMAC auth, v8/v11 `marketStatus` | [`datastreams.ts` 36–121](packages/cre/src/datastreams.ts#L36-L121) |
+| Chainlink Data Feed price check | [`dataFeed.ts` 47–78](packages/cre/src/dataFeed.ts#L47-L78) |
+| Hedge capacity from the book | [`hyperliquid.ts` `readHedgeCapacity` 54–69](packages/cre/src/hyperliquid.ts#L54-L69), [`book.ts` 37–45](packages/cre/src/book.ts#L37-L45) |
 | The receiver: report → state, ordering, future guard | [`RiskParams._processReport` 104–111](contracts/src/RiskParams.sol#L104-L111) |
 | The vault's cap: `maxLiquidation` lowered to the capacity, 0 once stale | [`RiskParams.get` 65–72](contracts/src/RiskParams.sol#L65-L72), [`_report` 114–119](contracts/src/RiskParams.sol#L114-L119) |
 | The hook's fee and the unwind cooldown | [`RiskParams.marketOpen` 80–83](contracts/src/RiskParams.sol#L80-L83) |
@@ -89,7 +95,7 @@ pnpm codegen                              # forge build + wagmi ABIs → package
 | `pnpm typecheck`                                                | Typecheck every package                                                                             |
 | `pnpm dev`                                                      | API + web together                                                                                  |
 | `pnpm web`                                                      | Dashboard only; set `NEXT_PUBLIC_USE_FIXTURE=1` in `packages/web/.env.local` to run without the API |
-| `pnpm keeper` / `pnpm keeper:replay`                            | Keeper bot                                                                                          |
+| `pnpm keeper`                                                   | Keeper bot                                                                                          |
 | `pnpm test` / `pnpm test:scenarios`                             | Keeper unit tests / keeper against the real contracts on the local stack (below)                    |
 | `pnpm --filter @afterbell/cre test` / `compile`                 | CRE workflow on the SDK's test runtime / build its WASM with `cre-compile`                          |
 | `pnpm replay <setup\|reset\|scene\|marketA\|marketB\|marketC\|buyers\|monday>` | One demo step (see "Demo replay")                                              |
@@ -203,7 +209,48 @@ scripts/testnet-stack.sh crash           # market C 1.4% under HyperCore's oracl
 scripts/testnet-stack.sh status
 ```
 
-HyperCore's oracle can't be moved on testnet, so market C's price follows it and `crash` stays inside the vault's 1.5% oracle band. The keeper runs with top-ups switched off (testnet's CoreDepositWallet would lose the USDC) and without Morpho's API (it doesn't index our Morpho copy). No pool is seeded, so `unwindStep` reverts with `OracleBand` and the keeper skips it; seed one with `SeedPool.s.sol` for the unwind.
+HyperCore's oracle can't be moved on testnet, so market C's price follows it and `crash` stays inside the vault's 1.5% oracle band. The keeper runs with top-ups switched off (testnet's CoreDepositWallet would lose the USDC) and without Morpho's API (it doesn't index our Morpho copy).
+
+### Demo round on the deployed testnet stack
+
+With the stack up (`pnpm testnet:up`: keeper, risk engine, API, bots, web on http://localhost:3000), each round is live HyperEVM + HyperCore state; only the market status comes from market hours (see the CRE section):
+
+```bash
+scripts/testnet-stack.sh cre-loop          # own terminal: a Chainlink CRE report every minute, kept running all demo
+scripts/testnet-stack.sh borrow 0.9        # a borrower just under market C's 77% LLTV at HyperCore's price
+scripts/testnet-stack.sh crash             # market C 1.4% down → the keeper liquidates and shorts on HyperCore
+scripts/testnet-stack.sh release           # market C back on HyperCore's price
+scripts/testnet-stack.sh status            # inventory vs short, while the stock leaves the vault both ways (below)
+scripts/testnet-stack.sh hook-fill 20      # optional: one more buyer filled by the hook, on demand
+scripts/testnet-stack.sh cre-status        # the CRE report the vault and hook are reading
+```
+
+After a liquidation the stock leaves the vault two ways at once, both on the vault's Uniswap v4 pool:
+
+- **Vault → AMM:** the keeper's `unwindStep` sells a chunk into the curve every cooldown (`Unwound`); the hook only sets the fee.
+- **Vault → buyer:** the bots' `buyer` (`BOTS=…,buyer`, `BUYER_USDC` every `BUYER_INTERVAL_MS`) plays organic demand. It bids the curve just past the hook's ask, then buys through the public swap router, and AfterbellHook fills it straight from the vault's stock at HyperCore's oracle plus the spread (`InventoryFill`), off the curve.
+
+Each sale queues a reduce-only buy-back on HyperCore, filled against the market maker's standing ask.
+
+`borrow` is bounded by what market C can lend (`fund-vault <usdc>` tops up the vault's idle USDC, which repays each liquidation). The bots keep the v4 pool on HyperCore's oracle (unwinds stay inside the 1% slippage check) and post the asks the buy-backs fill against; during a crash only market C's oracle follower holds. Rounds run on 2026-11-06:
+
+| Step | Transaction |
+| --- | --- |
+| CRE report lands in RiskParams (liquidation cap → the book's $265.24) | `0xdc8546e8c5a86200bed442f594a1473aeb3e4cc771e682bedb4501544cd5c2cd` |
+| Keeper liquidates the market C borrower, vault shorts 1.162 NVDA on HyperCore | `0x086c948f53688b62f27f0a424563805d2c29d42c8a5389dd51a7b761539c7e99` |
+| Hook fill: 0.093 NVDAx from the vault for 19.99 USDC at the $214.9987 ask | `0x59cc48091f4db99b9f8398d75d8b773dd7cd2815f975d729de8ed39afa319d71` |
+
+Open any of them decoded at `http://localhost:3000/tx/<hash>` (HyperEVM testnet has no working public explorer).
+
+What keeps a round clean on testnet (found by auditing the vault's HyperCore order history, `historicalOrders`):
+
+- **Every buy-back clears HyperCore's $10 minimum.** An unwind chunk stops at `maxImpactBps` of pool price impact; on the thin testnet pool 50 bps sold ~$4.75, so most buy-backs came back `minTradeNtlRejected`. Testnet runs `scripts/testnet-stack.sh risk-set maxImpactBps 120 maxSlippageBps 150` (~0.054 NVDAx ≈ $11.4 a chunk).
+- **The market maker never leaves the vault without an ask.** While the vault holds stock it keeps an ask for min(stock, `maxUnhedged`) from the chain (a hook fill sends its buy-back with no warning), keeps any ask that still covers the next buy instead of churning it, and places a replacement before cancelling. Its bid (`MM_SIZE`, 1 NVDA) rests at full size: it is what a liquidation's hedge sells into, so it sets the CRE hedge capacity.
+- **The keeper never withdraws margin on testnet** (`CORE_RESERVE_USDC`): `withdrawMargin` only reaches the vault's HyperCore spot balance there, out of the xyz margin the next short needs (`sweep` moves it back).
+- **The keeper's breaker retries after a minute** (`BREAKER_COOLDOWN_MS`): RPC timeouts count as failed sends, and without it three in a row stopped the keeper until a restart.
+- `faucet-cooldown <seconds>` sets how often one address may drip (600 for testing).
+
+Two consecutive rounds after these changes: 17 of 17 HyperCore orders filled on the first try (the hedge, every buy-back, the hook fill's buy-back), vault flat at the end, no keeper failures.
 
 ## API (dashboard data)
 
@@ -253,6 +300,7 @@ Contracts, scripts and tests follow the architecture doc. The offline suite (uni
 - [ ] Leverage on xyz: CoreWriter can't set it. If the default is wrong, `addApiWallet` lets an agent set it
 - [x] Morpho on HyperEVM mainnet: `0x68e37dE8…` with 77% and 38.5% LLTVs and the AdaptiveCurve IRM `0xD4a426F0…` enabled. Not on testnet → `TestnetInfra.s.sol`
 - [x] Uniswap v4 PoolManager on HyperEVM mainnet: `0x12D4Fd9C…`. Not on testnet → same. `pnpm contracts:test:fork` passes against both
-- [x] AfterbellHook on HyperEVM testnet: mined at `0x5Bf6…6088` (flags `0x2088`), pool initialised, a live buy paid its after-hours fee (1%)
+- [x] AfterbellHook on HyperEVM testnet: mined at `0x5Bf6…6088` (flags `0x2088`), pool initialised, a live buy paid its after-hours fee (1%), and a live buyer was filled from the vault's stock at the ask (`hook-fill`, tx in "Demo round")
 - [x] CRE: `hyperliquid-testnet` / `hyperliquid-mainnet` are in the SDK's chain registry; the workflow compiles to WASM with `cre-compile`; the simulation forwarder `0xB27f…24CB` is on HyperEVM testnet
-- [ ] CRE CLI simulation with Data Streams credentials (`cre workflow simulate market-feed --broadcast`)
+- [x] CRE CLI simulation with `--broadcast` on HyperEVM testnet: the report lands in RiskParams (market status from market hours, book depth from Hyperliquid, Chainlink Data Feed observed)
+- [ ] Data Streams `marketStatus` instead of market hours: waiting on Chainlink to authorize our key for the NVDA feed (`marketStatus: "dataStreams"` in the config)

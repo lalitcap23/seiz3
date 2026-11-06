@@ -20,7 +20,6 @@
     "format": "prettier --write .",
     "dev": "pnpm --parallel --filter @afterbell/api --filter @afterbell/web dev",
     "keeper": "pnpm --filter @afterbell/keeper start",
-    "keeper:replay": "pnpm --filter @afterbell/keeper start --replay",
     "api": "pnpm --filter @afterbell/api dev",
     "web": "pnpm --filter @afterbell/web dev",
     "replay": "pnpm --filter @afterbell/replay start",

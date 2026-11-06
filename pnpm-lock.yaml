@@ -139,25 +139,6 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
-  packages/risk-engine:
-    dependencies:
-      '@afterbell/shared':
-        specifier: workspace:*
-        version: link:../shared
-      zod:
-        specifier: ^4.6.7
-        version: 4.6.7
-    devDependencies:
-      '@types/node':
-        specifier: ^22.10.5
-        version: 22.20.5
-      tsx:
-        specifier: ^4.19.2
-        version: 4.23.15
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
-
   packages/shared:
     dependencies:
       viem:

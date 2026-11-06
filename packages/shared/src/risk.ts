@@ -4,8 +4,6 @@ import { z } from "zod";
  * The keeper's polled-data export contract.
  *
  * Keeper serializes one `PollExport` per tick and serves it on GET /snapshot.
- * A future risk engine (or any other consumer) imports this module to parse
- * that payload with the same schema the keeper uses to build it.
  *
  * All on-chain integers are bigint in-process; on the wire they are decimal
  * strings (the schemas accept either so both sides can share one definition).
@@ -135,15 +133,6 @@ export const pollExportSchema = z.object({
   morphoApi: morphoApiSnapshotSchema.nullable(),
 });
 
-export type PendingHedge = z.infer<typeof pendingHedgeSchema>;
-export type RiskConfig = z.infer<typeof riskConfigSchema>;
-export type MarketState = z.infer<typeof marketStateSchema>;
-export type BorrowerState = z.infer<typeof borrowerStateSchema>;
-export type VaultState = z.infer<typeof vaultStateSchema>;
-export type BorrowerReport = z.infer<typeof borrowerReportSchema>;
-export type ScanReport = z.infer<typeof scanReportSchema>;
-export type MorphoApiPosition = z.infer<typeof morphoApiPositionSchema>;
-export type MorphoApiSnapshot = z.infer<typeof morphoApiSnapshotSchema>;
 export type PollExport = z.infer<typeof pollExportSchema>;
 
 function bigintReplacer(_key: string, value: unknown): unknown {
@@ -152,9 +141,4 @@ function bigintReplacer(_key: string, value: unknown): unknown {
 
 export function serializePollExport(value: PollExport): string {
   return JSON.stringify(value, bigintReplacer);
-}
-
-export function parsePollExport(value: unknown): PollExport {
-  const parsed = JSON.parse(typeof value === "string" ? value : JSON.stringify(value, bigintReplacer));
-  return pollExportSchema.parse(parsed);
 }

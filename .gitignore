@@ -38,3 +38,4 @@ mocks/shared/
 context.md
 deployments/# CRE CLI build scratch
 .cre_build_tmp.js
+deployments/

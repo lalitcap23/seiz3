@@ -14,7 +14,6 @@ COPY packages/keeper/package.json packages/keeper/
 COPY packages/api/package.json packages/api/
 COPY packages/replay/package.json packages/replay/
 COPY packages/bots/package.json packages/bots/
-COPY packages/risk-engine/package.json packages/risk-engine/
 COPY packages/shared/package.json packages/shared/
 COPY packages/web/package.json packages/web/
 
