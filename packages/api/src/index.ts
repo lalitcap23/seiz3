@@ -15,16 +15,31 @@ import { Watchlist } from "./watch.js";
 import { readTx } from "./tx.js";
 import { getConnInfo } from "@hono/node-server/conninfo";
 
+/** Where the account holding the short opens on HyperCore's explorer (the vault itself on HyperEVM). */
 const EXPLORER = {
   local: "",
   testnet: "https://app.hyperliquid-testnet.xyz/explorer/address/",
   mainnet: "https://app.hyperliquid.xyz/explorer/address/",
+  "local-base": "",
+  "base-sepolia": "https://app.hyperliquid-testnet.xyz/explorer/address/",
+} as const;
+/** Where the vault's own transactions open: HyperEVM's are on Hyperliquid's explorer, Base Sepolia's on Basescan. */
+const TX_EXPLORER = {
+  local: "",
+  testnet: "https://app.hyperliquid-testnet.xyz/explorer/tx/",
+  mainnet: "https://app.hyperliquid.xyz/explorer/tx/",
+  "local-base": "",
+  "base-sepolia": "https://sepolia.basescan.org/tx/",
 } as const;
 
 const dep = loadDeployment(env.NETWORK, env.DEPLOYMENTS_PATH);
-const remote = env.NETWORK === "local" ? null : env.NETWORK; // HyperEVM + Hyperliquid's info API
+// HyperEVM or Base Sepolia + Hyperliquid's info API; null on an anvil (local: HyperEVM-like, local-base: Base-like)
+const remote = env.NETWORK === "local" || env.NETWORK === "local-base" ? null : env.NETWORK;
 const chain = remote ? chains[remote] : foundry;
-const rpcUrl = env.RPC_URL ?? (remote ? rpcUrlFor(remote) : "http://127.0.0.1:8545");
+const rpcUrl =
+  env.RPC_URL ?? (remote ? rpcUrlFor(remote) : env.NETWORK === "local-base" ? "http://127.0.0.1:8546" : "http://127.0.0.1:8545");
+/** The HyperCore account that holds the short: the vault on HyperEVM, the relayer's hedge account on Base. */
+const coreAccount = dep.hedgeAccount ?? dep.vault;
 // viem's default (10 s, 3 retries) lets one stuck call hold the 1 s poll for 40 s; the next poll is the retry
 const transport = (url: string | undefined) => http(url, { timeout: 8_000, retryCount: 1 });
 const client = createPublicClient({ chain, transport: transport(rpcUrl) }) as PublicClient;
@@ -39,7 +54,7 @@ const watchlist = new Watchlist(env.WATCH_FILE ?? `${DEPLOYMENTS_DIR}watch.json`
 
 const collector = new Collector(client, dep, {
   hlInfoUrl: remote ? (env.HL_INFO_API_URL ?? HL_INFO_API[remote]) : null,
-  explorerUrl: EXPLORER[env.NETWORK] && `${EXPLORER[env.NETWORK]}${dep.vault}`,
+  explorerUrl: EXPLORER[env.NETWORK] && `${EXPLORER[env.NETWORK]}${coreAccount}`,
   // where the deployment's markets were created: nothing of ours exists before it
   fromBlock: env.FROM_BLOCK ?? (dep.startBlock !== undefined ? BigInt(dep.startBlock) : remote ? null : 0n),
   logs: {
@@ -117,8 +132,8 @@ app.get("/tx/:hash", async (c) => {
   if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) return c.json({ error: "not a transaction hash" }, 400);
   const view = await readTx(client, collector.deployment, hash as `0x${string}`, {
     infoUrl: remote ? (env.HL_INFO_API_URL ?? HL_INFO_API[remote]) : null,
-    explorer: EXPLORER[env.NETWORK] ? `${EXPLORER[env.NETWORK]}${dep.vault}` : null,
-    txExplorer: EXPLORER[env.NETWORK] ? EXPLORER[env.NETWORK].replace("/address/", "/tx/") : null,
+    explorer: EXPLORER[env.NETWORK] ? `${EXPLORER[env.NETWORK]}${coreAccount}` : null,
+    txExplorer: TX_EXPLORER[env.NETWORK] || null,
   }).catch((error: unknown) => ({ error: error instanceof Error ? error.message.split("\n")[0] : String(error) }));
   if (view === null) return c.json({ error: "transaction not found (yet)" }, 404);
   return "error" in view ? c.json(view, 502) : c.json(view);

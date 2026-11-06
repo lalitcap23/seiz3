@@ -137,7 +137,7 @@ export class Collector {
       const res = await fetch(this.opts.hlInfoUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ type: "userFills", user: this.dep.vault }),
+        body: JSON.stringify({ type: "userFills", user: this.dep.hedgeAccount ?? this.dep.vault }),
         signal: AbortSignal.timeout(INFO_TIMEOUT_MS),
       });
       if (res.ok) this.fills = (await res.json()) as CoreFill[];
@@ -166,7 +166,8 @@ export class Collector {
       return chain.core ? panelFromCore(chain.core, szDecimals, this.opts.explorerUrl) : null;
     }
     try {
-      return await panelFromApi(this.opts.hlInfoUrl, this.dep.vault, chain.core, szDecimals, this.opts.explorerUrl);
+      const account = this.dep.hedgeAccount ?? this.dep.vault; // Base Sepolia: the relayer's hedge account
+      return await panelFromApi(this.opts.hlInfoUrl, account, chain.core, szDecimals, this.opts.explorerUrl);
     } catch {
       return null;
     }

@@ -41,14 +41,19 @@ export const deploymentSchema = z.object({
   // testnet extras (TestnetExtras.s.sol): what the public tester page calls
   faucet: address.optional(),
   swapRouter: address.optional(),
+  // Base Sepolia architecture (DeployRemote.s.sol): HyperCore through the gateway, the short in the hedge account
+  hyperCoreGateway: address.optional(),
+  hedgeAccount: address.optional(),
 });
 
 export type Deployment = z.infer<typeof deploymentSchema>;
 export type MarketName = "A_naive" | "B_conservative" | "C_afterbell";
 
-const raw: Record<Network, unknown> = { testnet, mainnet };
+/** Bundled for the browser; Base Sepolia's file is read at runtime (`@afterbell/shared/node`'s loadDeployment). */
+const raw: Partial<Record<Network, unknown>> = { testnet, mainnet };
 
 /** Single source of addresses for every off-chain package. Written by contracts/script/Deploy.s.sol. */
 export function getDeployment(network: Network): Deployment {
+  if (raw[network] === undefined) throw new Error(`no bundled deployment for ${network}: use loadDeployment`);
   return deploymentSchema.parse(raw[network]);
 }

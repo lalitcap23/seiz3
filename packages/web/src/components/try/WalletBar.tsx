@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { API_URL } from "@/lib/api";
-import { dep, EXPLORER_TX } from "@/lib/chain";
+import { CHAIN_LABEL, dep, EVM_NAME, evmTxUrl, GAS } from "@/lib/chain";
 import type { Me } from "@/lib/me";
 import { useWallet } from "@/lib/wallet";
 import { Tag } from "../ui";
@@ -12,25 +12,25 @@ export function WalletBar({ me }: { me: Me | undefined }) {
   const { address, hasWallet, onChain, connect, switchChain } = useWallet();
 
   if (!hasWallet) {
-    return <Card title="Account" hint="Install MetaMask or Rabby to try Afterbell on HyperEVM testnet." />;
+    return <Card title="Account" hint={`Install MetaMask or Rabby to try Afterbell on ${CHAIN_LABEL}.`} />;
   }
   if (address === null) {
     return (
-      <Card title="Account" hint="Connect a wallet to borrow, provide liquidity or swap on HyperEVM testnet.">
+      <Card title="Account" hint={`Connect a wallet to lend, borrow, provide liquidity or swap on ${CHAIN_LABEL}.`}>
         <Action label="Connect wallet" onClick={connect} className="w-full" />
       </Card>
     );
   }
   return (
-    <Card title="Account" meta={onChain ? <Tag tone="up">HyperEVM</Tag> : <Tag tone="warn">wrong chain</Tag>}>
+    <Card title="Account" meta={onChain ? <Tag tone="up">{EVM_NAME}</Tag> : <Tag tone="warn">wrong chain</Tag>}>
       <p className="truncate font-mono text-[12px]" title={address}>
         {address}
       </p>
-      {!onChain && <Action label="Switch to HyperEVM testnet" onClick={switchChain} className="w-full" />}
+      {!onChain && <Action label={`Switch to ${CHAIN_LABEL}`} onClick={switchChain} className="w-full" />}
       {me && (
         <Rows
           rows={[
-            ["HYPE (gas)", fmt(me.hype, 18, 5)],
+            [`${GAS} (gas)`, fmt(me.hype, 18, 5)],
             ["USDC", fmt(me.usdc, 6, 2)],
             ["NVDAx", fmt(me.nvdax, 18)],
           ]}
@@ -71,7 +71,7 @@ export function FaucetCard({ me }: { me: Me | undefined }) {
     <Card
       title="Faucet"
       meta={<span>1 drip / cooldown</span>}
-      hint="Test NVDAx to borrow against, a little USDC, and HYPE for gas."
+      hint={`Test NVDAx to borrow against, USDC to lend or buy with, and ${GAS} for gas.`}
     >
       <Action
         label={waitUntil ? `Next drip ${new Date(waitUntil * 1000).toLocaleString()}` : "Get test tokens"}
@@ -83,7 +83,7 @@ export function FaucetCard({ me }: { me: Me | undefined }) {
         <p className={`font-mono text-[11px] ${state.error ? "text-down" : "text-muted"}`}>
           {state.text}{" "}
           {state.hash && (
-            <a className="text-faint underline hover:text-foreground" href={`${EXPLORER_TX}${state.hash}`} target="_blank" rel="noreferrer">
+            <a className="text-faint underline hover:text-foreground" href={evmTxUrl(state.hash)} target="_blank" rel="noreferrer">
               view
             </a>
           )}

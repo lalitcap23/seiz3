@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { formatUnits, parseUnits } from "viem";
-import { EXPLORER_TX } from "@/lib/chain";
+import { evmTxUrl } from "@/lib/chain";
 import { useWallet } from "@/lib/wallet";
 import { shortHash } from "@/lib/format";
 import { KV, Panel } from "../ui";
@@ -130,7 +130,7 @@ export function TxStatus() {
         <span className={`size-1.5 rounded-full ${dot}`} />
         <span className="text-[12px] font-medium">{tx.label}</span>
         {tx.hash && (
-          <a className="ml-auto font-mono text-[11px] text-faint hover:text-foreground" href={`${EXPLORER_TX}${tx.hash}`} target="_blank" rel="noreferrer">
+          <a className="ml-auto font-mono text-[11px] text-faint hover:text-foreground" href={evmTxUrl(tx.hash)} target="_blank" rel="noreferrer">
             {shortHash(tx.hash)} ↗
           </a>
         )}

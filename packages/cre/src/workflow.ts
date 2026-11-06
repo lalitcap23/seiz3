@@ -26,6 +26,7 @@ import { z } from "zod";
 import type { Address } from "viem";
 
 import { checkPrice, readDataFeed, type PriceCheck } from "./dataFeed";
+import { readHedgeAccount, writeGatewaySnapshot, type HedgeAccountRead } from "./gateway";
 import { MARKET_OPEN, readMarketStatus, type MarketStatusRead } from "./datastreams";
 import { readHedgeCapacity, type BookRead } from "./hyperliquid";
 import { isMarketOpen } from "./marketHours";
@@ -45,6 +46,8 @@ export const configSchema = z
       ...chain, // "hyperliquid-testnet" | "hyperliquid-mainnet"
       riskParams: address,
       gasLimit: z.string().default("300000"),
+      // the block RiskParams' bands are read at: "latest" on Base Sepolia, whose finalized head trails by hours
+      readBlock: z.enum(["finalized", "latest"]).default("finalized"),
     }),
     marketStatus: z.enum(["dataStreams", "marketHours"]),
     dataStreams: z.object({ apiUrl: httpsUrl, feedId: z.string().regex(/^0x[0-9a-fA-F]{64}$/) }).optional(),
@@ -56,6 +59,15 @@ export const configSchema = z
       .optional(),
     hyperliquid: z.object({ apiUrl: httpsUrl, dex: z.string(), coin: z.string() }),
     bookShareBps: z.number().int().min(1).max(10_000).default(10_000), // share of the visible depth one hedge may take
+    // Base Sepolia (vault on Base, short on HyperCore): also attest the hedge account to HyperCoreGateway (src/gateway.ts)
+    gateway: z
+      .object({
+        address,
+        hedgeAccount: address,
+        szDecimals: z.number().int().min(0).max(6),
+        gasLimit: z.string().default("400000"),
+      })
+      .optional(),
   })
   .refine((c) => c[c.marketStatus] !== undefined, (c) => ({ message: `marketStatus "${c.marketStatus}" needs its config block` }));
 
@@ -81,6 +93,8 @@ interface Market {
   readonly open: boolean;
   readonly observedAt: number;
   readonly source: string;
+  /** v11 streams: the equity market's top of book, e.g. "$186.95 × 450 / $186.97 × 230" (logged, not reported). */
+  readonly equityBook?: string;
 }
 
 function readMarket(runtime: Runtime<Config>): Market {
@@ -91,12 +105,32 @@ function readMarket(runtime: Runtime<Config>): Market {
   }
   const ds = cfg.dataStreams!;
   const read = runtime
-    .runInNodeMode(readMarketStatus, ConsensusAggregationByFields<MarketStatusRead>({ status: identical, observedAt: median }))(
-      ds,
-      { apiKey: secret(runtime, SECRET_API_KEY), apiSecret: secret(runtime, SECRET_API_SECRET) },
-    )
+    .runInNodeMode(
+      readMarketStatus,
+      ConsensusAggregationByFields<MarketStatusRead>({
+        status: identical,
+        observedAt: median,
+        bidUsd6: median,
+        bidSize: median,
+        askUsd6: median,
+        askSize: median,
+      }),
+    )(ds, { apiKey: secret(runtime, SECRET_API_KEY), apiSecret: secret(runtime, SECRET_API_SECRET) })
     .result();
-  return { open: read.status === MARKET_OPEN, observedAt: read.observedAt, source: `status ${read.status}` };
+  const equityBook =
+    read.bidUsd6 > 0n && read.askUsd6 > 0n
+      ? `$${usd(read.bidUsd6)} × ${shares(read.bidSize)} / $${usd(read.askUsd6)} × ${shares(read.askSize)}`
+      : undefined;
+  return {
+    open: read.status === MARKET_OPEN,
+    observedAt: read.observedAt,
+    source: `status ${read.status}`,
+    ...(equityBook ? { equityBook } : {}),
+  };
+}
+
+function shares(size1e6: bigint): string {
+  return String(Number(size1e6) / 1e6);
 }
 
 export function onCronTrigger(runtime: Runtime<Config>): string {
@@ -105,7 +139,7 @@ export function onCronTrigger(runtime: Runtime<Config>): string {
   const riskParams = cfg.evm.riskParams as Address;
 
   // the bands the vault works within, from the contract that enforces them
-  const bands = readRiskBands(runtime, evm, riskParams);
+  const bands = readRiskBands(runtime, evm, riskParams, cfg.evm.readBlock);
   runtime.log(`RiskParams ${riskParams}: hedge band ${bands.hedgeCapBps} bps, oracle band ${bands.oracleBandBps} bps`);
 
   const book = runtime
@@ -118,6 +152,7 @@ export function onCronTrigger(runtime: Runtime<Config>): string {
 
   const market = readMarket(runtime);
   runtime.log(`market ${market.open ? "open" : "closed"} (${market.source}) at ${market.observedAt}`);
+  if (market.equityBook) runtime.log(`Data Streams NVDA top of book: ${market.equityBook}`);
 
   let check: PriceCheck | undefined;
   if (cfg.dataFeed) {
@@ -143,13 +178,55 @@ export function onCronTrigger(runtime: Runtime<Config>): string {
     throw new Error(`RiskParams rejected the report: ${reply.errorMessage || "receiver reverted"}`);
   }
 
+  const attested = cfg.gateway ? attestHedgeAccount(runtime, evm) : "";
+
   const summary =
     `market ${report.open ? "open" : "closed"} (${market.source}), ` +
     `hedge capacity $${usd(report.hedgeCapacity)} within ${bands.hedgeCapBps} bps, observed ${report.observedAt}` +
+    (market.equityBook ? `, equity book ${market.equityBook}` : "") +
     (check ? `, Chainlink gap ${check.gapBps} bps` : "") +
-    (reply.txHash && reply.txHash.length > 0 ? `, tx ${bytesHex(reply.txHash)}` : "");
+    (reply.txHash && reply.txHash.length > 0 ? `, tx ${bytesHex(reply.txHash)}` : "") +
+    attested;
   runtime.log(`Afterbell market feed: ${summary}`);
   return summary;
+}
+
+/** The DON's own snapshot of the hedge account → HyperCoreGateway (Base Sepolia). Returns the summary's tail. */
+function attestHedgeAccount(runtime: Runtime<Config>, evm: ReturnType<typeof evmClient>): string {
+  const cfg = runtime.config;
+  const gw = cfg.gateway!;
+  const read = runtime
+    .runInNodeMode(
+      readHedgeAccount,
+      ConsensusAggregationByFields<HedgeAccountRead>({
+        observedAt: median,
+        szi: median,
+        entryNtl: median,
+        accountValue: median,
+        marginUsed: median,
+        ntlPos: median,
+        spotUsdcWei: median,
+        oraclePx: median,
+        markPx: median,
+        leverage: median,
+        exists: identical,
+      }),
+    )(cfg.hyperliquid, gw)
+    .result();
+  runtime.log(
+    `hedge account ${gw.hedgeAccount}: szi ${read.szi}, account value $${usd(read.accountValue)}, observed ${read.observedAt}`,
+  );
+  const reply = writeGatewaySnapshot(runtime, evm, gw.address as Address, read, gw.gasLimit);
+  if (reply.txStatus !== TxStatus.SUCCESS) {
+    throw new Error(`HyperCoreGateway report failed: ${reply.errorMessage || String(reply.txStatus)}`);
+  }
+  if (reply.receiverContractExecutionStatus !== undefined && reply.receiverContractExecutionStatus !== RECEIVER_SUCCESS) {
+    throw new Error(`HyperCoreGateway rejected the snapshot: ${reply.errorMessage || "receiver reverted"}`);
+  }
+  return (
+    `; hedge account szi ${read.szi} attested to the gateway` +
+    (reply.txHash && reply.txHash.length > 0 ? ` (tx ${bytesHex(reply.txHash)})` : "")
+  );
 }
 
 function usd(usd6: bigint): string {

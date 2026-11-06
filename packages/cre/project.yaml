@@ -16,3 +16,23 @@ production-settings:
       url: https://rpc.hyperliquid.xyz/evm
     - chain-name: ethereum-mainnet
       url: https://ethereum-rpc.publicnode.com
+
+# Base Sepolia (the vault on Base, the short on HyperCore testnet): base-feed/
+base-sepolia-settings:
+  cre-cli:
+    don-family: "zone-a"
+  rpcs:
+    - chain-name: ethereum-testnet-sepolia-base-1
+      url: https://sepolia.base.org
+    - chain-name: ethereum-mainnet # Chainlink's NVDA/USD Data Feed (dataFeed in the config)
+      url: https://ethereum-rpc.publicnode.com
+
+# An anvil fork of Base Sepolia on :8547 (scripts/base-stack.sh fork): the same chain, its RPC pointed at the fork
+base-fork-settings:
+  cre-cli:
+    don-family: "zone-a"
+  rpcs:
+    - chain-name: ethereum-testnet-sepolia-base-1
+      url: http://127.0.0.1:8547
+    - chain-name: ethereum-mainnet
+      url: https://ethereum-rpc.publicnode.com

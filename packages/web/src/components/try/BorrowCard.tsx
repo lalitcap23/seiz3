@@ -12,14 +12,23 @@ const WAD = 10n ** 18n;
 /** Max leaves this much interest (in seconds of it) under the limit: enough for the tx to land, then it tips over. */
 const TIP_OVER_SEC = 15n;
 
-/** USDC Max may borrow: up to the LLTV, minus the rounding Morpho adds and ~15 s of interest. */
-function maxBorrow(me: Me): bigint {
-  const room = me.position.maxDebt - me.position.debt;
+/** What Max leaves under the limit: ~15 s of interest, at least the rounding Morpho adds. */
+function margin(me: Me): bigint {
   const interest = (me.position.maxDebt * me.market.ratePerSec * TIP_OVER_SEC) / WAD;
-  const margin = (interest > 3n ? interest : 3n) + 1n;
-  const out = room - margin;
+  return (interest > 3n ? interest : 3n) + 1n;
+}
+
+/** USDC Max may borrow: up to the LLTV, minus the margin. */
+function maxBorrow(me: Me): bigint {
+  const out = me.position.maxDebt - me.position.debt - margin(me);
   if (out <= 0n) return 0n;
   return out < me.market.liquidity ? out : me.market.liquidity;
+}
+
+/** Seconds of interest until a Max borrow crosses the limit: the margin over the interest a second. */
+function tipOverSec(me: Me): number | null {
+  const perSec = (Number(me.position.maxDebt) * Number(me.market.ratePerSec)) / 1e18;
+  return perSec > 0 ? Math.ceil(Number(margin(me)) / perSec) : null;
 }
 
 const TITLE = "Borrow · Morpho Market C";
@@ -113,7 +122,8 @@ export function BorrowCard({ me }: { me: Me | undefined }) {
         <Section step="02" title="Borrow USDC" aside={`max ${fmt(maxBorrow(me), 6, 2)}`} />
         <AmountInput amount={borrow} unit="USDC" max={{ value: maxBorrow(me), label: "Max" }} />
         <Note>
-          Max borrows right up to the {(lltv * 100).toFixed(0)}% limit. Interest crosses it within about a minute, and the
+          Max borrows right up to the {(lltv * 100).toFixed(0)}% limit. Interest crosses it{" "}
+          {tipOverSec(me) === null ? "soon after" : `about ${tipOverSec(me)} s after the borrow lands`}, and the
           keeper liquidates you through the Afterbell vault: it buys your NVDAx at Morpho&apos;s discount and shorts the same
           amount on HyperCore. You keep the USDC; the collateral goes.
         </Note>

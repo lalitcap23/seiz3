@@ -11,7 +11,14 @@ import {
   type Hex,
   type PublicClient,
 } from "viem";
-import { afterbellHookAbi, afterbellVaultAbi, demoOracleAbi, iMorphoAbi, riskParamsAbi } from "@afterbell/shared/abis";
+import {
+  afterbellHookAbi,
+  afterbellVaultAbi,
+  demoOracleAbi,
+  hyperCoreGatewayAbi,
+  iMorphoAbi,
+  riskParamsAbi,
+} from "@afterbell/shared/abis";
 import { accruedTotalBorrow, extsloadAbi, poolSlots, type MarketName } from "@afterbell/shared";
 import type { DeploymentFile } from "@afterbell/shared/node";
 
@@ -124,6 +131,26 @@ function precompile(name: string, address: Address, inputs: string, outputs: str
   };
 }
 
+/**
+ * Base Sepolia: the same read through HyperCoreGateway, which answers in the precompile's encoding (a static struct
+ * encodes as the flat tuple), so it decodes exactly like `precompile`.
+ */
+function gateway(name: string, address: Address, functionName: string, outputs: string, args: readonly unknown[]): Call {
+  return {
+    name,
+    target: address,
+    callData: encodeFunctionData({ abi: hyperCoreGatewayAbi, functionName, args } as never),
+    decode: (data) => decodeAbiParameters(parseAbiParameters(outputs), data),
+  };
+}
+
+/** HyperCore reads: the precompiles on HyperEVM (and the local stack), the gateway where the deployment has one. */
+function coreCall(dep: DeploymentFile, name: string, precompileAt: Address, fn: string, inputs: string, outputs: string, args: readonly unknown[]): Call {
+  return dep.hyperCoreGateway
+    ? gateway(name, dep.hyperCoreGateway, fn, outputs, args)
+    : precompile(name, precompileAt, inputs, outputs, args);
+}
+
 /** Multicall3's aggregate3 in one eth_call: each result is the call's return data, or null where it reverted. */
 async function aggregate(client: PublicClient, calls: readonly Call[], blockNumber?: bigint): Promise<(Hex | null)[]> {
   const data = await client.call({
@@ -166,15 +193,22 @@ export async function readChain(
     contract("risk.marketOpen", dep.riskParams, riskParamsAbi, "marketOpen"),
     contract("pool.slot0", dep.poolManager, extsloadAbi, "extsload", [slots.slot0]),
     contract("pool.liquidity", dep.poolManager, extsloadAbi, "extsload", [slots.liquidity]),
-    precompile("core.oraclePx", PRECOMPILE.oraclePx, "uint32", "uint64", [perpIndex]),
-    precompile("core.markPx", PRECOMPILE.markPx, "uint32", "uint64", [perpIndex]),
-    precompile("core.position", PRECOMPILE.position2, "address, uint32", "int64, uint64, int64, uint32, bool", [
-      dep.vault,
-      perpIndex,
-    ]),
-    precompile(
+    coreCall(dep, "core.oraclePx", PRECOMPILE.oraclePx, "oraclePx", "uint32", "uint64", [perpIndex]),
+    coreCall(dep, "core.markPx", PRECOMPILE.markPx, "markPx", "uint32", "uint64", [perpIndex]),
+    coreCall(
+      dep,
+      "core.position",
+      PRECOMPILE.position2,
+      "position",
+      "address, uint32",
+      "int64, uint64, int64, uint32, bool",
+      [dep.vault, perpIndex],
+    ),
+    coreCall(
+      dep,
       "core.marginSummary",
       PRECOMPILE.marginSummary,
+      "accountMarginSummary",
       "uint32, address",
       "int64, uint64, uint64, int64",
       [dep.hypercore.perpDexIndex, dep.vault],

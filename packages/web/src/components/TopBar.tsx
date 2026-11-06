@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useLive, useSnapshot } from "@/lib/api";
-import { NETWORK } from "@/lib/chain";
+import { CHAIN_LABEL, EVM_NAME, NETWORK } from "@/lib/chain";
 import { shortHash } from "@/lib/format";
 import { useWallet } from "@/lib/wallet";
 import { NotificationBell, NotificationToasts } from "./Notifications";
@@ -40,7 +40,7 @@ function WalletChip() {
   }
   return (
     <span
-      title={onChain ? address : "Wrong network: switch to HyperEVM on the Try it page"}
+      title={onChain ? address : `Wrong network: switch to ${CHAIN_LABEL} on the Try it page`}
       className="hidden h-8 items-center gap-1.5 rounded-[3px] border border-line-strong px-2.5 normal-case text-muted sm:flex"
     >
       <span className={`size-1.5 rounded-full ${onChain ? "bg-up" : "bg-warn"}`} />
@@ -93,7 +93,7 @@ export function TopBar({ active }: { active?: (typeof TABS)[number]["key"] }) {
               </span>
             )}
             <span className="hidden rounded-[2px] border border-line-strong px-2 py-0.5 text-muted lg:inline">
-              HyperEVM {NETWORK}
+              {NETWORK === "base-sepolia" ? CHAIN_LABEL : `${EVM_NAME} ${NETWORK}`}
             </span>
             <NotificationBell />
             <WalletChip />

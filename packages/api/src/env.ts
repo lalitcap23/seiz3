@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const env = z
   .object({
-    NETWORK: z.enum(["local", "testnet", "mainnet"]).default("testnet"),
+    NETWORK: z.enum(["local", "testnet", "mainnet", "local-base", "base-sepolia"]).default("testnet"),
     API_PORT: z.coerce.number().default(8787),
     RPC_URL: z.string().url().optional(), // default: anvil for local, HYPEREVM_(TESTNET_)RPC_URL or viem's
     DEPLOYMENTS_PATH: z.string().optional(), // default: deployments/<NETWORK>.json

@@ -24,6 +24,10 @@ export default defineConfig({
         "PoolSeeder.sol/**",
         "Faucet.sol/**",
         "PoolSwapTest.sol/**",
+        // Base Sepolia architecture (contracts/src/remote): same vault/hook ABI plus the HyperCore gateway
+        "HyperCoreGateway.sol/**",
+        "AfterbellVaultRemote.sol/**",
+        "AfterbellHookRemote.sol/**",
       ],
     }),
   ],

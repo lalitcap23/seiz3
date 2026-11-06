@@ -29,6 +29,7 @@ import {
 } from "./riskEngine.js";
 import { readState } from "./state.js";
 import { readWatchlist } from "./watchlist.js";
+import { BuyerWindow } from "./buyerWindow.js";
 import { buyNeeded, checkBuyLiquidity, keepStandingAsk } from "./liquidityGate.js";
 import { StartupError, runStartup } from "./startup.js";
 import type { Action, Address, Config, RiskDecision, ScanReport, VaultState } from "./types.js";
@@ -114,6 +115,7 @@ async function main(): Promise<void> {
   let stopped = false;
   let timer: NodeJS.Timeout | undefined;
   let lastBlock = -1n;
+  const buyerWindow = new BuyerWindow(BigInt(cfg.buyerWindowSec));
 
   const shutdown = async (signal: string) => {
     if (stopped) return;
@@ -172,6 +174,7 @@ async function main(): Promise<void> {
     }
     // The vault times orders with block.timestamp, so the keeper decides on the same clock.
     const now = state.blockTimestamp;
+    buyerWindow.observe(state.inventory, now);
     telemetry.tick(state.blockNumber, state);
     logScan(scan);
     telemetry.setSnapshot(serializePollExport(buildPollExport(state, scan, morphoApiSnapshot, cfg)));
@@ -208,6 +211,13 @@ async function main(): Promise<void> {
         role: result.role,
         leaderId: result.leaderId,
       });
+      return;
+    }
+
+    // buyers first: new stock from a liquidation goes to the hook's buyers before any of it is pushed into the pool
+    if (decision.action.kind === "unwindStep" && buyerWindow.holds(state.lastUnwindAt, now)) {
+      telemetry.decision(decision.action.kind, "buyer-window");
+      logDecision(state, scan, decision, "buyer-window", null, { secondsLeft: buyerWindow.remaining(now) });
       return;
     }
 

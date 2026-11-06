@@ -3,6 +3,7 @@ import type { Hex } from "viem";
 import { buyFromVault, coreOracleUsd6, followOracles, rebalancePool } from "./evmBots.js";
 import { log, owner } from "./chain.js";
 import { MarketMaker } from "./marketMaker.js";
+import { holdUtilization } from "./utilization.js";
 import { checkAlerts } from "./alerts.js";
 import { bots, env } from "./env.js";
 
@@ -22,8 +23,8 @@ async function loop(name: string, everyMs: number, step: () => Promise<void>): P
 
 const running: Promise<never>[] = [];
 
-if (bots.has("oracle") || bots.has("pool") || bots.has("buyer")) {
-  if (owner === null) throw new Error("the oracle, pool and buyer bots need DEPLOYER_PRIVATE_KEY (the oracles' owner)");
+if (bots.has("oracle") || bots.has("pool") || bots.has("buyer") || bots.has("util")) {
+  if (owner === null) throw new Error("the oracle, pool, buyer and util bots need DEPLOYER_PRIVATE_KEY (the oracles' owner)");
   // one loop, so they never race for the deployer's nonce
   running.push(
     loop("evm", env.EVM_INTERVAL_MS, async () => {
@@ -34,6 +35,7 @@ if (bots.has("oracle") || bots.has("pool") || bots.has("buyer")) {
       if (bots.has("oracle") && !held) await followOracles(core);
       if (bots.has("pool")) await rebalancePool(core);
       if (bots.has("buyer")) await buyFromVault();
+      if (bots.has("util")) await holdUtilization();
     }),
   );
 }

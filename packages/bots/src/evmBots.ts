@@ -42,7 +42,8 @@ export async function rebalancePool(core: bigint): Promise<void> {
   const { sqrtPriceX96, liquidity } = await poolState(dep.poolKey);
   if (sqrtPriceX96 === 0n || liquidity === 0n) return; // not seeded yet (scripts/testnet-stack.sh seed deep)
   const pool = usdcPerNvdaxAt(sqrtPriceX96, nvdax0);
-  const gap = diffBps(pool, core);
+  const target = await poolTarget(core);
+  const gap = diffBps(pool, target);
   if (gap <= env.REBALANCE_BPS) return;
 
   const seeder = dep.poolSeeder as Address;
@@ -54,7 +55,7 @@ export async function rebalancePool(core: bigint): Promise<void> {
     }
     approved = true;
   }
-  if (pool > core) {
+  if (pool > target) {
     // selling NVDAx into the pool: keep some on hand (the deployer owns MockNVDAx)
     const topUp = BigInt(Math.round(env.NVDAX_TOPUP * 1e6)) * 10n ** 12n;
     if ((await read<bigint>(dep.nvdax, erc20Abi, "balanceOf", [me])) < topUp) {
@@ -64,8 +65,21 @@ export async function rebalancePool(core: bigint): Promise<void> {
     const usdc = await read<bigint>(dep.usdc, erc20Abi, "balanceOf", [me]);
     if (usdc < BigInt(env.MIN_REBALANCER_USDC * 1e6)) await recycleFromVault(me, usdc);
   }
-  await send(seeder, poolSeederAbi, "swapToPrice", [dep.poolKey, sqrtPriceAt(core, nvdax0)]);
-  log("pool", `pool ${usd(pool)} → ${usd(core)} (${gap} bps off)`);
+  await send(seeder, poolSeederAbi, "swapToPrice", [dep.poolKey, sqrtPriceAt(target, nvdax0)]);
+  log("pool", `pool ${usd(pool)} → ${usd(target)} (${gap} bps off${target === core ? "" : ", held over the hook's ask"})`);
+}
+
+/**
+ * Where the pool should trade: HyperCore's oracle, the arbitrage a live market would do. With POOL_ABOVE_ASK_BPS set
+ * and stock in the vault, just over the hook's ask instead, so any buyer (a bot or a person on /try) is filled from the
+ * vault through the hook. Moving the pool up there starts below the ask, where the hook sells nothing, so the move
+ * itself never takes stock from the vault; and it stays inside the vault's oracle band, so unwinds still run.
+ */
+async function poolTarget(core: bigint): Promise<bigint> {
+  if (env.POOL_ABOVE_ASK_BPS === undefined || dep.hook === undefined) return core;
+  if ((await read<bigint>(dep.vault, afterbellVaultAbi, "inventory")) === 0n) return core;
+  const [, ask] = await read<readonly [bigint, bigint, number, boolean]>(dep.hook, afterbellHookAbi, "quote");
+  return (ask * (BPS + BigInt(env.POOL_ABOVE_ASK_BPS))) / BPS;
 }
 
 /** Redeem some of the deployer's own LP shares for the next rebalance, never below the vault's floor. */
@@ -107,8 +121,11 @@ async function approveOnce(token: Address, spender: Address): Promise<void> {
  * on the oracle, so the buyer first bids the curve just past the ask (buy pressure, through PoolSeeder), then buys
  * through the public swap router. The pool bot sells the curve back to the oracle on its next round.
  */
+/** BUYER_EACH_LIQUIDATION: when the vault's current stock arrived (block time), and the inventory seen last round. */
+let stockSince: bigint | null = null;
+let lastInventory = 0n;
+
 export async function buyFromVault(): Promise<void> {
-  if (Date.now() - lastBuyAt < env.BUYER_INTERVAL_MS) return;
   const hook = dep.hook;
   const router = dep.swapRouter;
   if (hook === undefined || router === undefined) return;
@@ -120,10 +137,19 @@ export async function buyFromVault(): Promise<void> {
     read<number>(dep.riskParams, riskParamsAbi, "cooldown"),
     client.getBlock(),
   ]);
+  if (inventory === 0n) stockSince = null;
+  else if (inventory > lastInventory) stockSince = block.timestamp; // a liquidation handed the vault new stock
+  lastInventory = inventory;
+  // BUYER_EACH_LIQUIDATION: the first buy from each liquidation's stock goes out at once, inside the keeper's buyer
+  // window (BUYER_WINDOW_SEC), so every liquidation sells to a buyer through the hook before anything is pushed
+  const firstFromNewStock = env.BUYER_EACH_LIQUIDATION && stockSince !== null && lastUnwindAt < stockSince;
+  if (!firstFromNewStock && Date.now() - lastBuyAt < env.BUYER_INTERVAL_MS) return;
   // nothing to sell, or a buy-back still in flight: the hook wouldn't sell either
   if (inventory === 0n || pending[0] !== 0n || paused) return;
   // the keeper's next sale is due soon: wait for the window after it (checked again next round, a few seconds on)
-  if (Number(lastUnwindAt) + Number(cooldown) - Number(block.timestamp) < env.BUYER_MIN_WINDOW_SEC) return;
+  if (!firstFromNewStock && Number(lastUnwindAt) + Number(cooldown) - Number(block.timestamp) < env.BUYER_MIN_WINDOW_SEC) {
+    return;
+  }
 
   const amountIn = BigInt(Math.round(env.BUYER_USDC * 1e6));
   const me = owner!.address;
@@ -133,15 +159,18 @@ export async function buyFromVault(): Promise<void> {
     return;
   }
   const nvdax0 = nvdaxIsCurrency0(dep.poolKey, dep.nvdax);
-  const [, ask] = await read<readonly [bigint, bigint, number, boolean]>(hook, afterbellHookAbi, "quote");
+  const [ready, ask] = await read<readonly [bigint, bigint, number, boolean]>(hook, afterbellHookAbi, "quote");
   await approveOnce(dep.usdc, dep.poolSeeder as Address);
   await approveOnce(dep.usdc, router);
 
-  // 1. buy pressure: the curve just past the hook's ask
-  await send(dep.poolSeeder as Address, poolSeederAbi, "swapToPrice", [
-    dep.poolKey,
-    sqrtPriceAt((ask * (BPS + BigInt(env.BUYER_PUSH_BPS))) / BPS, nvdax0),
-  ]);
+  // 1. buy pressure: the curve just past the hook's ask, unless the pool already trades there (the hook can sell now:
+  //    a push would itself be a buy the hook fills from the vault)
+  if (ready === 0n) {
+    await send(dep.poolSeeder as Address, poolSeederAbi, "swapToPrice", [
+      dep.poolKey,
+      sqrtPriceAt((ask * (BPS + BigInt(env.BUYER_PUSH_BPS))) / BPS, nvdax0),
+    ]);
+  }
   const [capacity] = await read<readonly [bigint, bigint, number, boolean]>(hook, afterbellHookAbi, "quote");
   lastBuyAt = Date.now();
   if (capacity === 0n) {

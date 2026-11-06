@@ -5,7 +5,7 @@ const key = z.string().regex(/^0x[0-9a-fA-F]{64}$/);
 
 export const env = z
   .object({
-    NETWORK: z.enum(["testnet", "mainnet"]).default("testnet"),
+    NETWORK: z.enum(["testnet", "mainnet", "base-sepolia"]).default("testnet"),
     RPC_URL: z.string().url().optional(),
     DEPLOYMENTS_PATH: z.string().optional(),
     /** oracle,pool,mm,alerts: which bots run in this process */
@@ -52,6 +52,15 @@ export const env = z
     // buy only while the vault's unwind cooldown has this long left, so the keeper's next sale can't land between the
     // buyer's two transactions (a sale sets a pending buy-back, and the hook sells nothing until it's confirmed)
     BUYER_MIN_WINDOW_SEC: z.coerce.number().int().min(1).default(10),
+    // buy once from every liquidation's stock right away, inside the keeper's BUYER_WINDOW_SEC (Base Sepolia demo)
+    BUYER_EACH_LIQUIDATION: z
+      .enum(["0", "1", "true", "false"])
+      .default("0")
+      .transform((v) => v === "1" || v === "true"),
+    // util (BOTS=…,util): hold market C at its rate model's target utilization, leaving this much USDC free to borrow
+    UTIL_FREE_USDC: z.coerce.number().positive().optional(),
+    // pool rebalancer: while the vault holds stock, hold the pool this far over the hook's ask instead of the oracle
+    POOL_ABOVE_ASK_BPS: z.coerce.number().int().min(1).max(50).optional(),
 
     // alerts: what only a person can refill on testnet (Discord or Slack incoming webhook; unset → log only)
     ALERT_WEBHOOK_URL: z.string().url().optional(),

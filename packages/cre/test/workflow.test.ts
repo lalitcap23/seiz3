@@ -44,7 +44,7 @@ const OPEN_MS = Date.UTC(2026, 10, 6, 15, 0);
 
 const config: Config = {
   schedule: "0 */1 * * * *",
-  evm: { chainSelectorName: "hyperliquid-testnet", isTestnet: true, riskParams: RISK_PARAMS, gasLimit: "300000" },
+  evm: { chainSelectorName: "hyperliquid-testnet", isTestnet: true, riskParams: RISK_PARAMS, gasLimit: "300000", readBlock: "finalized" },
   marketStatus: "dataStreams",
   marketHours: HOURS,
   dataStreams: { apiUrl: "https://api.testnet-dataengine.chain.link", feedId: FEED_V8 },
@@ -242,6 +242,21 @@ describe("market feed workflow (SDK test runtime)", () => {
     expect(overnight.seen.written?.open).toBe(false);
   });
 
+  test("v11 stream: the equity market's top of book is reported alongside HyperCore's depth (not written on-chain)", () => {
+    const { runtime, seen } = arrange({
+      cfg: { dataStreams: { ...config.dataStreams!, feedId: FEED_V11 } },
+      dsFullReport: fullReport(v11Blob(FEED_V11, DS_OBSERVED, 2)),
+    });
+    const summary = onCronTrigger(runtime);
+    expect(summary).toContain("equity book $212.87 × 1 / $212.87 × 1");
+    expect(seen.written).toEqual({ open: true, hedgeCapacity: CAPACITY_1PCT, observedAt: BigInt(DS_OBSERVED) });
+  });
+
+  test("v8 stream: no top of book, nothing extra in the summary", () => {
+    const { runtime } = arrange();
+    expect(onCronTrigger(runtime)).not.toContain("equity book");
+  });
+
   test("the hedge band comes from RiskParams on-chain: a wider band counts deeper bids", () => {
     const { runtime, seen } = arrange({ hedgeCapBps: 700 }); // floor $197.97: the $200 bid counts too
     onCronTrigger(runtime);
@@ -423,8 +438,20 @@ describe("pieces", () => {
   });
 
   test("decodeMarketStatus reads v8 and v11 and rejects schemas without the field", () => {
-    expect(decodeMarketStatus(fullReport(v8Blob(FEED_V8, 123, 2)))).toEqual({ feedId: FEED_V8, observedAt: 123, status: 2 });
-    expect(decodeMarketStatus(fullReport(v11Blob(FEED_V11, 456, 5)))).toEqual({ feedId: FEED_V11, observedAt: 456, status: 5 });
+    const noBook = { bidUsd6: 0n, bidSize: 0n, askUsd6: 0n, askSize: 0n };
+    expect(decodeMarketStatus(fullReport(v8Blob(FEED_V8, 123, 2)))).toEqual({
+      feedId: FEED_V8,
+      observedAt: 123,
+      status: 2,
+      book: noBook, // v8 has no top of book
+    });
+    // v11 carries the equity market's top of book: $212.87 × 1 share each side (USD 6 dec, shares × 1e6)
+    expect(decodeMarketStatus(fullReport(v11Blob(FEED_V11, 456, 5)))).toEqual({
+      feedId: FEED_V11,
+      observedAt: 456,
+      status: 5,
+      book: { bidUsd6: 212_870_000n, bidSize: 1_000_000n, askUsd6: 212_870_000n, askSize: 1_000_000n },
+    });
     const v3 = fullReport(v8Blob(FEED_V8.replace("0008", "0003") as Hex, 1, 2));
     expect(() => decodeMarketStatus(v3)).toThrow(/schema v3/);
   });

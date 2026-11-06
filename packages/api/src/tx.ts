@@ -160,12 +160,12 @@ export async function readTx(
       })).json()) as T;
     const fills = await post<{ oid: number; sz: string; px: string; time: number; hash: string }[]>({
       type: "userFills",
-      user: dep.vault,
+      user: dep.hedgeAccount ?? dep.vault,
     });
     for (const e of sent) {
       const cloid = toHex(BigInt(String(e.args.cloid)), { size: 16 });
       const delta = BigInt(String(e.args.delta));
-      const st = await post<HlOrderStatus>({ type: "orderStatus", user: dep.vault, oid: cloid }).catch(() => null);
+      const st = await post<HlOrderStatus>({ type: "orderStatus", user: dep.hedgeAccount ?? dep.vault, oid: cloid }).catch(() => null);
       const oid = st?.order?.order.oid;
       hypercore.push({
         cloid,

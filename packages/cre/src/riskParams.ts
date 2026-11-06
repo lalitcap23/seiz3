@@ -6,6 +6,7 @@ import {
   bytesToHex,
   encodeCallMsg,
   LAST_FINALIZED_BLOCK_NUMBER,
+  LATEST_BLOCK_NUMBER,
   prepareReportRequest,
   type EVMClient,
   type Runtime,
@@ -64,7 +65,17 @@ export interface RiskBands {
   readonly oracleBandBps: bigint; // the gap the vault tolerates between its prices and HyperCore's oracle
 }
 
-export function readRiskBands(runtime: Runtime<unknown>, evm: EVMClient, riskParams: Address): RiskBands {
+/**
+ * @param at the block to read at: the last finalized one (HyperEVM, final in a block), or the latest (Base Sepolia,
+ *           whose finalized head trails by hours: a fresh deployment wouldn't exist there yet). The bands are the
+ *           owner's settings, which rarely change, so the latest block is safe to agree on.
+ */
+export function readRiskBands(
+  runtime: Runtime<unknown>,
+  evm: EVMClient,
+  riskParams: Address,
+  at: "finalized" | "latest" = "finalized",
+): RiskBands {
   const reply = evm
     .callContract(runtime, {
       call: encodeCallMsg({
@@ -72,7 +83,7 @@ export function readRiskBands(runtime: Runtime<unknown>, evm: EVMClient, riskPar
         to: riskParams,
         data: encodeFunctionData({ abi: RISK_PARAMS_ABI, functionName: "params" }),
       }),
-      blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+      blockNumber: at === "latest" ? LATEST_BLOCK_NUMBER : LAST_FINALIZED_BLOCK_NUMBER,
     })
     .result();
   const p = decodeFunctionResult({ abi: RISK_PARAMS_ABI, functionName: "params", data: bytesToHex(reply.data) });

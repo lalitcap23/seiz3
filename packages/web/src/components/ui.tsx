@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { EVM_EXPLORER, evmTxUrl } from "@/lib/chain";
 import { shortHash } from "@/lib/format";
 
 /** A terminal panel: a header bar (uppercase title, optional meta on the right), then the body. */
@@ -109,11 +110,34 @@ export function Meter({ value, tone, className = "" }: { value: number; tone: st
   );
 }
 
-/** A HyperEVM transaction, opened on our own decoder page (app/tx/[hash]). */
+/** A transaction on the vault's chain: Basescan on Base Sepolia, our own decoder page (app/tx/[hash]) on HyperEVM. */
 export function TxLink({ hash, className = "" }: { hash: string; className?: string }) {
+  const cls = `shrink-0 font-mono text-[11px] text-faint hover:text-foreground ${className}`;
+  if (EVM_EXPLORER) {
+    return (
+      <a href={evmTxUrl(hash)} target="_blank" rel="noreferrer" className={cls} title="Open on Basescan">
+        {shortHash(hash)} ↗
+      </a>
+    );
+  }
   return (
-    <Link href={`/tx/${hash}`} className={`shrink-0 font-mono text-[11px] text-faint hover:text-foreground ${className}`}>
+    <Link href={`/tx/${hash}`} className={cls}>
       {shortHash(hash)}
     </Link>
+  );
+}
+
+/** Something on HyperCore (a fill, or the account that holds the short), opened on Hyperliquid's explorer. */
+export function CoreLink({ href, label, className = "" }: { href: string; label: string; className?: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      title="Open on Hyperliquid's explorer"
+      className={`shrink-0 font-mono text-[11px] text-faint hover:text-foreground ${className}`}
+    >
+      {label} ↗
+    </a>
   );
 }

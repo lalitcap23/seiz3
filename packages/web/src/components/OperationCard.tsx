@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import type { HedgeOrder, Operation } from "@afterbell/shared";
-import { HL_EXPLORER_TX } from "@/lib/chain";
+import { EVM_EXPLORER, EVM_NAME, HL_ACCOUNT_URL, HL_EXPLORER_TX } from "@/lib/chain";
 import { shortHash, usd } from "@/lib/format";
-import { Tag, TxLink } from "./ui";
+import { CoreLink, Tag, TxLink } from "./ui";
 
 const nvda = (wei: string) => (Number(wei) / 1e18).toFixed(4);
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -28,21 +28,44 @@ export function SoldToTag({ to }: { to: SoldTo }) {
 
 /** The lanes an operation runs through, for the legend above the list. */
 export const LANES = [
-  { lane: "EVM", tone: "text-evm", text: "HyperEVM tx" },
+  { lane: "EVM", tone: "text-evm", text: `${EVM_NAME} tx` },
   { lane: "CORE", tone: "text-core", text: "HyperCore order" },
   { lane: "SYNC", tone: "text-up", text: "hedge confirmed" },
   { lane: "FIFO", tone: "text-muted", text: "whose stock" },
 ] as const;
 
-/** One line of an operation's trace: which side it happened on, what, and the transaction. */
-function Step({ lane, tone, tx, children }: { lane: string; tone: string; tx?: string; children: ReactNode }) {
+/** One line of an operation's trace: which side it happened on, what, and where it opens (`link` overrides `tx`). */
+function Step({
+  lane,
+  tone,
+  tx,
+  link,
+  children,
+}: {
+  lane: string;
+  tone: string;
+  tx?: string;
+  link?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <li className="grid grid-cols-[2.75rem_1fr_auto] items-baseline gap-2">
       <span className={`font-mono text-[10px] font-semibold ${tone}`}>{lane}</span>
       <span className="min-w-0">{children}</span>
-      {tx ? <TxLink hash={tx} /> : <span />}
+      {link ?? (tx ? <TxLink hash={tx} /> : <span />)}
     </li>
   );
+}
+
+/**
+ * Where a HyperCore order opens: its fill on Hyperliquid's explorer. An order nothing filled has no fill to show; on
+ * Base it opens the hedge account there (its order history), on HyperEVM the vault tx that sent it, as before.
+ */
+function coreLink(o: HedgeOrder): ReactNode {
+  const fill = o.fills[0];
+  if (fill) return <CoreLink href={`${HL_EXPLORER_TX}${fill.hash}`} label={shortHash(fill.hash)} />;
+  if (EVM_EXPLORER) return <CoreLink href={HL_ACCOUNT_URL} label="HyperCore" />;
+  return <TxLink hash={o.txHash} />;
 }
 
 /** One HyperCore order of the vault, and what Hyperliquid filled (each fill opens on Hyperliquid's explorer). */
@@ -51,7 +74,7 @@ function OrderLine({ o, szDecimals }: { o: HedgeOrder; szDecimals: number }) {
   const what = Number(o.delta) < 0 ? `Short ${size.toFixed(3)} NVDA` : `Buy back ${size.toFixed(3)} NVDA of short`;
   const full = o.filled + 1e-9 >= size;
   return (
-    <Step lane="CORE" tone="text-core" tx={o.txHash}>
+    <Step lane="CORE" tone="text-core" link={coreLink(o)}>
       {what}
       {o.tries > 1 ? ` (retry ${o.tries})` : ""}
       {" · "}

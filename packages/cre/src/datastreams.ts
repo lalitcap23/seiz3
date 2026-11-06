@@ -22,7 +22,24 @@ export interface Credentials {
 export interface MarketStatusRead {
   readonly status: number;
   readonly observedAt: number; // the report's observationsTimestamp, unix seconds
+  // v11 (RWA Advanced) only, 0 for v8: the equity market's top of book in the stream (USD 6 dec, shares × 1e6)
+  readonly bidUsd6: bigint;
+  readonly bidSize: bigint;
+  readonly askUsd6: bigint;
+  readonly askSize: bigint;
 }
+
+/** v11's top of book: bid, bidVolume, ask, askVolume (18 decimals each) → USD 6 dec and shares × 1e6. */
+export interface TopOfBook {
+  readonly bidUsd6: bigint;
+  readonly bidSize: bigint;
+  readonly askUsd6: bigint;
+  readonly askSize: bigint;
+}
+
+const NO_BOOK: TopOfBook = { bidUsd6: 0n, bidSize: 0n, askUsd6: 0n, askSize: 0n };
+const E12 = 10n ** 12n;
+const nonNegative = (x: bigint) => (x > 0n ? x / E12 : 0n);
 
 /** `marketStatus` that means the US stock market is in regular hours: v8 "Open", v11 "Regular hours". */
 export const MARKET_OPEN = 2;
@@ -79,7 +96,9 @@ const V11_BODY = [
 ] as const;
 
 /** `fullReport` = abi.encode(bytes32[3] context, bytes reportBlob, bytes32[] rs, bytes32[] ss, bytes32 rawVs). */
-export function decodeMarketStatus(fullReport: Hex): { feedId: Hex; observedAt: number; status: number } {
+export function decodeMarketStatus(
+  fullReport: Hex,
+): { feedId: Hex; observedAt: number; status: number; book: TopOfBook } {
   const [, blob] = decodeAbiParameters(
     [{ type: "bytes32[3]" }, { type: "bytes" }, { type: "bytes32[]" }, { type: "bytes32[]" }, { type: "bytes32" }],
     fullReport,
@@ -87,11 +106,17 @@ export function decodeMarketStatus(fullReport: Hex): { feedId: Hex; observedAt: 
   const version = Number.parseInt(blob.slice(2, 6), 16); // a feed id's first two bytes are its schema version
   if (version === 8) {
     const [feedId, , observedAt, , , , , , status] = decodeAbiParameters(V8_BODY, blob);
-    return { feedId, observedAt, status };
+    return { feedId, observedAt, status, book: NO_BOOK };
   }
   if (version === 11) {
-    const [feedId, , observedAt, , , , , , , , , , , status] = decodeAbiParameters(V11_BODY, blob);
-    return { feedId, observedAt, status };
+    const [feedId, , observedAt, , , , , , bid, bidVolume, ask, askVolume, , status] = decodeAbiParameters(V11_BODY, blob);
+    const book = {
+      bidUsd6: nonNegative(bid),
+      bidSize: nonNegative(bidVolume),
+      askUsd6: nonNegative(ask),
+      askSize: nonNegative(askVolume),
+    };
+    return { feedId, observedAt, status, book };
   }
   throw new Error(`data streams: schema v${version} has no marketStatus`);
 }
@@ -117,5 +142,5 @@ export function readMarketStatus(
   if (decoded.feedId.toLowerCase() !== cfg.feedId.toLowerCase()) {
     throw new Error(`data streams: asked for ${cfg.feedId}, got ${decoded.feedId}`);
   }
-  return { status: decoded.status, observedAt: decoded.observedAt };
+  return { status: decoded.status, observedAt: decoded.observedAt, ...decoded.book };
 }

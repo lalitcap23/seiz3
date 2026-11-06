@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { API_URL } from "@/lib/api";
-import { dep } from "@/lib/chain";
+import { dep, EVM_NAME, GAS } from "@/lib/chain";
 import { describe } from "./ActivityFeed";
 import { KV, Panel, Tag } from "./ui";
 
@@ -58,7 +58,7 @@ function line(e: TxViewData["events"][number], hookFill: boolean): string {
   if (e.name === "Borrow") return `Morpho: ${who(a.onBehalf)} borrowed ${amount(a.assets, 6)} USDC`;
   if (e.name === "SupplyCollateral") return `Morpho: ${who(a.onBehalf)} deposited ${amount(a.assets, 18)} NVDAx collateral`;
   if (e.name === "Repay") return `Morpho: ${who(a.onBehalf)} repaid ${amount(a.assets, 6)} USDC`;
-  if (e.name === "Dripped") return `Faucet: ${amount(a.nvdax, 18)} NVDAx, ${amount(a.usdc, 6)} USDC, ${amount(a.native, 18)} HYPE to ${who(a.to)}`;
+  if (e.name === "Dripped") return `Faucet: ${amount(a.nvdax, 18)} NVDAx, ${amount(a.usdc, 6)} USDC, ${amount(a.native, 18)} ${GAS} to ${who(a.to)}`;
   return Object.entries(a)
     .map(([k, v]) => `${k}=${typeof v === "string" && v.startsWith("0x") && v.length === 42 ? short(v) : String(v)}`)
     .join(", ");
@@ -125,7 +125,7 @@ export function TxView() {
         />
       </Panel>
 
-      <Panel title={<span className="text-evm">HyperEVM · events</span>} meta={<span>{data.events.length}</span>} bodyClassName="">
+      <Panel title={<span className="text-evm">{EVM_NAME} · events</span>} meta={<span>{data.events.length}</span>} bodyClassName="">
         {data.events.length === 0 && <p className="px-3 py-4 font-mono text-[12px] text-faint">No events.</p>}
         <ol className="flex flex-col">
           {data.events.map((e, i) => (

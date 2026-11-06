@@ -58,6 +58,13 @@ export interface Me {
     ratePerSec: bigint;
     liquidity: bigint; // USDC a borrower can take right now
   };
+  /** This wallet as a lender in market C: the USDC its supply shares are worth now (interest included). */
+  lend: {
+    shares: bigint;
+    value: bigint;
+    marketSupply: bigint;
+    marketBorrow: bigint;
+  };
   position: {
     collateral: bigint;
     borrowShares: bigint;
@@ -171,8 +178,8 @@ export function useMe(me: Address | null) {
       const params: MarketParams = paramsRaw;
       const { irm, lltv } = params;
       const market = marketRaw;
-      const { totalSupplyAssets, totalBorrowAssets, totalBorrowShares, lastUpdate } = market;
-      const { borrowShares, collateral } = positionRaw;
+      const { totalSupplyAssets, totalSupplyShares, totalBorrowAssets, totalBorrowShares, lastUpdate } = market;
+      const { supplyShares, borrowShares, collateral } = positionRaw;
 
       const ratePerSec =
         irm === ZERO
@@ -184,6 +191,8 @@ export function useMe(me: Address | null) {
               args: [params, market],
             });
       const totalBorrow = accruedTotalBorrow(totalBorrowAssets, ratePerSec, timestamp - lastUpdate);
+      // lenders earn the interest Morpho hasn't booked yet too (these demo markets charge no fee)
+      const supplyNow = totalSupplyAssets + (totalBorrow - totalBorrowAssets);
       const debt = debtOf(borrowShares, totalBorrow, totalBorrowShares);
       const limit = maxDebt(collateral, price as bigint, lltv);
       const value = collateral === 0n ? 0 : Number((collateral * (price as bigint)) / 10n ** 36n);
@@ -206,6 +215,12 @@ export function useMe(me: Address | null) {
           price: price as bigint,
           ratePerSec,
           liquidity: totalSupplyAssets - totalBorrow,
+        },
+        lend: {
+          shares: supplyShares,
+          value: totalSupplyShares === 0n ? 0n : (supplyShares * supplyNow) / totalSupplyShares,
+          marketSupply: supplyNow,
+          marketBorrow: totalBorrow,
         },
         position: {
           collateral,

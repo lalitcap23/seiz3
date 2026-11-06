@@ -31,7 +31,7 @@ export class MarketMaker {
   private readonly szDecimals = dep.hypercore.szDecimals;
 
   constructor(privateKey: Hex, account?: Hex) {
-    const transport = new HttpTransport({ isTestnet: env.NETWORK === "testnet" });
+    const transport = new HttpTransport({ isTestnet: env.NETWORK !== "mainnet" }) // base-sepolia hedges on HyperCore testnet;
     const wallet = privateKeyToAccount(privateKey);
     this.info = new InfoClient({ transport });
     this.exchange = new ExchangeClient({ transport, wallet });

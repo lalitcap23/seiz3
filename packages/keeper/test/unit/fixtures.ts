@@ -103,6 +103,7 @@ export const baseConfig: Config = {
   maxActionsPerMinute: 6,
   maxConsecutiveReverts: 3,
   breakerCooldownMs: 0,
+  buyerWindowSec: 0,
   minSignerBalanceWei: 10n ** 15n,
   gasLimitCap: 3_000_000n,
   gasLimitMarginBps: 2500n,

@@ -55,6 +55,8 @@ const envSchema = z.object({
   MAX_ACTIONS_PER_MINUTE: z.coerce.number().int().positive().default(6),
   MAX_CONSECUTIVE_REVERTS: z.coerce.number().int().positive().default(3),
   BREAKER_COOLDOWN_MS: z.coerce.number().int().min(0).default(0), // 0: an open breaker waits for a restart
+  // buyers first: after a liquidation, wait up to this long for a hook fill before pushing stock into the pool (0: off)
+  BUYER_WINDOW_SEC: z.coerce.number().int().min(0).max(3600).default(0),
   MIN_SIGNER_BALANCE_WEI: z.string().default("1000000000000000"),
   GAS_LIMIT_CAP: z.coerce.number().int().positive().default(3_000_000),
   GAS_LIMIT_MARGIN_BPS: z.coerce.number().int().min(0).max(10_000).default(2500),
@@ -243,6 +245,7 @@ export function loadConfig(
     maxActionsPerMinute: e.MAX_ACTIONS_PER_MINUTE,
     maxConsecutiveReverts: e.MAX_CONSECUTIVE_REVERTS,
     breakerCooldownMs: e.BREAKER_COOLDOWN_MS,
+    buyerWindowSec: e.BUYER_WINDOW_SEC,
     minSignerBalanceWei: minBalance,
     gasLimitCap,
     gasLimitMarginBps: BigInt(e.GAS_LIMIT_MARGIN_BPS),

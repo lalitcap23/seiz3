@@ -1,6 +1,6 @@
 import { createPublicClient, createWalletClient, decodeAbiParameters, encodeAbiParameters, http, type Abi, type Address, type Hex, type PublicClient } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { chains, extsloadAbi, poolSlots, rpcUrlFor, slot0SqrtPrice, type PoolKey } from "@afterbell/shared";
+import { chains, extsloadAbi, hyperCoreGatewayAbi, poolSlots, rpcUrlFor, slot0SqrtPrice, type PoolKey } from "@afterbell/shared";
 import { loadDeployment } from "@afterbell/shared/node";
 import { env } from "./env.js";
 
@@ -25,9 +25,16 @@ export async function read<T>(address: Address, abi: Abi, functionName: string, 
   return (await client.readContract({ address, abi, functionName, args } as never)) as T;
 }
 
-/** HyperCore's NVDA oracle in USDC 6 dec, through the oraclePx precompile (6 − szDecimals decimals). */
+/**
+ * HyperCore's NVDA oracle in USDC 6 dec, as the vault reads it: the oraclePx precompile on HyperEVM, the gateway's
+ * last snapshot on Base Sepolia (both 6 − szDecimals decimals).
+ */
 export async function coreOracleUsd6(): Promise<bigint> {
   const perpIndex = dep.hypercore.perpAsset >= 100_000 ? dep.hypercore.perpAsset - 100_000 : dep.hypercore.perpAsset;
+  if (dep.hyperCoreGateway) {
+    const raw = await read<bigint>(dep.hyperCoreGateway, hyperCoreGatewayAbi, "oraclePx", [perpIndex]);
+    return raw * 10n ** BigInt(dep.hypercore.szDecimals);
+  }
   const { data } = await client.call({
     to: "0x0000000000000000000000000000000000000807",
     data: encodeAbiParameters([{ type: "uint32" }], [perpIndex]),

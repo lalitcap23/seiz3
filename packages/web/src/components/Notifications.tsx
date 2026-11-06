@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useCachedSnapshot } from "@/lib/api";
+import { CHAIN_LABEL, EVM_NAME } from "@/lib/chain";
 import { shortHash } from "@/lib/format";
 import {
   addNotes,
@@ -68,7 +69,7 @@ export function NotificationSync() {
           id: `tx:${tx.hash}`,
           tone: ok ? "up" : "down",
           title: `${tx.label} ${ok ? "confirmed" : "failed"}`,
-          body: ok ? "Your transaction landed on HyperEVM." : (tx.error ?? "Your transaction reverted."),
+          body: ok ? `Your transaction landed on ${EVM_NAME}.` : (tx.error ?? "Your transaction reverted."),
           time: Date.now(),
           tx: tx.hash,
         },
@@ -172,7 +173,7 @@ export function NotificationBell() {
               <p className="text-[12px] text-muted">
                 {hasWallet
                   ? "Connect a wallet to get alerts for your loan: near the limit, liquidated, hedged and sold."
-                  : "Install MetaMask or Rabby to get alerts for your loan on HyperEVM testnet."}
+                  : `Install MetaMask or Rabby to get alerts for your loan on ${CHAIN_LABEL}.`}
               </p>
               {hasWallet && (
                 <button
