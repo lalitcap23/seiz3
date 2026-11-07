@@ -1,4 +1,4 @@
-import { createPublicClient, http, type PublicClient } from "viem";
+import { createPublicClient, http, type Address, type PublicClient } from "viem";
 import { baseSepolia } from "viem/chains";
 import { deploymentSchema } from "@seiz3/shared/deployments";
 import type { Network } from "@seiz3/shared";
@@ -10,7 +10,19 @@ export const chain = baseSepolia;
 // next.config.ts hands the deployment file over at build time (deployments/ is git-ignored)
 const injected = process.env.NEXT_PUBLIC_DEPLOYMENT_JSON;
 if (!injected) throw new Error("NEXT_PUBLIC_DEPLOYMENT_JSON is not set: build with DEPLOYMENTS_PATH or deployments/base-sepolia.json");
-export const dep = deploymentSchema.parse(JSON.parse(injected));
+const raw = JSON.parse(injected) as Record<string, unknown>;
+export const dep = deploymentSchema.parse(raw);
+
+const optAddress = (key: string): Address | undefined => {
+  const v = raw[key];
+  return typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v) ? (v as Address) : undefined;
+};
+/** Addresses the shared schema leaves out, for the How it works page's contract list. */
+export const extraAddresses = {
+  poolSeeder: optAddress("poolSeeder"),
+  naiveLiquidator: optAddress("naiveLiquidator"),
+  creForwarder: optAddress("creForwarder"),
+};
 export const publicClient = createPublicClient({
   chain,
   transport: http(process.env.NEXT_PUBLIC_RPC_URL || chain.rpcUrls.default.http[0]), // "" (an unset build arg) too

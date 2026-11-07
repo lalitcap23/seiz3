@@ -10,16 +10,16 @@ import { NotificationBell, NotificationToasts } from "./Notifications";
 const TABS = [
   { key: "dashboard", href: "/", label: "Dashboard" },
   { key: "try", href: "/try", label: "Try it" },
+  { key: "how", href: "/how", label: "How it works", short: "How" },
 ] as const;
 
+/** The seiz3 mark, as in public/brand/seiz3-mark.svg. */
 function Mark() {
   return (
-    <span className="grid size-6 place-items-center rounded-[3px] bg-brand text-black">
-      <svg viewBox="0 0 16 16" className="size-3.5" fill="currentColor" aria-hidden>
-        <path d="M8 1.75a4.25 4.25 0 0 0-4.25 4.25v2.6L2.5 11h11l-1.25-2.4V6A4.25 4.25 0 0 0 8 1.75Z" />
-        <path d="M6.25 12.25a1.75 1.75 0 0 0 3.5 0z" />
-      </svg>
-    </span>
+    <svg viewBox="0 0 32 32" className="size-6" aria-hidden>
+      <rect width="32" height="32" rx="4" className="fill-brand" />
+      <path className="fill-black" d="M7 7h8v3h-5v5H7z M25 25h-8v-3h5v-5h3z M13 13h6v6h-6z" />
+    </svg>
   );
 }
 
@@ -63,7 +63,7 @@ export function TopBar({ active }: { active?: (typeof TABS)[number]["key"] }) {
     <>
       <header className="sticky top-0 z-30 border-b border-line bg-background/90 backdrop-blur">
         <div className="mx-auto flex h-12 max-w-[1440px] items-center gap-4 px-3 sm:gap-6 sm:px-4">
-          <Link href="/" className="flex items-center gap-2">
+          <Link href="/" aria-label="seiz3 dashboard" className="flex items-center gap-2">
             <Mark />
             <span className="hidden text-[15px] font-semibold tracking-tight sm:inline">seiz3</span>
           </Link>
@@ -78,7 +78,14 @@ export function TopBar({ active }: { active?: (typeof TABS)[number]["key"] }) {
                     : "text-muted hover:text-foreground"
                 }`}
               >
-                {t.label}
+                {"short" in t ? (
+                  <>
+                    <span className="sm:hidden">{t.short}</span>
+                    <span className="hidden sm:inline">{t.label}</span>
+                  </>
+                ) : (
+                  t.label
+                )}
               </Link>
             ))}
           </nav>

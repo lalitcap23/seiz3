@@ -1,3 +1,5 @@
+<img src="packages/web/public/brand/seiz3-mark.svg" alt="seiz3" width="64" height="64">
+
 # Seiz3
 
 A vault that buys seized stock collateral from Morpho, shorts the same stock on HyperCore, then sells the stock through Uniswap v4 while closing the short: buyers on the vault's pool are filled from its hedged stock by a v4 hook, and the keeper pushes whatever nobody buys. A Chainlink CRE workflow tells the contracts whether the stock market is open, how much HyperCore's book can hedge, and what the hedge account on HyperCore holds.
@@ -46,7 +48,8 @@ seiz3/
 │  ├─ api/               Hono: GET /snapshot, GET /stream (SSE), GET /history, POST /faucet, POST /watch
 │  ├─ bots/              demo counterparties (see above)
 │  ├─ cre/               Chainlink CRE workflow
-│  └─ web/               Next.js 16 (App Router, Tailwind 4, TanStack Query, Recharts)
+│  └─ web/               Next.js 16 (App Router, Tailwind 4, TanStack Query, Recharts);
+│                        logo SVGs in public/brand/ (mark, glyph, favicon), app icons in src/app/
 ├─ scripts/              base-stack.sh (deploy + run everything), check-api.sh, vps-deploy.sh
 └─ deployments/          <network>.json written by the deploy scripts (git-ignored)
 ```
@@ -59,6 +62,7 @@ The vault's NVDAx/USDC pool carries [`Seiz3HookRemote`](contracts/src/remote/Sei
 
 | What | Where |
 | --- | --- |
+| Deployed on Base Sepolia | hook [`0x4fbe407b4320E7ADF1323e86509eaC7097052088`](https://sepolia.basescan.org/address/0x4fbe407b4320E7ADF1323e86509eaC7097052088) on Uniswap's PoolManager [`0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408`](https://sepolia.basescan.org/address/0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408) |
 | Permissions: `beforeInitialize`, `beforeSwap`, `beforeSwapReturnDelta` | [`SEIZ3_HOOK_FLAGS`](contracts/src/remote/Seiz3HookRemote.sol#L31) |
 | The fill: price, size, settle, return the delta | [`beforeSwap` 196–221](contracts/src/remote/Seiz3HookRemote.sol#L196-L221), [`_fill` 225–250](contracts/src/remote/Seiz3HookRemote.sol#L225-L250) |
 | What one buy can take, at what ask (also the dashboard's quote) | [`quote` 148–162](contracts/src/remote/Seiz3HookRemote.sol#L148-L162), [`_capacity` 166–185](contracts/src/remote/Seiz3HookRemote.sol#L166-L185) |
@@ -149,7 +153,7 @@ The hedge account's 115 USDC of HyperCore margin covers about 1.3 NVDA of short 
 
 ### Live on Base Sepolia
 
-`deployments/base-sepolia.json`: vault [`0x9557…6c20`](https://sepolia.basescan.org/address/0x9557cd78f2332fb661eBd0017eE057cD4A086c20), hook `0x4fbe…2088`, gateway `0x6db0…d826`, RiskParams `0xce19…0990`, on Morpho `0xBBBB…FFCb` and PoolManager `0x05E7…3408`. Hedge account on HyperCore testnet `0x6011…40cB`. One full round on 2026-11-07:
+`deployments/base-sepolia.json`: vault [`0x9557…6c20`](https://sepolia.basescan.org/address/0x9557cd78f2332fb661eBd0017eE057cD4A086c20), hook [`0x4fbe…2088`](https://sepolia.basescan.org/address/0x4fbe407b4320E7ADF1323e86509eaC7097052088), gateway [`0x6db0…d826`](https://sepolia.basescan.org/address/0x6db06845B210C69889022B1F83a2Ba17528Ed826), RiskParams [`0xce19…0990`](https://sepolia.basescan.org/address/0xce19e7C888D3b4c3a6E2e55e2C516b1A8e2d0990), on Morpho [`0xBBBB…FFCb`](https://sepolia.basescan.org/address/0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb) and PoolManager [`0x05E7…3408`](https://sepolia.basescan.org/address/0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408). Hedge account on HyperCore testnet `0x6011…40cB`. One full round on 2026-11-07:
 
 | Step | Where | Transaction |
 | --- | --- | --- |
@@ -195,3 +199,7 @@ What keeps a round clean (found by auditing the hedge account's HyperCore order 
 - **CRE report.** `RiskParams` is the CRE receiver (`ReceiverTemplate`, forwarder pinned). The vault reads its cap and market flag through `risk.get()` / `risk.marketOpen()`.
 - **Code size.** `UnwindLib` is a linked library to keep the vault under 24 KB; forge links it in scripts and tests. `Seiz3VaultRemote` is 21,935 bytes, 2,641 under the limit.
 - **Dust counts as flat.** Hook fills sell whole Core size units, so less than one unit of stock can be left behind. `syncHedge` treats that dust as no stock and closes the short fully, as the keeper already assumes.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The libraries under `contracts/lib` (git submodules: Uniswap v4, Morpho Blue, OpenZeppelin, forge-std, hyper-evm-lib) keep their own licenses.
