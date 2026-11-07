@@ -13,7 +13,6 @@ optimizer_runs = 200
 via_ir = false
 ffi = false
 fs_permissions = [{ access = "read-write", path = "../deployments" }, { access = "read", path = "./out" }]
-gas_limit = 30_000_000       # big-block cap; runtime calls must stay < 3M
 
 [profile.default.fuzz]
 runs = 256
@@ -30,18 +29,8 @@ runs = 2048
 runs = 64
 depth = 500
 
-# Ring 2/3: hyper-evm-lib's simulator embeds HyperCore (~56 KB) in the test contract, which can't deploy under
-# the 30M big-block cap above. Only the simulator needs this; runtime calls are still sized for 3M.
-[profile.sim]
-gas_limit = 9223372036854775807
-disable_block_gas_limit = true # a fork inherits the forked block's limit, 3M on a HyperEVM small block
-
 [rpc_endpoints]
-hyperevm = "${HYPEREVM_RPC_URL}"
-hyperevm_testnet = "${HYPEREVM_TESTNET_RPC_URL}"
-
-[etherscan]
-hyperevm = { key = "${ETHERSCAN_API_KEY}", chain = 999, url = "https://api.etherscan.io/v2/api?chainid=999" }
+base_sepolia = "${BASE_SEPOLIA_RPC_URL}"
 
 [fmt]
 line_length = 120

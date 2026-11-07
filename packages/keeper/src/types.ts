@@ -108,15 +108,13 @@ export interface ScanReport {
 
 export type Action =
   | { readonly kind: "syncHedge" }
-  | { readonly kind: "topUpMargin"; readonly amount: bigint }
   | {
       readonly kind: "liquidate";
       readonly marketId: Hex;
       readonly borrower: Address;
       readonly seizedAssets: bigint;
     }
-  | { readonly kind: "unwindStep" }
-  | { readonly kind: "withdrawMargin"; readonly amount: bigint };
+  | { readonly kind: "unwindStep" };
 
 export type ActionKind = Action["kind"];
 
@@ -125,7 +123,7 @@ export interface DeploymentBorrower {
   readonly label?: string;
 }
 
-/** What the keeper takes from deployments/<network>.json (Deploy.s.sol + CreateMarkets.s.sol). */
+/** What the keeper takes from deployments/<network>.json (DeployRemote.s.sol + CreateMarkets.s.sol). */
 export interface DeploymentInfo {
   readonly chainId: bigint;
   readonly vault: Address;
@@ -139,7 +137,7 @@ export interface DeploymentInfo {
   /** xyz:NVDA size decimals and order id (deployments hypercore). */
   readonly szDecimals?: number;
   readonly perpAsset?: number;
-  /** Seiz3Hook on the vault's pool (deployments hook), if the deployment has one. */
+  /** Seiz3HookRemote on the vault's pool (deployments hook), if the deployment has one. */
   readonly hook?: Address;
 }
 
@@ -189,11 +187,6 @@ export interface Config {
   readonly killSwitchFile: string;
   readonly killSwitchEnv: boolean;
 
-  // money buffers, 6 dec
-  readonly idleReserveUsdc: bigint;
-  /** Slack kept on Core above the vault's marginTarget before margin is sent back. */
-  readonly coreReserveUsdc: bigint;
-
   // safety
   readonly maxActionsPerMinute: number;
   readonly maxConsecutiveReverts: number;
@@ -205,8 +198,6 @@ export interface Config {
   readonly gasLimitCap: bigint;
   readonly gasLimitMarginBps: bigint;
 }
-
-export type PolicyConfig = Pick<Config, "idleReserveUsdc" | "coreReserveUsdc">;
 
 /** What the keeper sends to the risk engine. BigInt-safe on the wire. */
 export interface RiskRequest {
@@ -231,8 +222,6 @@ export interface RiskRequest {
     readonly borrowers: readonly BorrowerReport[];
   };
   readonly keeper: {
-    readonly idleReserveUsdc: bigint;
-    readonly coreReserveUsdc: bigint;
     /** The block timestamp the state was read at. */
     readonly now: bigint;
   };
@@ -252,13 +241,10 @@ export type DecisionReason =
   | "wait-order-delay"
   | "clear-pause"
   | "paused"
-  | "topup-ready"
   | "liquidate-ready"
   | "unwind-ready"
   | "unwind-cooldown"
-  | "withdraw-ready"
   | "position-open"
-  | "core-at-reserve"
   | "idle";
 
 export interface Decision {
@@ -273,10 +259,6 @@ export type GuardReason =
   | "no-pending-hedge"
   | "same-block"
   | "order-delay"
-  | "no-margin-shortfall"
-  | "topup-above-shortfall"
-  | "amount-zero"
-  | "insufficient-idle"
   | "market-mismatch"
   | "unknown-borrower"
   | "borrower-healthy"
@@ -286,9 +268,7 @@ export type GuardReason =
   | "size-exceeds-debt"
   | "size-exceeds-cash"
   | "no-inventory"
-  | "cooldown-active"
-  | "position-open"
-  | "insufficient-core";
+  | "cooldown-active";
 
 export type GuardResult =
   | { readonly ok: true; readonly reason: "ok" }

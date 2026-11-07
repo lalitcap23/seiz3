@@ -9,7 +9,6 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/keeper/package.json packages/keeper/
 COPY packages/api/package.json packages/api/
-COPY packages/replay/package.json packages/replay/
 COPY packages/bots/package.json packages/bots/
 COPY packages/shared/package.json packages/shared/
 COPY packages/web/package.json packages/web/
@@ -18,15 +17,12 @@ RUN pnpm install --frozen-lockfile --filter @seiz3/web...
 
 COPY packages/shared ./packages/shared
 COPY packages/web ./packages/web
-# shared bundles the deployment addresses into the page; next.config.ts hands base-sepolia.json (git-ignored, so
-# optional here: the [n] glob matches nothing on a checkout without it) to a NEXT_PUBLIC_NETWORK=base-sepolia build
-COPY deployments/testnet.json deployments/mainnet.json deployments/base-sepolia.jso[n] ./deployments/
+# next.config.ts bundles the deployment addresses into the page (deployments/ is git-ignored: deploy first)
+COPY deployments/base-sepolia.json ./deployments/
 
-ARG NEXT_PUBLIC_API_URL=http://localhost:8787
-ARG NEXT_PUBLIC_NETWORK=testnet
+ARG NEXT_PUBLIC_API_URL=http://localhost:8788
 ARG NEXT_PUBLIC_RPC_URL=
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
-    NEXT_PUBLIC_NETWORK=$NEXT_PUBLIC_NETWORK \
     NEXT_PUBLIC_RPC_URL=$NEXT_PUBLIC_RPC_URL \
     NEXT_PUBLIC_USE_FIXTURE=0 \
     NEXT_TELEMETRY_DISABLED=1

@@ -1,6 +1,6 @@
 // Offline simulations of the Seiz3 market feed. They run the real workflow through the CRE SDK's test runtime:
 // secrets, node-mode consensus, the HTTP capability, the EVM read and the signed writeReport all go through the SDK,
-// with only the far ends (Data Streams, Hyperliquid, HyperEVM) mocked. No keys, no network.
+// with only the far ends (Data Streams, Hyperliquid, the EVM chain) mocked. No keys, no network.
 import { describe, expect } from "vitest";
 import { getNetwork, type Runtime } from "@chainlink/cre-sdk";
 import {
@@ -44,7 +44,7 @@ const OPEN_MS = Date.UTC(2026, 10, 6, 15, 0);
 
 const config: Config = {
   schedule: "0 */1 * * * *",
-  evm: { chainSelectorName: "hyperliquid-testnet", isTestnet: true, riskParams: RISK_PARAMS, gasLimit: "300000", readBlock: "finalized" },
+  evm: { chainSelectorName: "ethereum-testnet-sepolia-base-1", isTestnet: true, riskParams: RISK_PARAMS, gasLimit: "300000", readBlock: "finalized" },
   marketStatus: "dataStreams",
   marketHours: HOURS,
   dataStreams: { apiUrl: "https://api.testnet-dataengine.chain.link", feedId: FEED_V8 },
@@ -158,7 +158,7 @@ function arrange(s: Scenario = {}): { runtime: Runtime<Config>; seen: Seen } {
     return { statusCode: 200, body: Buffer.from(JSON.stringify(reply)).toString("base64") };
   };
 
-  const network = getNetwork({ chainFamily: "evm", chainSelectorName: "hyperliquid-testnet", isTestnet: true })!;
+  const network = getNetwork({ chainFamily: "evm", chainSelectorName: config.evm.chainSelectorName, isTestnet: true })!;
   const evm = EvmMock.testInstance(network.chainSelector.selector);
   const risk = addContractMock(evm, { address: RISK_PARAMS, abi: RISK_PARAMS_ABI });
   risk.params = () => ({
@@ -470,11 +470,6 @@ describe("pieces", () => {
         "00000000000000000000000000000000000000000000000000000000498d5880" +
         "000000000000000000000000000000000000000000000000000000006b49d200",
     );
-  });
-
-  test("HyperEVM testnet and mainnet are in the CRE chain registry", () => {
-    expect(getNetwork({ chainFamily: "evm", chainSelectorName: "hyperliquid-testnet", isTestnet: true })).toBeTruthy();
-    expect(getNetwork({ chainFamily: "evm", chainSelectorName: "hyperliquid-mainnet", isTestnet: false })).toBeTruthy();
   });
 });
 

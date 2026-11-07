@@ -20,17 +20,20 @@ import {
     toBeforeSwapDelta
 } from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 
-import {SEIZ3_HOOK_FLAGS} from "../Seiz3Hook.sol";
 import {RiskParams} from "../RiskParams.sol";
 import {UnwindLib} from "../libs/UnwindLib.sol";
 import {Units} from "../libs/Units.sol";
 import {Seiz3VaultRemote} from "./Seiz3VaultRemote.sol";
 import {HyperCoreGateway} from "./HyperCoreGateway.sol";
 
+/// @dev The callbacks Seiz3HookRemote's address must carry, and the only ones it implements. File-level so deploy
+///      scripts and tests can mine or place the address before the hook exists.
+uint160 constant SEIZ3_HOOK_FLAGS =
+    Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG;
+
 /// @title Seiz3HookRemote
-/// @notice Seiz3Hook for Seiz3VaultRemote (Base Sepolia): the same hook, line for line, except that its two
-///         HyperCore reads (the oracle price and the vault's short) come from the vault's HyperCoreGateway instead of
-///         the precompiles. Same permissions (SEIZ3_HOOK_FLAGS), events and quote.
+/// @notice The hook for Seiz3VaultRemote (Base Sepolia). Its two HyperCore reads (the oracle price and the vault's
+///         short) come from the vault's HyperCoreGateway.
 ///         Uniswap v4 hook on the vault's NVDAx/USDC pool. Buyers of NVDAx are filled from the vault's hedged
 ///         inventory at the HyperCore oracle price plus a spread, off the curve (`beforeSwap` returns a delta), and
 ///         each fill queues the matching reduce-only buy on HyperCore through `Seiz3VaultRemote.onHookFill`. Whatever

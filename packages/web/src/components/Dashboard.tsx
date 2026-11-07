@@ -7,7 +7,6 @@ import { HedgeStrip } from "./HedgeStrip";
 import { HyperliquidPanel } from "./HyperliquidPanel";
 import { MarketColumns } from "./MarketColumns";
 import { Operations } from "./Operations";
-import { PresenterBar } from "./PresenterBar";
 import { StatusBar } from "./StatusBar";
 
 /** Blocks the feed may trail the head before it's worth saying (a poll is 1–2 blocks). */
@@ -57,7 +56,6 @@ export function Dashboard() {
         <Operations operations={data.operations ?? []} szDecimals={data.vault.szDecimals} className="lg:col-span-6" />
         <ActivityFeed events={data.activity} szDecimals={data.vault.szDecimals} className="lg:col-span-6" />
       </div>
-      <PresenterBar />
     </div>
   );
 }

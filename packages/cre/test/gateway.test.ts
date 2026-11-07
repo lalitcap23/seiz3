@@ -157,7 +157,7 @@ describe("HyperCoreGateway attestation (Base Sepolia)", () => {
     expect(users).toEqual([HEDGE, HEDGE]);
   });
 
-  test("without a gateway block nothing else is read or written (the HyperEVM config)", () => {
+  test("without a gateway block nothing else is read or written (the market feed alone)", () => {
     const { runtime, seen } = arrange({ gateway: undefined });
     onCronTrigger(runtime);
     expect(seen.gateway).toBeUndefined();

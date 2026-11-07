@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { erc20Abi, parseAbi, type Address, type Hex } from "viem";
-import { seiz3VaultAbi, demoOracleAbi, faucetAbi, iMorphoAbi } from "@seiz3/shared/abis";
+import { seiz3VaultRemoteAbi, demoOracleAbi, faucetAbi, iMorphoAbi } from "@seiz3/shared/abis";
 import {
   accruedTotalBorrow,
   debtOf,
@@ -129,12 +129,12 @@ export function useMe(me: Address | null) {
           { address: dep.morpho, abi: iMorphoAbi, functionName: "market", args: [marketId] },
           { address: dep.morpho, abi: iMorphoAbi, functionName: "position", args: [marketId, who] },
           { address: dep.markets!.C_seiz3.oracle, abi: demoOracleAbi, functionName: "price" },
-          { address: dep.vault, abi: seiz3VaultAbi, functionName: "balanceOf", args: [who] },
-          { address: dep.vault, abi: seiz3VaultAbi, functionName: "maxRedeem", args: [who] },
-          { address: dep.vault, abi: seiz3VaultAbi, functionName: "queued", args: [who] },
-          { address: dep.vault, abi: seiz3VaultAbi, functionName: "totalAssets" },
-          { address: dep.vault, abi: seiz3VaultAbi, functionName: "totalSupply" },
-          { address: dep.vault, abi: seiz3VaultAbi, functionName: "instantLiquidity" },
+          { address: dep.vault, abi: seiz3VaultRemoteAbi, functionName: "balanceOf", args: [who] },
+          { address: dep.vault, abi: seiz3VaultRemoteAbi, functionName: "maxRedeem", args: [who] },
+          { address: dep.vault, abi: seiz3VaultRemoteAbi, functionName: "queued", args: [who] },
+          { address: dep.vault, abi: seiz3VaultRemoteAbi, functionName: "totalAssets" },
+          { address: dep.vault, abi: seiz3VaultRemoteAbi, functionName: "totalSupply" },
+          { address: dep.vault, abi: seiz3VaultRemoteAbi, functionName: "instantLiquidity" },
           {
             address: dep.poolManager,
             abi: extsloadAbi,

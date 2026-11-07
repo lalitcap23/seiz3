@@ -1,6 +1,5 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
-import { EVM_EXPLORER, evmTxUrl } from "@/lib/chain";
+import { evmTxUrl } from "@/lib/chain";
 import { shortHash } from "@/lib/format";
 
 /** A terminal panel: a header bar (uppercase title, optional meta on the right), then the body. */
@@ -110,20 +109,13 @@ export function Meter({ value, tone, className = "" }: { value: number; tone: st
   );
 }
 
-/** A transaction on the vault's chain: Basescan on Base Sepolia, our own decoder page (app/tx/[hash]) on HyperEVM. */
+/** A transaction on the vault's chain, opened on Basescan. */
 export function TxLink({ hash, className = "" }: { hash: string; className?: string }) {
   const cls = `shrink-0 font-mono text-[11px] text-faint hover:text-foreground ${className}`;
-  if (EVM_EXPLORER) {
-    return (
-      <a href={evmTxUrl(hash)} target="_blank" rel="noreferrer" className={cls} title="Open on Basescan">
-        {shortHash(hash)} ↗
-      </a>
-    );
-  }
   return (
-    <Link href={`/tx/${hash}`} className={cls}>
-      {shortHash(hash)}
-    </Link>
+    <a href={evmTxUrl(hash)} target="_blank" rel="noreferrer" className={cls} title="Open on Basescan">
+      {shortHash(hash)} ↗
+    </a>
   );
 }
 

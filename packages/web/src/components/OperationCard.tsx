@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { HedgeOrder, Operation } from "@seiz3/shared";
-import { EVM_EXPLORER, EVM_NAME, HL_ACCOUNT_URL, HL_EXPLORER_TX } from "@/lib/chain";
+import { EVM_NAME, HL_ACCOUNT_URL, HL_EXPLORER_TX } from "@/lib/chain";
 import { shortHash, usd } from "@/lib/format";
 import { CoreLink, Tag, TxLink } from "./ui";
 
@@ -58,14 +58,13 @@ function Step({
 }
 
 /**
- * Where a HyperCore order opens: its fill on Hyperliquid's explorer. An order nothing filled has no fill to show; on
- * Base it opens the hedge account there (its order history), on HyperEVM the vault tx that sent it, as before.
+ * Where a HyperCore order opens: its fill on Hyperliquid's explorer. An order nothing filled has no fill to show, so
+ * it opens the hedge account there (its order history).
  */
 function coreLink(o: HedgeOrder): ReactNode {
   const fill = o.fills[0];
   if (fill) return <CoreLink href={`${HL_EXPLORER_TX}${fill.hash}`} label={shortHash(fill.hash)} />;
-  if (EVM_EXPLORER) return <CoreLink href={HL_ACCOUNT_URL} label="HyperCore" />;
-  return <TxLink hash={o.txHash} />;
+  return <CoreLink href={HL_ACCOUNT_URL} label="HyperCore" />;
 }
 
 const LIMIT_HINT =
@@ -137,7 +136,7 @@ function Lots({ lots }: { lots: Operation["lots"] }) {
 }
 
 /**
- * A liquidation or an unwind, end to end: what the vault did on HyperEVM, the HyperCore orders that hedged it, the
+ * A liquidation or an unwind, end to end: what the vault did on Base, the HyperCore orders that hedged it, the
  * sync that confirmed it, and (first in, first out) which unwinds sold this liquidation's stock, or whose stock an
  * unwind sold.
  */

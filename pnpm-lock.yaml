@@ -16,12 +16,12 @@ importers:
 
   packages/api:
     dependencies:
-      '@seiz3/shared':
-        specifier: workspace:*
-        version: link:../shared
       '@hono/node-server':
         specifier: ^2.1.5
         version: 2.1.5(hono@4.13.13)
+      '@seiz3/shared':
+        specifier: workspace:*
+        version: link:../shared
       hono:
         specifier: ^4.13.13
         version: 4.13.13
@@ -44,12 +44,12 @@ importers:
 
   packages/bots:
     dependencies:
-      '@seiz3/shared':
-        specifier: workspace:*
-        version: link:../shared
       '@nktkas/hyperliquid':
         specifier: 0.33.3
         version: 0.33.3(typescript@7.0.2)
+      '@seiz3/shared':
+        specifier: workspace:*
+        version: link:../shared
       viem:
         specifier: ^2.57.7
         version: 2.57.7(typescript@7.0.2)(zod@4.6.7)
@@ -119,12 +119,12 @@ importers:
 
   packages/relayer:
     dependencies:
-      '@seiz3/shared':
-        specifier: workspace:*
-        version: link:../shared
       '@nktkas/hyperliquid':
         specifier: 0.33.3
         version: 0.33.3(typescript@5.9.3)
+      '@seiz3/shared':
+        specifier: workspace:*
+        version: link:../shared
       viem:
         specifier: ^2.57.7
         version: 2.57.7(typescript@5.9.3)(zod@4.6.7)
@@ -144,28 +144,6 @@ importers:
       vitest:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@22.20.5)(lightningcss@1.32.0)(supports-color@7.2.0)
-
-  packages/replay:
-    dependencies:
-      '@seiz3/shared':
-        specifier: workspace:*
-        version: link:../shared
-      viem:
-        specifier: ^2.57.7
-        version: 2.57.7(typescript@7.0.2)(zod@4.6.7)
-      zod:
-        specifier: ^4.6.7
-        version: 4.6.7
-    devDependencies:
-      '@types/node':
-        specifier: ^26.6.5
-        version: 26.6.5
-      tsx:
-        specifier: ^4.23.15
-        version: 4.23.15
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
 
   packages/shared:
     dependencies:

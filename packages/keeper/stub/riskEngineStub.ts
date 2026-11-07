@@ -2,12 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 
 import { evaluate } from "../src/riskCalc.js";
 import { serializeJson } from "../src/observe.js";
-import {
-  parseRiskDecision,
-  parseRiskRequest,
-  policyConfigFromRequest,
-  stateFromRiskRequest,
-} from "../src/riskEngine.js";
+import { parseRiskDecision, parseRiskRequest, stateFromRiskRequest } from "../src/riskEngine.js";
 import type { RiskDecision } from "../src/types.js";
 
 interface ControlState {
@@ -163,11 +158,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       return;
     }
 
-    const decision = control.forced ?? evaluate(
-      stateFromRiskRequest(request),
-      request.keeper.now,
-      policyConfigFromRequest(request),
-    );
+    const decision = control.forced ?? evaluate(stateFromRiskRequest(request), request.keeper.now);
 
     process.stdout.write(`${serializeJson({
       event: "risk-engine-decision",

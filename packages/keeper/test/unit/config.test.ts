@@ -5,7 +5,7 @@ import { DUMMY_KEY, MORPHO, VAULT } from "./fixtures.js";
 
 const MARKET_C = `0x${"cc".repeat(32)}`;
 
-/** Shaped like deployments/<network>.json after Deploy.s.sol + CreateMarkets.s.sol (+ a borrower list). */
+/** Shaped like deployments/<network>.json after DeployRemote.s.sol + CreateMarkets.s.sol (+ a borrower list). */
 const deployment = {
   chainId: 31337,
   usdc: "0x00000000000000000000000000000000000000c1",
@@ -65,12 +65,10 @@ describe("config: loadConfig", () => {
     expect(() => loadConfig(baseEnv, () => JSON.stringify(bare))).toThrow(/deployments\.markets/);
   });
 
-  it("parses decimal reserves and gas settings", () => {
+  it("parses loop, breaker and gas settings", () => {
     const cfg = loadConfig(
       {
         ...baseEnv,
-        IDLE_RESERVE_USDC: "12.5",
-        CORE_RESERVE_USDC: "1",
         TICK_MS: "2500",
         DRY_RUN: "true",
         KILL_SWITCH: "1",
@@ -81,8 +79,6 @@ describe("config: loadConfig", () => {
       readDeployment,
     );
 
-    expect(cfg.idleReserveUsdc).toBe(12_500_000n);
-    expect(cfg.coreReserveUsdc).toBe(1_000_000n);
     expect(cfg.tickMs).toBe(2500);
     expect(cfg.dryRun).toBe(true);
     expect(cfg.killSwitchEnv).toBe(true);
@@ -134,11 +130,5 @@ describe("config: loadConfig", () => {
 
   it("fails fast on a bad tick rate", () => {
     expect(() => loadConfig({ ...baseEnv, TICK_MS: "10" }, readDeployment)).toThrow(/TICK_MS/);
-  });
-
-  it("fails fast on a bad reserve decimal", () => {
-    expect(() =>
-      loadConfig({ ...baseEnv, IDLE_RESERVE_USDC: "1.1234567" }, readDeployment),
-    ).toThrow(/IDLE_RESERVE_USDC/);
   });
 });

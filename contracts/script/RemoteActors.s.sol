@@ -12,7 +12,7 @@ import {Units} from "../src/libs/Units.sol";
 import {Seiz3VaultRemote} from "../src/remote/Seiz3VaultRemote.sol";
 import {DeployHelpers} from "./DeployHelpers.sol";
 
-/// @notice TestnetActors.s.sol for the Base Sepolia architecture, after RemoteInfra → DeployRemote → CreateMarkets →
+/// @notice The demo's actors on Base Sepolia, after RemoteInfra → DeployRemote → CreateMarkets →
 ///         SeedPool: risk params sized for a 1 NVDAx round, LP money in the vault, a lender in market C, and a market C
 ///         borrower just under the 77% LLTV at PRICE_USD6 (HyperCore's NVDA oracle). Then a ~1.4% drop of market C's
 ///         oracle (`scripts/base-stack.sh crash`) makes it liquidatable while staying inside the vault's 1.5% band.

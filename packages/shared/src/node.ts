@@ -10,11 +10,11 @@ const address = z
   .regex(/^0x[0-9a-fA-F]{40}$/)
   .transform((s) => s as Address);
 
-/** deployments/<network>.json as the scripts leave it: Deploy.s.sol, then CreateMarkets' markets, then borrowers. */
+/** deployments/<network>.json as the scripts leave it: DeployRemote.s.sol, then CreateMarkets' markets, then borrowers. */
 const deploymentFileSchema = deploymentSchema.extend({
   naiveLiquidator: address.optional(),
   poolSeeder: address.optional(),
-  // testnet extras (TestnetExtras.s.sol): public testers' faucet and swap router, market A's own thin pool
+  // public testers' faucet and swap router, market A's own thin pool
   faucet: address.optional(),
   swapRouter: address.optional(),
   thinPoolKey: deploymentSchema.shape.poolKey.optional(),
@@ -39,7 +39,7 @@ export function loadDeployment(network: string, path?: string): DeploymentFile {
   const parsed = deploymentFileSchema.safeParse(raw);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
-    throw new Error(`${file}: ${issues} (run Deploy.s.sol and CreateMarkets.s.sol first)`);
+    throw new Error(`${file}: ${issues} (run DeployRemote.s.sol and CreateMarkets.s.sol first)`);
   }
   return parsed.data;
 }

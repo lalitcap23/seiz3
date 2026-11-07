@@ -19,7 +19,7 @@ const WAD = 10n ** 18n;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 export interface CollectorOptions {
-  /** Hyperliquid info API; null on the local stack, where the panel comes from MockHyperCore's precompiles. */
+  /** Hyperliquid info API; null on the local stack, where the panel comes from MockHyperCore via the gateway. */
   hlInfoUrl: string | null;
   explorerUrl: string;
   fromBlock: bigint | null;
@@ -36,7 +36,7 @@ const OPERATIONS_KEPT = 40;
 const FILLS_EVERY_MS = 5_000;
 const INFO_TIMEOUT_MS = 5_000;
 
-/** Polls HyperEVM (one multicall) + Hyperliquid info API every second; keeps latest snapshot in memory. */
+/** Polls the vault's chain (one multicall) + Hyperliquid info API every second; keeps latest snapshot in memory. */
 export class Collector {
   latest: Snapshot | null = null; // null until the first poll lands: /snapshot answers 503, the web shows its fixture
   history: HistoryPoint[] = [];
@@ -58,15 +58,6 @@ export class Collector {
 
   get deployment(): DeploymentFile {
     return this.dep;
-  }
-
-  /** After the replay's setup redeploys: new addresses, so a fresh feed and history. */
-  reload(dep: DeploymentFile) {
-    this.dep = dep;
-    this.logs.stop();
-    this.logs = new LogScanner(this.client, dep, this.opts.fromBlock, this.opts.logs);
-    this.history = [];
-    this.latest = null;
   }
 
   /** Polls back to back, never overlapping: a slow RPC stretches the interval instead of stacking requests. */
@@ -91,11 +82,11 @@ export class Collector {
         this.client.getBlockNumber({ cacheTime: 0 }).catch(() => null),
       ]);
       if (this.latest !== null && chain.blockNumber < BigInt(this.latest.blockNumber)) {
-        // HyperEVM never goes back: a load-balanced RPC's lagging node answered, and the page keeps the newer snapshot
+        // a public chain never goes back: a load-balanced RPC's lagging node answered, and the page keeps the newer one
         if (!this.opts.logs?.chainRewinds) return;
         this.history = []; // anvil revert
       }
-      // HyperEVM runs eth_call in the next block's context (block.number = latest + 1), and eth_getLogs refuses a block
+      // some RPCs run eth_call in the next block's context (block.number = latest + 1), and eth_getLogs refuses a block
       // that isn't there yet: the logs go up to the latest one, so a new unwind lands with the stock it sold
       const head = latest === null ? chain.blockNumber - 1n : latest < chain.blockNumber ? latest : chain.blockNumber;
       const [hyperliquid] = await Promise.all([this.panel(chain), this.refreshFills(), this.followLogs(head)]);
@@ -159,15 +150,14 @@ export class Collector {
     }
   }
 
-  /** Info API on testnet/mainnet (null when unreachable: the stale badge); precompiles on the local stack. */
+  /** Info API on Base Sepolia (null when unreachable: the stale badge); the gateway's reads on the local stack. */
   private async panel(chain: ChainRead): Promise<HyperliquidPanel | null> {
     const szDecimals = this.dep.hypercore.szDecimals;
     if (this.opts.hlInfoUrl === null) {
       return chain.core ? panelFromCore(chain.core, szDecimals, this.opts.explorerUrl) : null;
     }
     try {
-      const account = this.dep.hedgeAccount ?? this.dep.vault; // Base Sepolia: the relayer's hedge account
-      return await panelFromApi(this.opts.hlInfoUrl, account, chain.core, szDecimals, this.opts.explorerUrl);
+      return await panelFromApi(this.opts.hlInfoUrl, this.dep.hedgeAccount, chain.core, szDecimals, this.opts.explorerUrl);
     } catch {
       return null;
     }

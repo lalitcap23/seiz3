@@ -11,7 +11,7 @@ export interface BorrowerScanOptions {
   readonly marketId: Hex;
   /** Oldest block to backfill to; null → `defaultLookback` blocks under the head at the first poll. */
   readonly fromBlock: bigint | null;
-  /** The public HyperEVM RPC refuses eth_getLogs over ~1000 blocks. */
+  /** Blocks per eth_getLogs call: public RPCs refuse wide ranges. */
   readonly pageBlocks: bigint;
   /** eth_getLogs calls per poll: new blocks first, then backfill with what's left. */
   readonly maxPagesPerPoll: number;

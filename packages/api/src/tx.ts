@@ -10,8 +10,8 @@ import {
   type PublicClient,
 } from "viem";
 import {
-  seiz3HookAbi,
-  seiz3VaultAbi,
+  seiz3HookRemoteAbi,
+  seiz3VaultRemoteAbi,
   demoOracleAbi,
   faucetAbi,
   iMorphoAbi,
@@ -22,7 +22,7 @@ import {
 } from "@seiz3/shared/abis";
 import type { DeploymentFile } from "@seiz3/shared/node";
 
-/** Everything the web's /tx/<hash> page shows: HyperEVM testnet has no working public explorer. */
+/** Everything the web's /tx/<hash> page shows: the decoded call and events, plus the vault's HyperCore orders. */
 export interface TxView {
   hash: Hex;
   status: "success" | "reverted";
@@ -60,8 +60,8 @@ const morphoEventsAbi = parseAbi([
 ]);
 
 const ABIS: Abi[] = [
-  seiz3VaultAbi,
-  seiz3HookAbi,
+  seiz3VaultRemoteAbi,
+  seiz3HookRemoteAbi,
   morphoEventsAbi,
   iMorphoAbi,
   naiveLiquidatorAbi,
@@ -77,8 +77,8 @@ const ABIS: Abi[] = [
 function names(dep: DeploymentFile): Map<string, { name: string; abi: Abi }> {
   const m = new Map<string, { name: string; abi: Abi }>();
   const add = (a: string | undefined, name: string, abi: Abi) => a && m.set(a.toLowerCase(), { name, abi });
-  add(dep.vault, "Seiz3 vault", seiz3VaultAbi);
-  add(dep.hook, "Seiz3Hook (v4 hook)", seiz3HookAbi);
+  add(dep.vault, "Seiz3 vault", seiz3VaultRemoteAbi);
+  add(dep.hook, "Seiz3 hook (v4)", seiz3HookRemoteAbi);
   add(dep.morpho, "Morpho Blue", [...iMorphoAbi, ...morphoEventsAbi]);
   add(dep.naiveLiquidator, "NaiveLiquidator (market A)", naiveLiquidatorAbi);
   add(dep.faucet, "Faucet", faucetAbi);

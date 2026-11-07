@@ -23,7 +23,7 @@ export function Operations({
       className={className}
       bodyClassName="flex flex-col"
     >
-      {/* each one end to end: the HyperEVM tx, the HyperCore orders that hedged it, the sync that confirmed it, and
+      {/* each one end to end: the Base tx, the HyperCore orders that hedged it, the sync that confirmed it, and
           which unwinds sold whose stock (first in, first out) */}
       <div className="flex flex-wrap gap-x-4 gap-y-1 border-b border-line px-3 py-1.5 font-mono text-[10px] text-faint">
         {LANES.map((l) => (

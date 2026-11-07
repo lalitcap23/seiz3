@@ -10,7 +10,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 
-import {SEIZ3_HOOK_FLAGS} from "../src/Seiz3Hook.sol";
+import {SEIZ3_HOOK_FLAGS} from "../src/remote/Seiz3HookRemote.sol";
 import {RiskParams} from "../src/RiskParams.sol";
 import {HedgeLib} from "../src/libs/HedgeLib.sol";
 import {MockNVDAx} from "../src/mocks/MockNVDAx.sol";
@@ -21,11 +21,11 @@ import {Seiz3VaultRemote} from "../src/remote/Seiz3VaultRemote.sol";
 import {Seiz3HookRemote} from "../src/remote/Seiz3HookRemote.sol";
 import {DeployHelpers} from "./DeployHelpers.sol";
 
-/// @notice Deploy.s.sol for the Base Sepolia architecture: MockNVDAx, RiskParams, HyperCoreGateway, Seiz3HookRemote
+/// @notice Deploys the Base Sepolia system: MockNVDAx, RiskParams, HyperCoreGateway, Seiz3HookRemote
 ///         (at a mined CREATE2 address), Seiz3VaultRemote, NaiveLiquidator, PoolSeeder and the public swap router,
 ///         against the official Morpho Blue and Uniswap v4 PoolManager; seeds the vault; writes
-///         deployments/<NETWORK>.json with the same fields Deploy.s.sol writes, plus `hyperCoreGateway`,
-///         `hedgeAccount` and `relayer`. CreateMarkets.s.sol and SeedPool.s.sol then run unchanged.
+///         deployments/<NETWORK>.json, including `hyperCoreGateway`, `hedgeAccount` and `relayer`.
+///         CreateMarkets.s.sol and SeedPool.s.sol then read it.
 ///
 ///   NETWORK=base-sepolia RELAYER_ADDRESS=0x… HEDGE_ACCOUNT=0x… forge script script/DeployRemote.s.sol \
 ///     --rpc-url base_sepolia --broadcast --slow

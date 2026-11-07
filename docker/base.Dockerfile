@@ -15,7 +15,6 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/keeper/package.json packages/keeper/
 COPY packages/api/package.json packages/api/
-COPY packages/replay/package.json packages/replay/
 COPY packages/bots/package.json packages/bots/
 COPY packages/relayer/package.json packages/relayer/
 COPY packages/cre/package.json packages/cre/
@@ -23,22 +22,19 @@ COPY packages/shared/package.json packages/shared/
 COPY packages/web/package.json packages/web/
 
 RUN pnpm install --frozen-lockfile \
-  --filter @seiz3/keeper... --filter @seiz3/api... --filter @seiz3/replay... \
+  --filter @seiz3/keeper... --filter @seiz3/api... \
   --filter @seiz3/bots... --filter @seiz3/relayer... --filter @seiz3/cre...
 
 COPY packages/keeper ./packages/keeper
 COPY packages/api ./packages/api
-COPY packages/replay ./packages/replay
 COPY packages/bots ./packages/bots
 COPY packages/relayer ./packages/relayer
 COPY packages/cre ./packages/cre
 COPY packages/shared ./packages/shared
 COPY scripts/base-stack.sh ./scripts/
-# shared imports the deployment files at type level; the real ones come from the volume
-COPY deployments/testnet.json deployments/mainnet.json ./deployments/
 
-# the CRE loop writes the workflow's config and build output next to it
-RUN chown -R node:node /app/deployments /app/packages/cre
+# the deployment files come from the volume; the CRE loop writes the workflow's config and build output next to it
+RUN mkdir -p /app/deployments && chown -R node:node /app/deployments /app/packages/cre
 USER node
 
 ENTRYPOINT ["/usr/bin/tini", "--"]

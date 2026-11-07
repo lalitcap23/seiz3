@@ -1,81 +1,25 @@
 "use client";
 
-import { useEffect } from "react";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { Snapshot } from "@seiz3/shared";
 import { API_URL, useSnapshot } from "@/lib/api";
-import { CHAIN_LABEL, dep, GAS } from "@/lib/chain";
-import { useMe, type Me } from "@/lib/me";
+import { CHAIN_LABEL, dep } from "@/lib/chain";
+import { useMe } from "@/lib/me";
 import { useWallet } from "@/lib/wallet";
-import { StatusBar } from "../StatusBar";
-import { BorrowCard } from "./BorrowCard";
-import { LendCard } from "./LendCard";
+import { useJourney, type Role, type StepKey } from "./journey";
 import { LoanTimeline } from "./LoanTimeline";
-import { SwapCard } from "./SwapCard";
+import { NextStep, Progress } from "./NextStep";
+import { Roles } from "./Roles";
 import { TxStatus } from "./ui";
-import { VaultCard } from "./VaultCard";
-import { FaucetCard, WalletBar } from "./WalletBar";
-
-const STEPS = [
-  ["Get test tokens", `Faucet drips NVDAx, USDC and ${GAS} for gas`],
-  ["Lend USDC", "Supply Morpho Market C: the loans the vault protects"],
-  ["Deposit NVDAx", "Collateral on Morpho Market C"],
-  ["Borrow to the limit", "Max leaves ~15 s of interest before it tips over"],
-  ["Get liquidated", "The vault buys your NVDAx and shorts it on HyperCore"],
-  ["Watch it unwind", "To buyers through the v4 hook and into the pool"],
-] as const;
-
-/** Has this wallet's liquidated stock all been sold, to at least one buyer through the hook? */
-function unwound(snapshot: Snapshot | undefined, address: string): boolean {
-  const ops = snapshot?.operations ?? [];
-  const mine = ops.filter((o) => o.kind === "liquidation" && o.borrower?.toLowerCase() === address.toLowerCase());
-  if (mine.length === 0) return false;
-  const sold = new Set(mine.flatMap((o) => o.lots.map((l) => l.opId)));
-  const toBuyer = ops.some((o) => sold.has(o.id) && o.soldTo === "buyer");
-  return toBuyer && mine.every((o) => BigInt(o.held) === 0n);
-}
-
-/** The walkthrough, ticked off from this wallet's own state. */
-function Steps({ me, snapshot, address }: { me: Me | undefined; snapshot: Snapshot | undefined; address: string | null }) {
-  const liquidated =
-    address !== null &&
-    (snapshot?.operations ?? []).some((o) => o.kind === "liquidation" && o.borrower?.toLowerCase() === address.toLowerCase());
-  const done = [
-    liquidated || (!!me && (me.nvdax > 0n || me.position.collateral > 0n)),
-    !!me && me.lend.shares > 0n,
-    liquidated || (!!me && me.position.collateral > 0n),
-    liquidated || (!!me && me.position.debt > 0n),
-    liquidated,
-    address !== null && unwound(snapshot, address),
-  ];
-  const current = address === null ? -1 : done.indexOf(false);
-  return (
-    <ol className="grid grid-cols-2 gap-px overflow-hidden rounded-[3px] border border-line bg-line sm:grid-cols-3 lg:grid-cols-6">
-      {STEPS.map(([title, text], i) => (
-        <li
-          key={title}
-          className={`flex gap-3 px-4 py-3 ${i === current ? "bg-raised shadow-[inset_0_2px_0_var(--color-brand)]" : "bg-panel"}`}
-        >
-          <span
-            className={`font-mono text-[12px] font-semibold ${done[i] ? "text-up" : i === current ? "text-brand" : "text-faint"}`}
-          >
-            {done[i] ? "✓" : `0${i + 1}`}
-          </span>
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <span className={`text-[13px] font-medium ${done[i] || i === current ? "text-foreground" : "text-muted"}`}>{title}</span>
-            <span className="text-[11px] text-faint">{text}</span>
-          </div>
-        </li>
-      ))}
-    </ol>
-  );
-}
+import { WalletPanel } from "./WalletPanel";
 
 export function TryPage() {
-  const { address } = useWallet();
+  const { address, hasWallet, onChain } = useWallet();
   const { data: me, isRefetchError, dataUpdatedAt } = useMe(address);
   const qc = useQueryClient();
   const { data: snapshot } = useSnapshot();
+  const operations = snapshot?.operations ?? [];
   // the API's snapshot arrives every second over SSE; when something that touches this wallet changed (a vault event,
   // the vault's stock, this address's collateral or health), re-read the wallet's balances and position right away.
   // Not debt: interest moves it every second, and the browser shares the public RPC's rate limit.
@@ -102,34 +46,61 @@ export function TryPage() {
       body: JSON.stringify({ address }),
     }).catch(() => undefined);
   }, [address]);
+
+  const journey = useJourney({ hasWallet, address, onChain, me, operations });
+  // a step opened from the tabs; it lasts until the wallet moves on to another step (or "back to your next step")
+  const [view, setView] = useState<{ step: StepKey; at: StepKey } | null>(null);
+  const shown = view !== null && view.at === journey.step ? view.step : journey.step;
+  const go = (step?: StepKey) => setView(step === undefined || step === journey.step ? null : { step, at: journey.step });
+  const [role, setRole] = useState<Role | null>(null);
+  const rolesRef = useRef<HTMLDivElement>(null);
+  function openRole(r: Role) {
+    setRole(r);
+    rolesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   return (
-    <div className="flex flex-col gap-2 pb-24">
-      {snapshot && <StatusBar data={snapshot} />}
-      <Steps me={me} snapshot={snapshot} address={address} />
+    <div className="flex flex-col gap-3 pb-24">
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2 px-1 pt-1">
+        <div className="flex max-w-[78ch] flex-col gap-1">
+          <h1 className="text-[20px] font-semibold tracking-tight">Try Seiz3 as a borrower</h1>
+          <p className="text-[13px] leading-relaxed text-muted">
+            Borrow USDC against tokenized NVIDIA stock, get liquidated, then watch Seiz3&apos;s vault take the stock, hedge it
+            on HyperCore and sell it back through a Uniswap v4 hook. Test tokens on {CHAIN_LABEL}; follow the steps.
+          </p>
+        </div>
+        <Link href="/" className="font-mono text-[11px] text-faint hover:text-foreground">
+          The whole system: Dashboard →
+        </Link>
+      </div>
+      <Progress current={journey.step} selected={shown} onSelect={go} />
       {/* react-query keeps the last good read when a refetch fails: say so, or a stale loan looks live */}
       {me && isRefetchError && (
         <p className="rounded-[3px] border border-warn/40 bg-warn/5 px-3 py-2 font-mono text-[11px] text-warn">
-          {CHAIN_LABEL} RPC isn&apos;t answering (rate limit?): your balances and loan below are from{" "}
+          {CHAIN_LABEL} RPC isn&apos;t answering (rate limit?): your balances and loan are from{" "}
           {new Date(dataUpdatedAt).toLocaleTimeString()}. Retrying every 5 s.
         </p>
       )}
-      <div className="grid items-start gap-2 lg:grid-cols-12">
-        <div className="flex flex-col gap-2 lg:col-span-3">
-          <WalletBar me={me} />
-          <FaucetCard me={me} />
-          <LendCard me={me} />
+      <div className="grid items-start gap-3 lg:grid-cols-12">
+        <div className="flex flex-col gap-3 lg:col-span-8">
+          <NextStep
+            me={me}
+            journey={journey}
+            step={shown}
+            operations={operations}
+            readAt={dataUpdatedAt}
+            go={go}
+            onRole={openRole}
+          />
+          {address && <LoanTimeline operations={operations} address={address} szDecimals={dep.hypercore.szDecimals} />}
         </div>
-        <div className="lg:col-span-5">
-          <BorrowCard me={me} />
-        </div>
-        <div className="flex flex-col gap-2 lg:col-span-4">
-          <VaultCard me={me} />
-          <SwapCard me={me} />
+        <div className="flex flex-col gap-3 lg:col-span-4">
+          <WalletPanel me={me} step={journey.step} />
+          <div ref={rolesRef} className="scroll-mt-16">
+            <Roles me={me} role={role} onRole={setRole} />
+          </div>
         </div>
       </div>
-      {snapshot && address && (
-        <LoanTimeline operations={snapshot.operations ?? []} address={address} szDecimals={dep.hypercore.szDecimals} />
-      )}
       <TxStatus />
     </div>
   );

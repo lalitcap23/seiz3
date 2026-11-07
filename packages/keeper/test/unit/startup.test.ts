@@ -43,15 +43,6 @@ describe("startup: validateConfig", () => {
     );
   });
 
-  it("rejects negative reserves", () => {
-    expect(validateConfig(makeConfig({ idleReserveUsdc: -1n }))).toContain(
-      "USDC reserves must be >= 0",
-    );
-    expect(validateConfig(makeConfig({ coreReserveUsdc: -1n }))).toContain(
-      "USDC reserves must be >= 0",
-    );
-  });
-
   it("rejects a missing market id (env-only config without MARKET_ID)", () => {
     const cfg = makeConfig();
     const errors = validateConfig({

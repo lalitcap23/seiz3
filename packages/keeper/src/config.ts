@@ -3,7 +3,6 @@ import { z } from "zod";
 import { privateKeyToAccount } from "viem/accounts";
 
 import type { Address, Config, DeploymentInfo, Hex } from "./types.js";
-import { parseUsdc } from "./riskCalc.js";
 
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -36,7 +35,7 @@ const envSchema = z.object({
   BORROWER_SCAN_PAGE_BLOCKS: z.coerce.number().int().min(1).max(10_000).default(500),
   BORROWER_SCAN_PAGES_PER_TICK: z.coerce.number().int().min(1).max(100).default(2),
   BORROWER_SCAN_INTERVAL_MS: z.coerce.number().int().min(0).default(4000), // keeps a public logs RPC under its limit
-  // eth_getLogs only; default RPC_URL. Alchemy's HyperEVM testnet has no eth_getLogs, so there it's the public RPC.
+  // eth_getLogs only; default RPC_URL. Set it when the main RPC has no eth_getLogs or rate-limits it.
   LOGS_RPC_URL: z.string().min(1).optional(),
   WATCH_FILE: z.string().min(1).optional(), // default watch.json next to DEPLOYMENTS_PATH (the API writes it)
   // buy-back liquidity gate (liquidityGate.ts): unset HL_INFO_API_URL turns it off (local MockHyperCore fills all)
@@ -50,8 +49,6 @@ const envSchema = z.object({
   DRY_RUN: z.string().optional(),
   KILL_SWITCH: z.string().optional(),
   KILL_SWITCH_FILE: z.string().min(1).default("/shared/KILL"),
-  IDLE_RESERVE_USDC: z.string().default("10"),
-  CORE_RESERVE_USDC: z.string().default("10"),
   MAX_ACTIONS_PER_MINUTE: z.coerce.number().int().positive().default(6),
   MAX_CONSECUTIVE_REVERTS: z.coerce.number().int().positive().default(3),
   BREAKER_COOLDOWN_MS: z.coerce.number().int().min(0).default(0), // 0: an open breaker waits for a restart
@@ -68,7 +65,7 @@ const borrowerSchema = z.object({
 });
 
 /**
- * deployments/<network>.json as Deploy.s.sol writes it and CreateMarkets.s.sol extends it. Only the
+ * deployments/<network>.json as DeployRemote.s.sol writes it and CreateMarkets.s.sol extends it. Only the
  * fields the keeper needs are checked; everything else (pool key, HyperCore ids, ...) is ignored.
  */
 const deploymentSchema = z.object({
@@ -80,7 +77,7 @@ const deploymentSchema = z.object({
   /** Block the markets were created in: where borrower discovery starts. */
   startBlock: z.union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)]).optional(),
   hypercore: z.object({ szDecimals: z.number().int().min(0).max(6), perpAsset: z.number().int().positive() }).optional(),
-  /** Seiz3Hook on the vault's pool: buyers can take stock between ticks. */
+  /** Seiz3HookRemote on the vault's pool: buyers can take stock between ticks. */
   hook: addressSchema.optional(),
 });
 
@@ -186,14 +183,6 @@ export function loadConfig(
 
   const deployment = resolveDeployment(e, readFile);
 
-  const checkUsdc = (name: string, value: string): bigint => {
-    try {
-      return parseUsdc(value);
-    } catch (error) {
-      throw new ConfigError(`${name}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
-
   const gasLimitCap = BigInt(e.GAS_LIMIT_CAP);
   if (gasLimitCap <= 0n || gasLimitCap > 30_000_000n) {
     throw new ConfigError("GAS_LIMIT_CAP must be between 1 and 30,000,000");
@@ -240,8 +229,6 @@ export function loadConfig(
     dryRun: boolEnv(e.DRY_RUN),
     killSwitchFile: e.KILL_SWITCH_FILE,
     killSwitchEnv: boolEnv(e.KILL_SWITCH),
-    idleReserveUsdc: checkUsdc("IDLE_RESERVE_USDC", e.IDLE_RESERVE_USDC),
-    coreReserveUsdc: checkUsdc("CORE_RESERVE_USDC", e.CORE_RESERVE_USDC),
     maxActionsPerMinute: e.MAX_ACTIONS_PER_MINUTE,
     maxConsecutiveReverts: e.MAX_CONSECUTIVE_REVERTS,
     breakerCooldownMs: e.BREAKER_COOLDOWN_MS,

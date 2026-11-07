@@ -8,7 +8,7 @@ import {
   type ReadContractParameters,
 } from "viem";
 import {
-  seiz3VaultAbi,
+  seiz3VaultRemoteAbi,
   demoOracleAbi,
   iMorphoAbi,
   riskParamsAbi,
@@ -250,7 +250,7 @@ function read<
 function vaultRead(
   address: Address,
   functionName: Extract<
-    ContractFunctionName<typeof seiz3VaultAbi, "pure" | "view">,
+    ContractFunctionName<typeof seiz3VaultRemoteAbi, "pure" | "view">,
     | "pendingHedge"
     | "inventory"
     | "confirmedShort"
@@ -263,7 +263,7 @@ function vaultRead(
     | "usdc"
   >,
 ): ReadCall {
-  return read({ address, abi: seiz3VaultAbi, functionName });
+  return read({ address, abi: seiz3VaultRemoteAbi, functionName });
 }
 
 async function multiCall(

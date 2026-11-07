@@ -66,7 +66,7 @@ function line(e: TxViewData["events"][number], hookFill: boolean): string {
 
 const short = (v: string) => (v.length > 14 ? `${v.slice(0, 6)}…${v.slice(-4)}` : v);
 
-/** The /tx/<hash> page: HyperEVM testnet has no working public explorer, so the API decodes the tx for us. */
+/** The /tx/<hash> page: the API decodes the tx, with the vault's HyperCore orders beside it. */
 export function TxView() {
   const { hash } = useParams<{ hash: string }>();
   const { data, error } = useQuery({

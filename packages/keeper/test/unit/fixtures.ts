@@ -98,8 +98,6 @@ export const baseConfig: Config = {
   dryRun: true,
   killSwitchFile: "/shared/KILL",
   killSwitchEnv: false,
-  idleReserveUsdc: USDC(10),
-  coreReserveUsdc: USDC(10),
   maxActionsPerMinute: 6,
   maxConsecutiveReverts: 3,
   breakerCooldownMs: 0,

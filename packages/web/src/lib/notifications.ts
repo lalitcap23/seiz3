@@ -12,7 +12,7 @@ export interface Note {
   title: string;
   body: string;
   time: number; // ms
-  tx?: string; // HyperEVM tx hash
+  tx?: string; // Base Sepolia tx hash
 }
 
 /** One wallet's notifications, kept in this browser. */

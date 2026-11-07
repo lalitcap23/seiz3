@@ -5,12 +5,12 @@ const key = z.string().regex(/^0x[0-9a-fA-F]{64}$/);
 
 export const env = z
   .object({
-    NETWORK: z.enum(["testnet", "mainnet", "base-sepolia"]).default("testnet"),
+    NETWORK: z.enum(["base-sepolia"]).default("base-sepolia"),
     RPC_URL: z.string().url().optional(),
     DEPLOYMENTS_PATH: z.string().optional(),
     /** oracle,pool,mm,alerts: which bots run in this process */
     BOTS: z.string().default("oracle,pool,mm,alerts"),
-    /** Owns the DemoOracles, PoolSeeder and MockNVDAx: Deploy.s.sol's broadcaster. */
+    /** Owns the DemoOracles, PoolSeeder and MockNVDAx: DeployRemote.s.sol's broadcaster. */
     DEPLOYER_PRIVATE_KEY: key.optional(),
     /** While this file exists the EVM bots stand still: a presenter crash sets the oracles on purpose. */
     HOLD_FILE: z.string().default(`${DEPLOYMENTS_DIR}BOTS_HOLD`),
@@ -23,7 +23,7 @@ export const env = z
     REBALANCE_BPS: z.coerce.number().int().min(1).default(30),
     MIN_REBALANCER_USDC: z.coerce.number().default(20), // warn under this: the next rebalance up may fail
     NVDAX_TOPUP: z.coerce.number().positive().default(5), // minted to the deployer when it runs low
-    // testnet's only arbitrageur is this bot: unwind proceeds land in the vault, where the deployer is the main LP, so
+    // the testnet pool's only arbitrageur is this bot: unwind proceeds land in the vault, where the deployer is the main LP, so
     // it redeems USDC_TOPUP of its own shares when low, leaving the vault at least VAULT_FLOOR_USDC for liquidations
     USDC_TOPUP: z.coerce.number().positive().default(40),
     VAULT_FLOOR_USDC: z.coerce.number().min(0).default(100),
@@ -62,13 +62,13 @@ export const env = z
     // pool rebalancer: while the vault holds stock, hold the pool this far over the hook's ask instead of the oracle
     POOL_ABOVE_ASK_BPS: z.coerce.number().int().min(1).max(50).optional(),
 
-    // alerts: what only a person can refill on testnet (Discord or Slack incoming webhook; unset → log only)
+    // alerts: what only a person can refill (Discord or Slack incoming webhook; unset → log only)
     ALERT_WEBHOOK_URL: z.string().url().optional(),
     ALERT_INTERVAL_MS: z.coerce.number().int().min(10_000).default(60_000),
     ALERT_IDLE_USDC: z.coerce.number().default(40), // ~2 testers' repayments
     ALERT_CORE_USDC: z.coerce.number().default(60),
     ALERT_MM_USDC: z.coerce.number().default(15), // free margin: ~1.5 NVDA of quotes at 20x
-    ALERT_DEPLOYER_HYPE: z.coerce.number().default(0.01),
+    ALERT_DEPLOYER_ETH: z.coerce.number().default(0.01),
   })
   // compose passes unset optional keys as "": treat them as unset
   .parse(Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== "")));

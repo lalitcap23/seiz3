@@ -3,7 +3,7 @@ import { ExchangeClient, HttpTransport, InfoClient } from "@nktkas/hyperliquid";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Hex } from "viem";
 import { PERP_COIN, PERP_DEX } from "@seiz3/shared";
-import { seiz3VaultAbi, riskParamsAbi } from "@seiz3/shared/abis";
+import { seiz3VaultRemoteAbi, riskParamsAbi } from "@seiz3/shared/abis";
 import { dep, log, read } from "./chain.js";
 import { env } from "./env.js";
 
@@ -31,7 +31,7 @@ export class MarketMaker {
   private readonly szDecimals = dep.hypercore.szDecimals;
 
   constructor(privateKey: Hex, account?: Hex) {
-    const transport = new HttpTransport({ isTestnet: env.NETWORK !== "mainnet" }) // base-sepolia hedges on HyperCore testnet;
+    const transport = new HttpTransport({ isTestnet: true }); // the hedge account trades HyperCore testnet
     const wallet = privateKeyToAccount(privateKey);
     this.info = new InfoClient({ transport });
     this.exchange = new ExchangeClient({ transport, wallet });
@@ -43,8 +43,8 @@ export class MarketMaker {
       this.info.metaAndAssetCtxs({ dex: PERP_DEX }),
       this.info.openOrders({ user: this.user, dex: PERP_DEX }),
       this.account(),
-      read<readonly [bigint, bigint, bigint, number]>(dep.vault, seiz3VaultAbi, "pendingHedge"),
-      read<bigint>(dep.vault, seiz3VaultAbi, "inventory"),
+      read<readonly [bigint, bigint, bigint, number]>(dep.vault, seiz3VaultRemoteAbi, "pendingHedge"),
+      read<bigint>(dep.vault, seiz3VaultRemoteAbi, "inventory"),
       read<{ maxUnhedged: bigint }>(dep.riskParams, riskParamsAbi, "get"),
     ]);
     // > 0: the vault wants to buy back that many Core size units, now (pending) or in its next unwind (the request)

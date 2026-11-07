@@ -6,8 +6,8 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "compile": "cre-compile market-feed/main.ts dist/market-feed.wasm",
-    "simulate": "cre workflow simulate market-feed --target staging-settings --non-interactive --trigger-index 0"
+    "compile": "cre-compile base-feed/main.ts dist/base-feed.wasm",
+    "simulate": "cre workflow simulate base-feed --target base-sepolia-settings --non-interactive --trigger-index 0"
   },
   "dependencies": {
     "@chainlink/cre-sdk": "~1.6.0",

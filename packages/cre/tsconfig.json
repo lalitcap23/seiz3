@@ -14,5 +14,5 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true
   },
-  "include": ["src", "market-feed", "test", "vitest.config.ts"]
+  "include": ["src", "base-feed", "test", "vitest.config.ts"]
 }

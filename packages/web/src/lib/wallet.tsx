@@ -40,7 +40,7 @@ interface Wallet {
 const WalletContext = createContext<Wallet | null>(null);
 const noSubscribe = () => () => {};
 
-/** An injected wallet (MetaMask, Rabby, …) on HyperEVM; no WalletConnect, no wallet library. */
+/** An injected wallet (MetaMask, Rabby, …) on Base Sepolia; no WalletConnect, no wallet library. */
 export function WalletProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [address, setAddress] = useState<Address | null>(null);

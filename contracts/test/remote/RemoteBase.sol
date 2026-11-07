@@ -16,7 +16,7 @@ import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {HLConstants} from "@hyper-evm-lib/src/common/HLConstants.sol";
 
-import {SEIZ3_HOOK_FLAGS} from "../../src/Seiz3Hook.sol";
+import {SEIZ3_HOOK_FLAGS} from "../../src/remote/Seiz3HookRemote.sol";
 import {RiskParams} from "../../src/RiskParams.sol";
 import {UnwindLib} from "../../src/libs/UnwindLib.sol";
 import {Units} from "../../src/libs/Units.sol";
@@ -27,7 +27,7 @@ import {HyperCoreGateway} from "../../src/remote/HyperCoreGateway.sol";
 import {Seiz3VaultRemote} from "../../src/remote/Seiz3VaultRemote.sol";
 import {Seiz3HookRemote} from "../../src/remote/Seiz3HookRemote.sol";
 import {DeployHelpers} from "../../script/DeployHelpers.sol";
-import {MockUSDC} from "../utils/Seiz3Base.sol";
+import {MockUSDC} from "../../src/mocks/MockUSDC.sol";
 import {MockHyperCore} from "../utils/MockHyperCore.sol";
 
 /// @notice The Base Sepolia shape of the system: real Morpho Blue and Uniswap v4 bytecode on a chain with no HyperCore,
@@ -91,7 +91,7 @@ abstract contract RemoteBase is Test {
         seeder = new PoolSeeder(address(this), pm);
         swapRouter = new PoolSwapTest(pm);
 
-        core = new MockHyperCore(usdc, PERP_INDEX, DEX, SZ_DEC);
+        core = new MockHyperCore(PERP_INDEX, DEX, SZ_DEC);
         core.setPx(_raw(START_PX));
         core.forceActivate(hedge);
         core.forceDexBalance(hedge, CORE_MARGIN);
@@ -175,9 +175,13 @@ abstract contract RemoteBase is Test {
         );
     }
 
+    function _poolDepth() internal pure virtual returns (uint256) {
+        return POOL_DEPTH;
+    }
+
     function _seedPool() internal {
         seeder.initialize(key, UnwindLib.sqrtPriceAt(START_PX, nvdax0));
-        _addLiquidity(POOL_DEPTH, 1000, bytes32(0));
+        _addLiquidity(_poolDepth(), 1000, bytes32(0));
     }
 
     /// @dev LP deposit (no gateway reads yet) → first relayer snapshot → the vault counts the hedge account.

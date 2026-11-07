@@ -27,7 +27,7 @@ contract RiskParams is ReceiverTemplate {
         uint32 cooldownClosedSec; // unwind cooldown while closed
         uint256 withdrawReserve; // idle USDC kept back for margin top-ups while the vault has exposure
         uint16 maxImpactBps; // max pool price move per unwind chunk, enforced as the swap's price limit
-        uint8 transitBlocks; // blocks a HyperEVM → HyperCore deposit is counted as in transit (VERIFY: 1)
+        uint8 transitBlocks; // unused on Base (no bridge to HyperCore); kept for the report/params layout
     }
 
     /// @notice The last CRE report. Layout on the wire: abi.encode(bool open, uint256 hedgeCapacity, uint64 observedAt).

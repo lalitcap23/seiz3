@@ -6,18 +6,16 @@
  *
  * Sections:
  *   - units      decimal parse/format helpers
- *   - math       Morpho health/size math, mirrored from Morpho Blue and Seiz3Vault
+ *   - math       Morpho health/size math, mirrored from Morpho Blue and Seiz3VaultRemote
  *   - reports    borrower report rows for logs + the risk engine
  *   - decide     picks AT MOST ONE action per tick
  *   - guards     per-action preconditions, checked right before simulating
  *
- * `decide(state, now, cfg) -> Action | null` priority order (first match wins):
+ * `decide(state, now) -> Action | null` priority order (first match wins):
  *   1. syncHedge      pending delta != 0, later block, order delay elapsed
- *   2. topUpMargin    the vault reports a margin shortfall, idle USDC above reserve
- *   3. syncHedge      paused for hedge/margin, nothing pending, no shortfall: only a sync clears it
- *   4. liquidate      not paused, borrower LTV > LLTV
- *   5. unwindStep     inventory > 0, cooldown elapsed (also under a margin pause: it raises cash)
- *   6. withdrawMargin not paused, inventory == 0, short == 0, Core USDC above marginTarget + reserve
+ *   2. syncHedge      paused for hedge/margin, nothing pending, no shortfall: only a sync clears it
+ *   3. liquidate      not paused, borrower LTV > LLTV
+ *   4. unwindStep     inventory > 0, cooldown elapsed (also under a margin pause: it raises cash)
  *
  * Extra rules:
  *   - owner pause => syncHedge (when pending) is the ONLY possible action.
@@ -25,7 +23,10 @@
  *   - `now` is the block timestamp the state was read at: the contract's clock.
  *   - Checks the keeper can't see from the EVM (pool vs Core price band, Core margin for a new
  *     short) are left to the eth_call simulation. A reverting simulation is skipped, never sent.
- *   - The keeper never signs HyperCore orders. Orders are sent by the vault.
+ *   - The keeper never signs HyperCore orders. The vault queues them at the HyperCoreGateway and
+ *     the relayer places them.
+ *   - The keeper never moves margin: there is no USDC bridge from Base to HyperCore, so the hedge
+ *     account is funded on HyperCore (the vault's topUpMargin / withdrawMargin revert NoBridge).
  */
 
 import type {
@@ -37,7 +38,6 @@ import type {
   DeploymentBorrower,
   GuardResult,
   Hex,
-  PolicyConfig,
   VaultState,
 } from "./types.js";
 
@@ -104,7 +104,7 @@ const MAX_LIQUIDATION_INCENTIVE_FACTOR = 115n * 10n ** 16n;
 const VIRTUAL_SHARES = 10n ** 6n;
 const VIRTUAL_ASSETS = 1n;
 
-// Seiz3Vault pause flags
+// Seiz3VaultRemote pause flags
 export const PAUSE_HEDGE = 1n;
 export const PAUSE_MARGIN = 2n;
 export const PAUSE_OWNER = 4n;
@@ -221,21 +221,6 @@ export function maxSeized(borrower: BorrowerState, state: SizingState): bigint {
   );
 }
 
-/** Balance minus reserve, floored at zero. Never underflows. */
-export function availableAfterReserve(balance: bigint, reserve: bigint): bigint {
-  return balance > reserve ? balance - reserve : 0n;
-}
-
-/** The vault's shortfall plus 10%, as the spec asks. Non-owners may top up to 110% of marginTarget. */
-export function topUpTarget(marginShortfall: bigint): bigint {
-  return marginShortfall + marginShortfall / 10n;
-}
-
-/** Core USDC beyond what the next liquidation needs (vault.marginTarget) plus the keeper's slack. */
-export function withdrawableCore(state: VaultState, cfg: PolicyConfig): bigint {
-  return availableAfterReserve(state.coreUsdc, state.marginTarget + cfg.coreReserveUsdc);
-}
-
 /** RiskParams.cooldown(): shorter while the stock market is open. */
 export function unwindCooldownSec(state: VaultState): bigint {
   return state.marketOpen ? state.risk.cooldownOpenSec : state.risk.cooldownClosedSec;
@@ -334,7 +319,7 @@ export function buildReports(
 // decide
 // ---------------------------------------------------------------------------
 
-export function evaluate(state: VaultState, now: bigint, cfg: PolicyConfig): Decision {
+export function evaluate(state: VaultState, now: bigint): Decision {
   const pending = state.pendingHedge;
 
   // 1. The retry loop never stops, not even while paused.
@@ -353,20 +338,13 @@ export function evaluate(state: VaultState, now: bigint, cfg: PolicyConfig): Dec
     return { action: null, reason: "paused" };
   }
 
-  // 2. Restore the margin buffer before any new risk.
-  if (state.marginShortfall > 0n) {
-    const available = availableAfterReserve(state.idleUsdc, cfg.idleReserveUsdc);
-    const wanted = topUpTarget(state.marginShortfall);
-    const amount = wanted < available ? wanted : available;
-    if (amount > 0n) {
-      return { action: { kind: "topUpMargin", amount }, reason: "topup-ready" };
-    }
-  } else if (state.pauseFlags !== 0n) {
-    // 3. Margin is back (or the hedge matches): the vault only notices on a sync.
+  // 2. Margin is back (or the hedge matches): the vault only notices on a sync. The keeper can't add margin
+  //    itself (no bridge: the hedge account is funded on HyperCore), so while it's short this falls through.
+  if (state.marginShortfall <= 0n && state.pauseFlags !== 0n) {
     return { action: { kind: "syncHedge" }, reason: "clear-pause" };
   }
 
-  // 4. New liquidation, only when not paused.
+  // 3. New liquidation, only when not paused.
   if (state.pauseFlags === 0n) {
     for (const borrower of state.borrowers) {
       if (!isLiquidatable(borrower, state.market.price, state.market.lltv)) continue;
@@ -384,7 +362,7 @@ export function evaluate(state: VaultState, now: bigint, cfg: PolicyConfig): Dec
     }
   }
 
-  // 5. Unwind inventory in small chunks. Under a margin pause this is how the vault raises cash.
+  // 4. Unwind inventory in small chunks. Under a margin pause this is how the vault raises cash.
   if (state.inventory > 0n) {
     if (!cooldownElapsed(state.lastUnwindAt, now, unwindCooldownSec(state))) {
       return { action: null, reason: "unwind-cooldown" };
@@ -396,24 +374,20 @@ export function evaluate(state: VaultState, now: bigint, cfg: PolicyConfig): Dec
     return { action: null, reason: "paused" };
   }
 
-  // 6. Return margin the next liquidation won't need once stock and short are both zero.
+  // No stock left. Margin stays put: the hedge account is funded on HyperCore, with no bridge to or from Base.
   if (state.confirmedShort !== 0n) {
     return { action: null, reason: "position-open" };
-  }
-  const withdrawable = withdrawableCore(state, cfg);
-  if (withdrawable > 0n) {
-    return { action: { kind: "withdrawMargin", amount: withdrawable }, reason: "withdraw-ready" };
-  }
-  if (state.coreUsdc > 0n) {
-    return { action: null, reason: "core-at-reserve" };
   }
 
   return { action: null, reason: "idle" };
 }
 
-/** Frozen signature required by the spec. Use `evaluate` when a log reason is needed. */
-export function decide(state: VaultState, now: bigint, cfg: PolicyConfig): Action | null {
-  return evaluate(state, now, cfg).action;
+/**
+ * The spec's frozen signature, less its `cfg` argument: that only carried the USDC reserves for the margin
+ * top-ups and withdrawals, which the keeper no longer makes. Use `evaluate` when a log reason is needed.
+ */
+export function decide(state: VaultState, now: bigint): Action | null {
+  return evaluate(state, now).action;
 }
 
 // ---------------------------------------------------------------------------
@@ -426,19 +400,15 @@ const fail = (reason: Exclude<GuardResult, { ok: true }>["reason"]): GuardResult
   reason,
 });
 
-/** Each guard mirrors the matching Seiz3Vault function's own preconditions. */
-export function guards(action: Action, state: VaultState, now: bigint, cfg: PolicyConfig): GuardResult {
+/** Each guard mirrors the matching Seiz3VaultRemote function's own preconditions. */
+export function guards(action: Action, state: VaultState, now: bigint): GuardResult {
   switch (action.kind) {
     case "syncHedge":
       return guardSync(state, now);
-    case "topUpMargin":
-      return guardTopUp(action.amount, state, cfg);
     case "liquidate":
       return guardLiquidate(action, state);
     case "unwindStep":
       return guardUnwind(state, now);
-    case "withdrawMargin":
-      return guardWithdraw(action.amount, state, cfg);
   }
 }
 
@@ -450,16 +420,6 @@ function guardSync(state: VaultState, now: bigint): GuardResult {
   }
   if (state.blockNumber <= pending.sentBlock) return fail("same-block");
   if (now < pending.sentAt + state.risk.orderDelaySec) return fail("order-delay");
-  return ok;
-}
-
-/** topUpMargin has no pause or pending check on chain: it only ever adds margin. */
-function guardTopUp(amount: bigint, state: VaultState, cfg: PolicyConfig): GuardResult {
-  if (amount <= 0n) return fail("amount-zero");
-  if (state.marginShortfall <= 0n) return fail("no-margin-shortfall");
-  if (amount > topUpTarget(state.marginShortfall)) return fail("topup-above-shortfall");
-  const available = availableAfterReserve(state.idleUsdc, cfg.idleReserveUsdc);
-  if (amount > available) return fail("insufficient-idle");
   return ok;
 }
 
@@ -494,13 +454,5 @@ function guardUnwind(state: VaultState, now: bigint): GuardResult {
   if (!cooldownElapsed(state.lastUnwindAt, now, unwindCooldownSec(state))) {
     return fail("cooldown-active");
   }
-  return ok;
-}
-
-function guardWithdraw(amount: bigint, state: VaultState, cfg: PolicyConfig): GuardResult {
-  if (state.pendingHedge.delta !== 0n) return fail("hedge-pending");
-  if (state.inventory !== 0n || state.confirmedShort !== 0n) return fail("position-open");
-  if (amount <= 0n) return fail("amount-zero");
-  if (amount > withdrawableCore(state, cfg)) return fail("insufficient-core");
   return ok;
 }

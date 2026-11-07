@@ -22,7 +22,7 @@ export function StatusBar({ data }: { data: Snapshot }) {
   const oracle = data.hyperliquid?.oraclePx ?? 0;
   const gap = oracle > 0 ? data.pool.price / oracle - 1 : 0;
   const holding = BigInt(data.vault.inventory) > 0n;
-  // testnet: market A dumps into its own thin pool, and the vault's pool stays deep
+  // market A dumps into its own thin pool, and the vault's pool stays deep
   const thin = data.thinPool;
   const pool: { text: string; tone: Tone; title?: string } =
     !thin && drained(data.pool.price, oracle)

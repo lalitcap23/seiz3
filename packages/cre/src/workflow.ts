@@ -43,7 +43,7 @@ export const configSchema = z
   .object({
     schedule: z.string(), // six-field cron, e.g. "0 */1 * * * *"
     evm: z.object({
-      ...chain, // "hyperliquid-testnet" | "hyperliquid-mainnet"
+      ...chain, // "ethereum-testnet-sepolia-base-1"
       riskParams: address,
       gasLimit: z.string().default("300000"),
       // the block RiskParams' bands are read at: "latest" on Base Sepolia, whose finalized head trails by hours

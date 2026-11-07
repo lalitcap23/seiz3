@@ -1,6 +1,6 @@
 import type { PublicClient, WalletClient } from "viem";
 import type { PrivateKeyAccount } from "viem/accounts";
-import { seiz3VaultAbi, iMorphoAbi } from "@seiz3/shared/abis";
+import { seiz3VaultRemoteAbi, iMorphoAbi } from "@seiz3/shared/abis";
 
 import { PAUSE_HEDGE, PAUSE_MARGIN, guards } from "./riskCalc.js";
 import { describeError } from "./riskEngine.js";
@@ -36,7 +36,7 @@ export interface ExecuteParams {
 export async function executeAction(params: ExecuteParams): Promise<ExecuteResult> {
   const { publicClient, walletClient, account, nonces, cfg, action, state, now } = params;
 
-  const guard = guards(action, state, now, cfg);
+  const guard = guards(action, state, now);
   if (!guard.ok) return { status: "skipped", reason: guard.reason };
 
   let simulation;
@@ -91,24 +91,12 @@ async function simulate(
   cfg: Config,
   account: PrivateKeyAccount,
 ) {
-  const base = { address: cfg.vault, abi: seiz3VaultAbi, account } as const;
+  const base = { address: cfg.vault, abi: seiz3VaultRemoteAbi, account } as const;
   switch (action.kind) {
     case "syncHedge":
       return publicClient.simulateContract({ ...base, functionName: "syncHedge" });
     case "unwindStep":
       return publicClient.simulateContract({ ...base, functionName: "unwindStep" });
-    case "topUpMargin":
-      return publicClient.simulateContract({
-        ...base,
-        functionName: "topUpMargin",
-        args: [action.amount],
-      });
-    case "withdrawMargin":
-      return publicClient.simulateContract({
-        ...base,
-        functionName: "withdrawMargin",
-        args: [action.amount],
-      });
     case "liquidate": {
       // The vault takes Morpho's MarketParams, not the id; Morpho maps one to the other.
       const params = await publicClient.readContract({
@@ -173,16 +161,5 @@ export function verifyEffect(before: VaultState, after: VaultState, action: Acti
         detail: `inventory ${before.inventory} -> ${after.inventory}`,
       };
     }
-    case "topUpMargin": {
-      // The EVM side is immediate; HyperCore credits the deposit from the next block.
-      const moved = after.idleUsdc < before.idleUsdc;
-      return {
-        ok: moved,
-        detail: `idleUsdc ${before.idleUsdc} -> ${after.idleUsdc}`,
-      };
-    }
-    case "withdrawMargin":
-      // Only CoreWriter actions: nothing changes on the EVM until HyperCore runs them after this block.
-      return { ok: true, detail: `sent; coreUsdc ${after.coreUsdc} until HyperCore pays out` };
   }
 }

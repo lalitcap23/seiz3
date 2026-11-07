@@ -1,5 +1,3 @@
-import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
@@ -15,31 +13,24 @@ import { Watchlist } from "./watch.js";
 import { readTx } from "./tx.js";
 import { getConnInfo } from "@hono/node-server/conninfo";
 
-/** Where the account holding the short opens on HyperCore's explorer (the vault itself on HyperEVM). */
+/** Where the hedge account (the one holding the short) opens on HyperCore's explorer. */
 const EXPLORER = {
-  local: "",
-  testnet: "https://app.hyperliquid-testnet.xyz/explorer/address/",
-  mainnet: "https://app.hyperliquid.xyz/explorer/address/",
   "local-base": "",
   "base-sepolia": "https://app.hyperliquid-testnet.xyz/explorer/address/",
 } as const;
-/** Where the vault's own transactions open: HyperEVM's are on Hyperliquid's explorer, Base Sepolia's on Basescan. */
+/** Where the vault's own transactions open. */
 const TX_EXPLORER = {
-  local: "",
-  testnet: "https://app.hyperliquid-testnet.xyz/explorer/tx/",
-  mainnet: "https://app.hyperliquid.xyz/explorer/tx/",
   "local-base": "",
   "base-sepolia": "https://sepolia.basescan.org/tx/",
 } as const;
 
 const dep = loadDeployment(env.NETWORK, env.DEPLOYMENTS_PATH);
-// HyperEVM or Base Sepolia + Hyperliquid's info API; null on an anvil (local: HyperEVM-like, local-base: Base-like)
-const remote = env.NETWORK === "local" || env.NETWORK === "local-base" ? null : env.NETWORK;
+// Base Sepolia + Hyperliquid's info API; null on the local anvil (scripts/base-stack.sh local)
+const remote = env.NETWORK === "local-base" ? null : env.NETWORK;
 const chain = remote ? chains[remote] : foundry;
-const rpcUrl =
-  env.RPC_URL ?? (remote ? rpcUrlFor(remote) : env.NETWORK === "local-base" ? "http://127.0.0.1:8546" : "http://127.0.0.1:8545");
-/** The HyperCore account that holds the short: the vault on HyperEVM, the relayer's hedge account on Base. */
-const coreAccount = dep.hedgeAccount ?? dep.vault;
+const rpcUrl = env.RPC_URL ?? (remote ? rpcUrlFor(remote) : "http://127.0.0.1:8546");
+/** The HyperCore account that holds the short: the relayer's hedge account. */
+const coreAccount = dep.hedgeAccount;
 // viem's default (10 s, 3 retries) lets one stuck call hold the 1 s poll for 40 s; the next poll is the retry
 const transport = (url: string | undefined) => http(url, { timeout: 8_000, retryCount: 1 });
 const client = createPublicClient({ chain, transport: transport(rpcUrl) }) as PublicClient;
@@ -69,7 +60,7 @@ const collector = new Collector(client, dep, {
       : {}),
     backfillPage: env.LOG_PAGE,
     backfillGapMs: env.LOG_SCAN_MS,
-    // anvil's reverts would make a cache lie; HyperEVM's blocks are final
+    // anvil's reverts would make a cache lie; Base Sepolia's blocks are final
     ...(remote ? { cacheFile: env.FEED_CACHE_FILE ?? `${DEPLOYMENTS_DIR}feed-cache.${env.NETWORK}.json` } : {}),
     chainRewinds: !remote,
   },
@@ -126,7 +117,7 @@ app.get("/stream", (c) =>
   }),
 );
 
-/** The web's transaction page: decoded call, events and the vault's HyperCore orders (no public testnet explorer). */
+/** The web's transaction page: decoded call, events and the vault's HyperCore orders. */
 app.get("/tx/:hash", async (c) => {
   const hash = c.req.param("hash");
   if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) return c.json({ error: "not a transaction hash" }, 400);
@@ -151,7 +142,7 @@ const faucet =
     ? new FaucetRelay(client, chain, rpcUrl, env.FAUCET_OPERATOR_PRIVATE_KEY as `0x${string}`, dep.faucet, env.FAUCET_IP_COOLDOWN_SEC)
     : null;
 
-/** Testers' first step: NVDAx to borrow against, a little USDC, and HYPE for gas, sent by the operator key. */
+/** Testers' first step: NVDAx to borrow against, a little USDC, and ETH for gas, sent by the operator key. */
 app.post("/faucet", async (c) => {
   if (faucet === null) return c.json({ error: "faucet not configured on this API" }, 503);
   const body = (await c.req.json().catch(() => ({}))) as { address?: string };
@@ -160,46 +151,6 @@ app.post("/faucet", async (c) => {
   watchlist.add(body.address ?? "");
   const result = await faucet.drip(body.address ?? "", ip);
   return result.ok ? c.json(result) : c.json(result, result.status);
-});
-
-const REPLAY_STEPS = ["setup", "reset", "scene", "marketA", "marketB", "marketC", "buyers", "monday"];
-let replaying: string | null = null;
-
-/** `pnpm replay <step>` in the repo, with this process's env; resolves with its exit status and output tail. */
-function runReplay(step: string): Promise<{ ok: boolean; output: string }> {
-  return new Promise((resolve) => {
-    const child = spawn("pnpm", ["--silent", "--filter", "@seiz3/replay", "start", step], {
-      cwd: fileURLToPath(new URL("../../../", import.meta.url)),
-      env: process.env,
-    });
-    let output = "";
-    const keep = (chunk: Buffer) => {
-      output = (output + chunk.toString()).slice(-4000);
-    };
-    child.stdout.on("data", keep);
-    child.stderr.on("data", keep);
-    child.on("error", (error) => resolve({ ok: false, output: String(error) }));
-    child.on("exit", (code) => resolve({ ok: code === 0, output }));
-  });
-}
-
-/** The presenter's clicker: one demo step at a time, answered when it has finished. */
-app.post("/replay/:step", async (c) => {
-  // the steps move real oracles with the deployer's key: a public API never runs them on the example token
-  if (remote && env.REPLAY_TOKEN === "change-me") return c.json({ error: "set REPLAY_TOKEN to enable replay" }, 503);
-  if (c.req.header("authorization") !== `Bearer ${env.REPLAY_TOKEN}`)
-    return c.json({ error: "unauthorized" }, 401);
-  const step = c.req.param("step");
-  if (!REPLAY_STEPS.includes(step)) return c.json({ error: `unknown step ${step}`, steps: REPLAY_STEPS }, 404);
-  if (replaying !== null) return c.json({ error: `${replaying} is still running` }, 409);
-  replaying = step;
-  try {
-    const { ok, output } = await runReplay(step);
-    if (ok && step === "setup") collector.reload(loadDeployment(env.NETWORK, env.DEPLOYMENTS_PATH)); // new addresses
-    return c.json({ ok, step, output }, ok ? 200 : 500);
-  } finally {
-    replaying = null;
-  }
 });
 
 serve({ fetch: app.fetch, port: env.API_PORT }, (info) =>

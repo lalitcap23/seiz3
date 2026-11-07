@@ -6,7 +6,7 @@ import { Panel, TxLink } from "./ui";
 const SHOWN = 12;
 
 /**
- * One vault event in words: what happened, and on which side (HyperEVM or HyperCore). `soldTo` says where an
+ * One vault event in words: what happened, and on which side (Base or HyperCore). `soldTo` says where an
  * Unwound's stock went, when known: the hook's InventoryFill in the same transaction means a buyer, otherwise the curve.
  */
 export function describe(

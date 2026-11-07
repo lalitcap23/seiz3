@@ -1,6 +1,6 @@
 # Uniswap v4 feedback: Seiz3
 
-Seiz3 is a lending-liquidation vault on HyperEVM. Its v4 hook, [`Seiz3Hook`](contracts/src/Seiz3Hook.sol), fills buyers from the vault's hedged stock inside `beforeSwap`, at the HyperCore oracle price plus a spread. The hook also sets the pool's fee by stock-market hours. We built it against v4-core `e50237c4` and v4-periphery `9969eec4`, testing on a local PoolManager and a fork of the HyperEVM mainnet PoolManager (`0x12D4Fd9C…`).
+Seiz3 is a lending-liquidation vault on Base Sepolia, hedged on HyperCore. Its v4 hook, [`Seiz3HookRemote`](contracts/src/remote/Seiz3HookRemote.sol), fills buyers from the vault's hedged stock inside `beforeSwap`, at the HyperCore oracle price plus a spread. The hook also sets the pool's fee by stock-market hours. We built it against v4-core `e50237c4` and v4-periphery `9969eec4`, testing on a local PoolManager and a fork of Uniswap's Base Sepolia PoolManager (`0x05E7…3408`).
 
 ## What worked well
 
@@ -16,7 +16,7 @@ Seiz3 is a lending-liquidation vault on HyperEVM. Its v4 hook, [`Seiz3Hook`](con
 3. **`BeforeSwapDelta` signs are only in a comment.** The `IHooks` NatSpec says "positive: the hook is owed/took currency". Which currency is "specified" depends on `exactInput == zeroForOne` (`Hooks.afterSwap`). We worked out all four cases (exact in or out × currency order) by reading `Hooks.sol`. A table in the docs would make this a five-minute job.
 4. **Paying out before the swapper settles uses the PoolManager's own balance.** It isn't documented that a hook's `take` inside `beforeSwap` is funded from the PoolManager's existing token balance, because the swapper hasn't paid yet. We cap each fill at the PoolManager's USDC balance. It matters on a new chain where the PoolManager holds little.
 5. **A dynamic-fee pool's fee is 0 until the hook sets it.** That is easy to miss when a hook only overrides on some paths.
-6. **No PoolManager on HyperEVM testnet.** Mainnet has one, so on testnet we deployed our own.
+6. **No PoolManager on HyperEVM testnet, where we started.** Only Uniswap's own deployments count, so we moved the vault to Base Sepolia and reach HyperCore through a gateway contract and a relayer.
 
 ## Missing capability or documentation
 

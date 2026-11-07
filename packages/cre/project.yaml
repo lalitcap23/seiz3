@@ -1,22 +1,4 @@
 # CRE project settings: the RPC each target reads and writes through. chain-name must be the CRE chain selector name.
-staging-settings:
-  cre-cli:
-    don-family: "zone-a"
-  rpcs:
-    - chain-name: hyperliquid-testnet
-      url: https://rpc.hyperliquid-testnet.xyz/evm
-    - chain-name: ethereum-mainnet # Chainlink's NVDA/USD Data Feed (dataFeed in the config)
-      url: https://ethereum-rpc.publicnode.com
-
-production-settings:
-  cre-cli:
-    don-family: "zone-a"
-  rpcs:
-    - chain-name: hyperliquid-mainnet
-      url: https://rpc.hyperliquid.xyz/evm
-    - chain-name: ethereum-mainnet
-      url: https://ethereum-rpc.publicnode.com
-
 # Base Sepolia (the vault on Base, the short on HyperCore testnet): base-feed/
 base-sepolia-settings:
   cre-cli:

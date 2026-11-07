@@ -28,19 +28,17 @@ import {Units} from "../libs/Units.sol";
 import {HyperCoreGateway} from "./HyperCoreGateway.sol";
 
 /// @title Seiz3VaultRemote
-/// @notice Seiz3Vault for an EVM chain without HyperCore (Base Sepolia): the same ERC-4626 USDC vault that buys
-///         seized stock collateral from Morpho, shorts the same stock on HyperCore (xyz:NVDA) and unwinds into
-///         Uniswap v4 while closing the short. Every door into HyperCore goes through `HyperCoreGateway` instead of
-///         the precompiles and CoreWriter: orders are queued there for the relayer, which places them from the hedge
-///         account, and reads come from the gateway's last attested snapshot of that account.
-/// @dev Same external interface as Seiz3Vault (keeper, API, hook and scripts drive either one), with three
-///      differences that follow from the chain:
+/// @notice ERC-4626 USDC vault on an EVM chain without HyperCore (Base Sepolia) that buys seized stock collateral
+///         from Morpho, shorts the same stock on HyperCore (xyz:NVDA) and unwinds into Uniswap v4 while closing the
+///         short. Every door into HyperCore goes through `HyperCoreGateway`: orders are queued there for the relayer,
+///         which places them from the hedge account, and reads come from the gateway's last attested snapshot of
+///         that account.
+/// @dev Implements the full ISeiz3Vault interface. What follows from the chain:
 ///        - the short is placed by the relayer a few seconds after `liquidate`, not in the same transaction, and
 ///          `syncHedge` waits for the gateway to acknowledge the order (`settled`) before it reads the result;
 ///        - there is no USDC bridge to HyperCore from here: the hedge account is funded on HyperCore, and the margin
 ///          moves (`topUpMargin`, `withdrawMargin`, `sweepSpotToDex`, `addApiWallet`) revert `NoBridge`;
 ///        - `activateCore` only starts counting the hedge account's HyperCore USDC, once the gateway has seen it.
-///      Everything else (pauses, invariants, LP queue, unwind and hook rules) is Seiz3Vault's, line for line.
 contract Seiz3VaultRemote is
     ERC4626,
     Ownable,
@@ -65,7 +63,7 @@ contract Seiz3VaultRemote is
     IMorpho public immutable morpho;
     IPoolManager public immutable poolManager;
     HyperCoreGateway public immutable gateway; // HyperCore's precompiles + CoreWriter on this chain
-    address public immutable coreDepositWallet; // Seiz3Vault's USDC entry to Core; here the gateway
+    address public immutable coreDepositWallet; // ISeiz3Vault's USDC entry to Core; here the gateway
     uint32 public immutable perpAsset; // order id: 100000 + perpDexIndex*10000 + indexInMeta
     uint32 public immutable perpIndex; // read id: perpDexIndex*10000 + indexInMeta
     uint32 public immutable perpDexIndex;
@@ -84,7 +82,7 @@ contract Seiz3VaultRemote is
     uint256 public marginFloat; // USDC (6 dec) on the xyz perp account, refreshed on sync
     uint8 public pauseFlags;
     uint64 public lastUnwindAt;
-    uint32 public marginDepositDex; // kept for Seiz3Vault's interface: always perpDexIndex
+    uint32 public marginDepositDex; // kept for ISeiz3Vault: always perpDexIndex
     bool public coreFunded; // set by `activateCore`; until then the hedge account's USDC isn't counted
     mapping(Id => bool) public marketAllowed;
 
@@ -170,7 +168,7 @@ contract Seiz3VaultRemote is
         return _dexAccountValue() + spot;
     }
 
-    /// @notice Always 0: nothing moves to HyperCore from this chain (Seiz3Vault's interface).
+    /// @notice Always 0: nothing moves to HyperCore from this chain (kept for ISeiz3Vault).
     function inTransit() public pure returns (uint256) {
         return 0;
     }
@@ -454,13 +452,13 @@ contract Seiz3VaultRemote is
         emit MarketAllowed(Id.unwrap(id), allowed);
     }
 
-    /// @notice Margin always sits on the perp DEX here (Seiz3Vault's interface).
+    /// @notice Margin always sits on the perp DEX here (kept for ISeiz3Vault).
     function setMarginDepositDex(uint32) external pure {
         revert NoBridge();
     }
 
     /// @notice Start counting the hedge account's HyperCore USDC in `totalAssets`, once the gateway has seen the
-    ///         account (fund it on HyperCore first). The argument is Seiz3Vault's deposit size, unused here.
+    ///         account (fund it on HyperCore first). The argument (a bridge deposit size) is unused here.
     function activateCore(uint256) external onlyOwner nonReentrant {
         if (!gateway.coreUserExists(address(this))) revert CoreAccountMissing();
         coreFunded = true;
@@ -585,7 +583,7 @@ contract Seiz3VaultRemote is
         return target == 0 ? gap == 0 : _abs(gap) <= r.maxUnhedged;
     }
 
-    /// @dev The Core oracle through the gateway; 0 means unknown, as with the precompile (HedgeLib.oraclePx).
+    /// @dev The Core oracle through the gateway; 0 means unknown, as with the oraclePx precompile.
     function _oraclePx() internal view returns (uint64 px) {
         px = gateway.oraclePx(perpIndex);
         if (px == 0) revert HyperCoreGateway.UnknownAsset(perpIndex);

@@ -15,8 +15,8 @@ library DeployHelpers {
     uint24 internal constant THIN_POOL_FEE = 500;
     int24 internal constant THIN_TICK_SPACING = 10;
 
-    /// @notice Hackathon defaults for xyz:NVDA (szDecimals 3, ~$217, max 20x). Tune after the pre-kickoff
-    ///         spikes (orderDelaySec and transitBlocks especially).
+    /// @notice Hackathon defaults for xyz:NVDA (szDecimals 3, ~$217, max 20x). `transitBlocks` is unused on Base
+    ///         (no bridge to HyperCore).
     function defaultRisk() internal pure returns (RiskParams.Params memory) {
         return RiskParams.Params({
             maxLiquidation: 50_000e6,
@@ -37,16 +37,7 @@ library DeployHelpers {
         });
     }
 
-    /// @notice The Chainlink forwarder that delivers CRE reports to RiskParams (docs.chain.link/cre, forwarder
-    ///         directory). HyperEVM testnet gets the simulation forwarder, which `cre workflow simulate --broadcast`
-    ///         writes through. Chains without one (anvil) use `fallback_`, which can then post reports itself.
-    function creForwarder(address fallback_) internal view returns (address) {
-        if (block.chainid == 999) return 0x9eF6468C5f37b976E57d52054c693269479A784d; // KeystoneForwarder
-        if (block.chainid == 998) return 0xB27fA1c28288c50542527F64BCda22C9FbAc24CB; // MockKeystoneForwarder
-        return fallback_;
-    }
-
-    /// @notice The vault's NVDAx/USDC pool every script agrees on: Seiz3Hook with a dynamic fee (the hook sets
+    /// @notice The vault's NVDAx/USDC pool every script agrees on: Seiz3HookRemote with a dynamic fee (the hook sets
     ///         it per swap: 0.3% while the market is open, wider after the bell).
     function poolKey(address usdc, address nvdax, address hook) internal pure returns (PoolKey memory) {
         (address c0, address c1) = usdc < nvdax ? (usdc, nvdax) : (nvdax, usdc);

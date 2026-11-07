@@ -6,12 +6,11 @@
 #   pnpm base:down    # also takes the market maker's resting quotes off HyperCore
 #
 # Then http://localhost:3001/try (testers) and http://localhost:3001 (dashboard); API on http://localhost:8788.
-# The HyperEVM testnet stack (docker-compose.testnet.yml, :3000 / :8787) is separate and can run beside it.
 #
 # Each service runs `scripts/base-stack.sh sepolia <service>`, so its env is the one `live` gives it. Keys come from
 # .env.local, as on the host: DEPLOYER_PRIVATE_KEY, KEEPER_PRIVATE_KEY, BASE_HEDGE_PRIVATE_KEY (+ BASE_RELAYER_PRIVATE_KEY),
 # BASE_MM_PRIVATE_KEY, FAUCET_OPERATOR_PRIVATE_KEY, CRE_PRIVATE_KEY, DATA_STREAMS_API_KEY + DATA_STREAMS_USER_SECRET,
-# INFURA_API_KEY or BASE_SEPOLIA_RPC_URL. The script overrides RPC_URL / HL_MM_* from .env.local (the HyperEVM stack's).
+# INFURA_API_KEY or BASE_SEPOLIA_RPC_URL. The script sets RPC_URL / HL_MM_* itself, whatever .env.local says.
 # Don't run this and `live` (or a host keeper / relayer / bots) at once: two relayers place every order twice. `live`
 # refuses while this stack holds :3001 / :8788.
 name: seiz3-base
@@ -96,7 +95,6 @@ services:
       dockerfile: docker/web.Dockerfile
       args:
         NEXT_PUBLIC_API_URL: http://localhost:8788 # the API as the browser reaches it
-        NEXT_PUBLIC_NETWORK: base-sepolia
         # the browser's reads; the public RPC rate-limits per IP (the page says so when a read fails)
         NEXT_PUBLIC_RPC_URL: https://sepolia.base.org
     image: seiz3-web:base

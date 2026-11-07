@@ -4,10 +4,9 @@
 #   Morpho Blue + Uniswap v4 PoolManager: Morpho's and Uniswap's own Base Sepolia deployments (no copies of either)
 #   Seiz3VaultRemote + Seiz3HookRemote + HyperCoreGateway: ours (contracts/src/remote)
 #   relayer (packages/relayer): gateway orders → the hedge account on HyperCore → snapshots back to the gateway
-#   keeper (packages/keeper): unchanged; it drives Seiz3VaultRemote through the same ABI
+#   keeper (packages/keeper): liquidates, syncs the hedge and unwinds through Seiz3VaultRemote
 #
-# The HyperEVM stacks (scripts/local-stack.sh, scripts/testnet-stack.sh) are untouched; this one writes its own files:
-# deployments/local-base*.json and deployments/base-sepolia*.json.
+# It writes deployments/local-base*.json, deployments/base-fork*.json and deployments/base-sepolia*.json.
 #
 # ─── local: a plain anvil on :8546 with Morpho/v4 bytecode set up like Base Sepolia, HyperCore = MockHyperCore ───
 #   anvil --port 8546                          # terminal 1
@@ -303,8 +302,8 @@ activate() {
 keeper() {
   single keeper
   cd "$ROOT"
-  # no USDC route to HyperCore from Base: top-ups and withdrawals stay out of reach (the vault reverts NoBridge).
-  # Its own ask-request and watch files: the HyperEVM docker stack reads deployments/ASK_REQUEST.json and watch.json.
+  # The hedge account is funded on HyperCore (no USDC route from Base), so the keeper never moves margin.
+  # Its ask-request and watch files are shared with the bots and the API below (BASE_*).
   # On sepolia the HyperCore buy-back gate is on (HL_INFO_API_URL): it asks the Base market maker for an ask first.
   if [[ $NET == sepolia ]]; then
     export HL_INFO_API_URL=${HL_INFO_API_URL:-https://api.hyperliquid-testnet.xyz/info}
@@ -314,8 +313,7 @@ keeper() {
   RPC_URL=$RPC KEEPER_PK=${KEEPER_PK:?set KEEPER_PRIVATE_KEY in .env.local} DEPLOYMENTS_PATH=$DEP_JSON \
     KILL_SWITCH_FILE=$ROOT/deployments/BASE_KILL ASK_REQUEST_FILE=$ROOT/deployments/BASE_ASK_REQUEST.json \
     WATCH_FILE=$ROOT/deployments/BASE_watch.json \
-    MORPHO_API_ENABLED=0 IDLE_RESERVE_USDC=1000000000 \
-    CORE_RESERVE_USDC=1000000000 MIN_SIGNER_BALANCE_WEI=${MIN_SIGNER_BALANCE_WEI:-10000000000000} \
+    MORPHO_API_ENABLED=0 MIN_SIGNER_BALANCE_WEI=${MIN_SIGNER_BALANCE_WEI:-10000000000000} \
     MAX_ACTIONS_PER_MINUTE=${MAX_ACTIONS_PER_MINUTE:-60} TICK_MS=${TICK_MS:-1000} \
     BUYER_WINDOW_SEC=${BUYER_WINDOW_SEC:-$([[ $NET == sepolia ]] && echo 60 || echo 0)} \
     exec pnpm --silent --filter @seiz3/keeper start
@@ -323,9 +321,8 @@ keeper() {
 # BUYER_WINDOW_SEC (sepolia: 60): each liquidation's stock goes to buyers through the v4 hook before the keeper pushes
 # any of it into the pool; the first hook fill (or the end of the window) lets the pushes start
 
-# The Base vault's bots. The market maker trades its OWN account (BASE_MM_PRIVATE_KEY), never the HyperEVM stack's
-# (HL_MM_PRIVATE_KEY / HL_MM_ACCOUNT, which the docker bots already quote with): two makers on one account would
-# cancel each other's orders.
+# The Base vault's bots. The market maker trades its own account (BASE_MM_PRIVATE_KEY, passed on as HL_MM_PRIVATE_KEY
+# whatever .env.local sets that to): two makers on one account would cancel each other's orders.
 #   oracle  markets A/B/C follow HyperCore's oracle (the gateway's), so a borrow at the limit tips over on interest
 #   pool    the v4 pool on the oracle; while the vault holds stock, just over the hook's ask (POOL_ABOVE_ASK_BPS), so a
 #           buyer's swap (yours on /try included) is filled from the vault through the hook
@@ -348,8 +345,8 @@ bots() {
     DEPLOYER_PRIVATE_KEY=$DEPLOYER_PK exec pnpm --filter @seiz3/bots start
 }
 
-# The dashboard's data (packages/api) for this deployment, on its own port and watch file (the HyperEVM docker API
-# serves 8787 and reads deployments/watch.json). The faucet relay uses FAUCET_OPERATOR_PRIVATE_KEY from .env.local.
+# The dashboard's data (packages/api) for this deployment, on :8788 with the keeper's watch file. The faucet relay uses
+# FAUCET_OPERATOR_PRIVATE_KEY from .env.local.
 api() {
   [[ $NET != fork ]] || { echo "api runs on local or sepolia" >&2; exit 1; }
   cd "$ROOT"
@@ -361,7 +358,7 @@ api() {
   # address per 10 minutes)
 }
 
-# The dashboard and /try page for this deployment, on :3001 (the HyperEVM docker web is on :3000)
+# The dashboard and /try page for this deployment, on :3001
 web() {
   [[ $NET == sepolia ]] || { echo "web runs against Base Sepolia" >&2; exit 1; }
   cd "$ROOT"
@@ -559,7 +556,7 @@ sqrt_limit() {
   ' "$1" "$2"
 }
 
-# hook-fill <usdc> [push-max-usdc]: as scripts/testnet-stack.sh — push the curve just past the hook's ask, then buy
+# hook-fill <usdc> [push-max-usdc]: push the curve just past the hook's ask, then buy
 # <usdc> of NVDAx, which the hook fills from the vault's hedged stock. Its buy-back goes out through the relayer.
 hook_fill() {
   local usdc=$((${1:?usage: hook-fill <usdc> [push-max-usdc]} * 1000000)) push=$((${2:-100} * 1000000))
@@ -640,13 +637,13 @@ hedge_admin() {
   (cd "$ROOT" && HL_PRIVATE_KEY=$HEDGE_PK HL_ACCOUNT=$HEDGE pnpm --silent --filter @seiz3/relayer admin "$@")
 }
 
-# packages/cre/base-feed/config.base-sepolia.json: the testnet feed's config (market hours, Data Feed check, the book)
-# pointed at this deployment's RiskParams on Base Sepolia, plus the gateway block that turns on the hedge attestation
+# packages/cre/base-feed/config.base-sepolia.json (committed: market hours, Data Feed check, the book) pointed at this
+# deployment's RiskParams on Base Sepolia, plus the gateway block that turns on the hedge attestation
 cre_config() {
   node -e '
     const fs = require("fs");
-    const [stagingPath, depPath, out] = process.argv.slice(1);
-    const c = JSON.parse(fs.readFileSync(stagingPath, "utf8"));
+    const [depPath, out] = process.argv.slice(1);
+    const c = JSON.parse(fs.readFileSync(out, "utf8"));
     const dep = JSON.parse(fs.readFileSync(depPath, "utf8"));
     // readBlock latest: the finalized head of Base Sepolia trails by hours, so a fresh RiskParams is not there yet
     c.evm = { chainSelectorName: "ethereum-testnet-sepolia-base-1", isTestnet: true, riskParams: dep.riskParams, gasLimit: "300000", readBlock: "latest" };
@@ -659,7 +656,7 @@ cre_config() {
     };
     c.gateway = { address: dep.hyperCoreGateway, hedgeAccount: dep.hedgeAccount, szDecimals: dep.hypercore.szDecimals, gasLimit: "400000" };
     fs.writeFileSync(out, JSON.stringify(c, null, 2) + "\n");
-  ' "$ROOT/packages/cre/market-feed/config.staging.json" "$DEP_JSON" "$ROOT/packages/cre/base-feed/config.base-sepolia.json"
+  ' "$DEP_JSON" "$ROOT/packages/cre/base-feed/config.base-sepolia.json"
 }
 
 # One run of the CRE workflow with the Base Sepolia config: RiskParams + the DON's snapshot of the hedge account to the

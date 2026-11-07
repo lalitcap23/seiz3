@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { seiz3HookAbi } from "@seiz3/shared/abis";
+import { seiz3HookRemoteAbi } from "@seiz3/shared/abis";
 import { dep, publicClient } from "./chain";
 
 export interface HookQuote {
@@ -24,7 +24,7 @@ export function useHookQuote() {
       try {
         const [capacity, askUsd6, fee, open] = await publicClient.readContract({
           address: dep.hook!,
-          abi: seiz3HookAbi,
+          abi: seiz3HookRemoteAbi,
           functionName: "quote",
         });
         return { capacity, askUsd6, fee: Number(fee), open };

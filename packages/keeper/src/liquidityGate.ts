@@ -20,27 +20,14 @@ export interface GateConfig {
 export type GateResult = { readonly ok: true } | { readonly ok: false; readonly reason: string; readonly needNvda: number };
 
 /**
- * Core size units the vault will buy on HyperCore with this action (0 if it buys nothing). An unwind buys back the
- * over-short there already is plus the chunk it sells: up to `maxUnhedged`, but the pool's 0.5% impact cap usually
- * stops it far sooner, so the chunk counts at most `chunkUnits`. A partial fill is fine: the rest stays over-short,
- * inside the tolerance, and goes into the next round's buy.
+ * Core size units the vault will buy on HyperCore with this action (0 if it buys nothing). A sync with a buy pending
+ * counts the whole pending buy. An unwind buys back the over-short there already is plus the chunk it sells: up to
+ * `maxUnhedged`, but the pool's 0.5% impact cap usually stops it far sooner, so the chunk counts at most `chunkUnits`.
+ * A partial fill is fine: the rest stays over-short, inside the tolerance, and goes into the next round's buy.
  */
-export function buyNeeded(
-  action: Action,
-  state: VaultState,
-  szDecimals: number,
-  chunkUnits: bigint,
-  /** The vault's live position on HyperCore (precompile), when known: a sync only buys if it's still over-short. */
-  coreSzi: bigint | null = null,
-): bigint {
+export function buyNeeded(action: Action, state: VaultState, szDecimals: number, chunkUnits: bigint): bigint {
   if (action.kind === "syncHedge") {
-    if (state.pendingHedge.delta <= 0n) return 0n;
-    if (coreSzi === null) return state.pendingHedge.delta;
-    // what syncHedge would resend: the gap to −inventory, unless it's within the vault's tolerance (then it just confirms)
-    const held = state.inventory / 10n ** BigInt(18 - szDecimals);
-    const gap = -held - coreSzi; // > 0: still more short than stock
-    const tolerance = held > 0n ? state.risk.maxUnhedged : 0n;
-    return gap > tolerance ? gap : 0n;
+    return state.pendingHedge.delta > 0n ? state.pendingHedge.delta : 0n;
   }
   if (action.kind !== "unwindStep") return 0n;
   const held = state.inventory / 10n ** BigInt(18 - szDecimals);
@@ -92,7 +79,7 @@ export async function checkBuyLiquidity(
 }
 
 /**
- * A hook fill (Seiz3Hook) sells stock to a buyer inside their swap and sends the buy-back at once, so no gate runs
+ * A hook fill (Seiz3HookRemote) sells stock to a buyer inside their swap and sends the buy-back at once, so no gate runs
  * before it. While the vault holds stock its hook can sell, keep an ask request standing for the most one fill can
  * take (min(stock, maxUnhedged)), so asks are on the book whenever a buyer comes. Returns the size requested, NVDA.
  */

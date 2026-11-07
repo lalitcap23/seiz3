@@ -1,7 +1,6 @@
 import {
   decodeAbiParameters,
   decodeFunctionResult,
-  encodeAbiParameters,
   encodeFunctionData,
   hexToBigInt,
   parseAbi,
@@ -12,8 +11,8 @@ import {
   type PublicClient,
 } from "viem";
 import {
-  seiz3HookAbi,
-  seiz3VaultAbi,
+  seiz3HookRemoteAbi,
+  seiz3VaultRemoteAbi,
   demoOracleAbi,
   hyperCoreGatewayAbi,
   iMorphoAbi,
@@ -22,7 +21,7 @@ import {
 import { accruedTotalBorrow, extsloadAbi, poolSlots, type MarketName } from "@seiz3/shared";
 import type { DeploymentFile } from "@seiz3/shared/node";
 
-/** Canonical Multicall3: deployed on HyperEVM mainnet and testnet; scripts/local-stack.sh etches it on anvil. */
+/** Canonical Multicall3: deployed on Base Sepolia; scripts/base-stack.sh etches it on a local anvil. */
 export const MULTICALL3: Address = "0xcA11bde05977b3631167028862bE2a173976CA11";
 
 const multicall3Abi = parseAbi([
@@ -32,13 +31,6 @@ const multicall3Abi = parseAbi([
   "function getBlockNumber() view returns (uint256 blockNumber)",
   "function getCurrentBlockTimestamp() view returns (uint256 timestamp)",
 ]);
-
-const PRECOMPILE = {
-  markPx: "0x0000000000000000000000000000000000000806",
-  oraclePx: "0x0000000000000000000000000000000000000807",
-  marginSummary: "0x000000000000000000000000000000000000080F",
-  position2: "0x0000000000000000000000000000000000000813",
-} as const;
 
 const irmAbi = parseAbi([
   "struct MarketParams { address loanToken; address collateralToken; address oracle; address irm; uint256 lltv; }",
@@ -92,9 +84,9 @@ export interface ChainRead {
   pool: { sqrtPriceX96: bigint; liquidity: bigint };
   /** Market A's own weekend pool; null where it shares the vault's pool. */
   thinPool: { sqrtPriceX96: bigint; liquidity: bigint } | null;
-  /** Seiz3Hook's quote; null without a hook, or while its HyperCore reads fail. */
+  /** The hook's quote; null without a hook, or while its HyperCore reads fail. */
   hook: HookRead | null;
-  core: CoreRead | null; // null without HyperCore precompiles
+  core: CoreRead | null; // null while the gateway's snapshot is stale (its reads revert)
 }
 
 export interface HookRead {
@@ -121,19 +113,9 @@ function contract(name: string, address: Address, abi: Abi, functionName: string
   };
 }
 
-/** HyperCore read precompiles take bare ABI-encoded args, no selector. */
-function precompile(name: string, address: Address, inputs: string, outputs: string, args: readonly unknown[]): Call {
-  return {
-    name,
-    target: address,
-    callData: encodeAbiParameters(parseAbiParameters(inputs), args as never),
-    decode: (data) => decodeAbiParameters(parseAbiParameters(outputs), data),
-  };
-}
-
 /**
- * Base Sepolia: the same read through HyperCoreGateway, which answers in the precompile's encoding (a static struct
- * encodes as the flat tuple), so it decodes exactly like `precompile`.
+ * A HyperCore read through HyperCoreGateway, which answers in the precompile's encoding (a static struct encodes as
+ * the flat tuple), so it decodes as that tuple.
  */
 function gateway(name: string, address: Address, functionName: string, outputs: string, args: readonly unknown[]): Call {
   return {
@@ -142,13 +124,6 @@ function gateway(name: string, address: Address, functionName: string, outputs: 
     callData: encodeFunctionData({ abi: hyperCoreGatewayAbi, functionName, args } as never),
     decode: (data) => decodeAbiParameters(parseAbiParameters(outputs), data),
   };
-}
-
-/** HyperCore reads: the precompiles on HyperEVM (and the local stack), the gateway where the deployment has one. */
-function coreCall(dep: DeploymentFile, name: string, precompileAt: Address, fn: string, inputs: string, outputs: string, args: readonly unknown[]): Call {
-  return dep.hyperCoreGateway
-    ? gateway(name, dep.hyperCoreGateway, fn, outputs, args)
-    : precompile(name, precompileAt, inputs, outputs, args);
 }
 
 /** Multicall3's aggregate3 in one eth_call: each result is the call's return data, or null where it reverted. */
@@ -167,7 +142,7 @@ async function aggregate(client: PublicClient, calls: readonly Call[], blockNumb
   return results.map((r) => (r.success ? r.returnData : null));
 }
 
-/** Everything the snapshot needs from HyperEVM and HyperCore, in one eth_call at one block (plus one for the IRMs). */
+/** Everything the snapshot needs from Base and HyperCore (via the gateway), in one eth_call at one block (plus one for the IRMs). */
 export async function readChain(
   client: PublicClient,
   dep: DeploymentFile,
@@ -176,7 +151,7 @@ export async function readChain(
   const perpIndex = dep.hypercore.perpAsset >= 100_000 ? dep.hypercore.perpAsset - 100_000 : dep.hypercore.perpAsset;
   const slots = poolSlots(dep.poolKey);
   const borrowerOf = (name: MarketName) => dep.borrowers.find((b) => b.label === name)?.address ?? null;
-  const vault = (fn: string) => contract(`vault.${fn}`, dep.vault, seiz3VaultAbi, fn);
+  const vault = (fn: string) => contract(`vault.${fn}`, dep.vault, seiz3VaultRemoteAbi, fn);
 
   const calls: Call[] = [
     contract("blockNumber", MULTICALL3, multicall3Abi, "getBlockNumber"),
@@ -193,23 +168,13 @@ export async function readChain(
     contract("risk.marketOpen", dep.riskParams, riskParamsAbi, "marketOpen"),
     contract("pool.slot0", dep.poolManager, extsloadAbi, "extsload", [slots.slot0]),
     contract("pool.liquidity", dep.poolManager, extsloadAbi, "extsload", [slots.liquidity]),
-    coreCall(dep, "core.oraclePx", PRECOMPILE.oraclePx, "oraclePx", "uint32", "uint64", [perpIndex]),
-    coreCall(dep, "core.markPx", PRECOMPILE.markPx, "markPx", "uint32", "uint64", [perpIndex]),
-    coreCall(
-      dep,
-      "core.position",
-      PRECOMPILE.position2,
-      "position",
-      "address, uint32",
-      "int64, uint64, int64, uint32, bool",
-      [dep.vault, perpIndex],
-    ),
-    coreCall(
-      dep,
+    gateway("core.oraclePx", dep.hyperCoreGateway, "oraclePx", "uint64", [perpIndex]),
+    gateway("core.markPx", dep.hyperCoreGateway, "markPx", "uint64", [perpIndex]),
+    gateway("core.position", dep.hyperCoreGateway, "position", "int64, uint64, int64, uint32, bool", [dep.vault, perpIndex]),
+    gateway(
       "core.marginSummary",
-      PRECOMPILE.marginSummary,
+      dep.hyperCoreGateway,
       "accountMarginSummary",
-      "uint32, address",
       "int64, uint64, uint64, int64",
       [dep.hypercore.perpDexIndex, dep.vault],
     ),
@@ -237,8 +202,8 @@ export async function readChain(
 
   if (dep.hook) {
     calls.push(
-      contract("hook.quote", dep.hook, seiz3HookAbi, "quote"),
-      contract("hook.settings", dep.hook, seiz3HookAbi, "settings"),
+      contract("hook.quote", dep.hook, seiz3HookRemoteAbi, "quote"),
+      contract("hook.settings", dep.hook, seiz3HookRemoteAbi, "settings"),
     );
   }
 

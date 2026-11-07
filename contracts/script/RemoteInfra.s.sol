@@ -2,10 +2,9 @@
 pragma solidity ^0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IMorpho} from "@morpho-blue/interfaces/IMorpho.sol";
 
-import {MockUSDC} from "../test/utils/Seiz3Base.sol";
+import {MockUSDC} from "../src/mocks/MockUSDC.sol";
 import {MockHyperCore} from "../test/utils/MockHyperCore.sol";
 import {DeployHelpers} from "./DeployHelpers.sol";
 
@@ -51,7 +50,7 @@ contract RemoteInfra is Script {
         address swapRouter = BASE_SEPOLIA_POOL_SWAP_TEST.code.length > 0 ? BASE_SEPOLIA_POOL_SWAP_TEST : address(0);
 
         address core;
-        if (mockCore) core = _mockCore(usdc);
+        if (mockCore) core = _mockCore();
         vm.stopBroadcast();
 
         string memory o = "remoteInfra";
@@ -69,11 +68,11 @@ contract RemoteInfra is Script {
     }
 
     /// @dev HyperCore for the relayer's mock backend: testnet's xyz:NVDA ids, and the hedge account live with margin.
-    function _mockCore(address usdc) internal returns (address) {
+    function _mockCore() internal returns (address) {
         uint32 perpIndex = uint32(vm.envOr("PERP_INDEX", uint256(650_002)));
         uint32 dex = uint32(vm.envOr("PERP_DEX_INDEX", uint256(65)));
         uint8 szDecimals = uint8(vm.envOr("SZ_DECIMALS", uint256(3)));
-        MockHyperCore core = new MockHyperCore(IERC20(usdc), perpIndex, dex, szDecimals);
+        MockHyperCore core = new MockHyperCore(perpIndex, dex, szDecimals);
         core.setPx(uint64(vm.envOr("START_PRICE_USD6", uint256(217e6)) / 10 ** szDecimals));
         address hedge = vm.envOr("HEDGE_ACCOUNT", address(0));
         if (hedge != address(0)) {

@@ -82,7 +82,7 @@ interface ISeiz3Vault {
     function syncHedge() external;
     function unwindStep() external;
 
-    // ─── hook-facing (Seiz3Hook, the pool key's hook) ─────────────────
+    // ─── hook-facing (Seiz3HookRemote, the pool key's hook) ─────────────────
     function onHookFill(uint256 sold, uint256 usdcIn) external;
     function topUpMargin(uint256 amount) external;
     function withdrawMargin(uint256 amount) external;

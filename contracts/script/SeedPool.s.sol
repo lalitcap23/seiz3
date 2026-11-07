@@ -19,11 +19,10 @@ import {DeployHelpers} from "./DeployHelpers.sol";
 
 /// @notice Initialises the NVDAx/USDC v4 pool (first run) and adds liquidity through PoolSeeder.
 /// THIN=true seeds weekend conditions; THIN=false adds the "Monday" deep liquidity. With a `thinPoolKey` in the
-/// deployment file (Deploy.s.sol writes one), THIN=true seeds market A's separate pool instead of the vault's.
+/// deployment file (DeployRemote.s.sol writes one), THIN=true seeds market A's separate pool instead of the vault's.
 /// The deployer must hold USDC_AMOUNT USDC; NVDAx is minted if the deployer owns MockNVDAx.
-/// VERIFY (spike 6): PoolManager address on HyperEVM.
 ///
-///   NETWORK=testnet THIN=true forge script script/SeedPool.s.sol --rpc-url hyperevm_testnet --broadcast
+///   NETWORK=base-sepolia THIN=true forge script script/SeedPool.s.sol --rpc-url $RPC --broadcast
 contract SeedPool is Script {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
@@ -63,7 +62,7 @@ contract SeedPool is Script {
     }
 
     function _config() internal view returns (Config memory c) {
-        string memory network = vm.envOr("NETWORK", string("testnet"));
+        string memory network = vm.envOr("NETWORK", string("base-sepolia"));
         string memory dep = vm.readFile(DeployHelpers.deploymentPath(vm.projectRoot(), network));
         c.seeder = PoolSeeder(vm.parseJsonAddress(dep, ".poolSeeder"));
         c.usdc = vm.parseJsonAddress(dep, ".usdc");

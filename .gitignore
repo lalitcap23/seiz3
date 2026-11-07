@@ -15,15 +15,6 @@ contracts/out/
 contracts/cache/
 contracts/broadcast/*/31337/
 contracts/broadcast/**/dry-run/
-deployments/test-local.json
-# scripts/local-stack.sh (ephemeral anvil addresses; KILL is the local keeper's kill switch)
-deployments/local.json
-deployments/local-chain.json
-deployments/KILL
-deployments/BOTS_HOLD
-deployments/watch.json
-deployments/feed-cache.*.json
-deployments/ASK_REQUEST.json
 
 # generated
 packages/shared/src/generated/
@@ -36,8 +27,9 @@ mocks/cache/
 mocks/broadcast/
 mocks/shared/
 context.md
-deployments/# CRE CLI build scratch
+# CRE CLI build scratch
 .cre_build_tmp.js
+# deploy outputs and the stack's runtime state (scripts/base-stack.sh)
 deployments/
 
 # VPS access (never commit) + the tunnel credentials docker-compose.vps.yml mounts

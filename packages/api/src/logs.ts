@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { parseAbiItem, toHex, type AbiEvent, type Address, type PublicClient } from "viem";
-import { seiz3HookAbi, seiz3VaultAbi, naiveLiquidatorAbi } from "@seiz3/shared/abis";
+import { seiz3HookRemoteAbi, seiz3VaultRemoteAbi, naiveLiquidatorAbi } from "@seiz3/shared/abis";
 import type { ActivityEvent, MarketLiquidation, MarketName } from "@seiz3/shared";
 import { MARKETS } from "./chain.js";
 import type { DeploymentFile } from "@seiz3/shared/node";
@@ -22,12 +22,12 @@ const morphoLiquidate = parseAbiItem(
 const morphoBorrow = parseAbiItem(
   "event Borrow(bytes32 indexed id, address caller, address indexed onBehalf, address indexed receiver, uint256 assets, uint256 shares)",
 );
-const vaultEvents = seiz3VaultAbi.filter(
-  (item): item is Extract<(typeof seiz3VaultAbi)[number], { type: "event" }> =>
+const vaultEvents = seiz3VaultRemoteAbi.filter(
+  (item): item is Extract<(typeof seiz3VaultRemoteAbi)[number], { type: "event" }> =>
     item.type === "event" && ACTIVITY.includes(item.name),
 );
-const hookFill = seiz3HookAbi.find(
-  (item): item is Extract<(typeof seiz3HookAbi)[number], { type: "event"; name: "InventoryFill" }> =>
+const hookFill = seiz3HookRemoteAbi.find(
+  (item): item is Extract<(typeof seiz3HookRemoteAbi)[number], { type: "event"; name: "InventoryFill" }> =>
     item.type === "event" && item.name === "InventoryFill",
 );
 const shortfall = naiveLiquidatorAbi.find(
@@ -78,13 +78,13 @@ interface Cache {
 export interface LogScannerOptions {
   /** eth_getLogs client for the history; the tail stays on the main client. */
   logsClient?: PublicClient;
-  /** Blocks per backfill call (thirdweb serves 1000, the public HyperEVM RPC 500). */
+  /** Blocks per backfill call (publicnode serves 2000, Alchemy's free tier 10). */
   backfillPage?: bigint;
   /** Gap between backfill calls: a keyless logs RPC rate-limits by the second. */
   backfillGapMs?: number;
   /** Where the scanned history survives a restart; unset on anvil, whose reverts would make it lie. */
   cacheFile?: string;
-  /** Anvil: the chain can go back (the replay's reset). HyperEVM never does, so a lower head is a lagging RPC node. */
+  /** Anvil: the chain can go back (a revert). A public chain never does, so a lower head is a lagging RPC node. */
   chainRewinds?: boolean;
 }
 
@@ -191,12 +191,6 @@ export class LogScanner {
       historyLeft: Number(this.tailFrom > this.backfillNext ? this.tailFrom - this.backfillNext : 0n),
       error: this.tailError ?? this.backfillError,
     };
-  }
-
-  /** Stops the backfill (the collector swaps scanners after a redeploy) and saves what's scanned. */
-  stop(): void {
-    this.persist(true);
-    this.epoch++;
   }
 
   /** First poll: resume from the cache when it's this vault's, then start the tail at the head and backfill the rest. */
@@ -353,7 +347,7 @@ export class LogScanner {
     this.badDebt.set(market, (this.badDebt.get(market) ?? 0n) + amount);
   }
 
-  /** HyperEVM's logs carry their block's timestamp; any RPC that leaves it out costs one getBlock per block. */
+  /** Most RPCs' logs carry their block's timestamp; any that leaves it out costs one getBlock per block. */
   private async timeOf(log: DecodedLog): Promise<number> {
     if (log.blockTimestamp !== undefined && log.blockTimestamp !== null) return Number(log.blockTimestamp) * 1000;
     let t = this.times.get(log.blockNumber);

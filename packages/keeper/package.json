@@ -6,7 +6,6 @@
   "scripts": {
     "test": "vitest run test/unit",
     "test:watch": "vitest test/unit",
-    "test:scenarios": "vitest run test/scenarios",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
     "start": "tsx src/index.ts",

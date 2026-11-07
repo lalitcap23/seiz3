@@ -1,4 +1,4 @@
-import { seiz3VaultAbi } from "@seiz3/shared/abis";
+import { seiz3VaultRemoteAbi } from "@seiz3/shared/abis";
 
 import type { KeeperClients } from "./clients.js";
 import { sameAddress } from "./riskCalc.js";
@@ -41,9 +41,6 @@ export function validateConfig(cfg: Config): string[] {
   }
   if (cfg.gasLimitMarginBps < 0n || cfg.gasLimitMarginBps > 10_000n) {
     errors.push("gasLimitMarginBps must be between 0 and 10000");
-  }
-  if (cfg.idleReserveUsdc < 0n || cfg.coreReserveUsdc < 0n) {
-    errors.push("USDC reserves must be >= 0");
   }
   if (/^0x0{64}$/.test(cfg.deployments.marketId)) errors.push("marketId is required");
   if (cfg.chainId <= 0n) errors.push("chainId must be > 0");
@@ -104,7 +101,7 @@ export async function runStartup(
 
   // The deployment file and the chain must agree: same Morpho, and a market the vault will liquidate.
   try {
-    const vault = { address: cfg.vault, abi: seiz3VaultAbi } as const;
+    const vault = { address: cfg.vault, abi: seiz3VaultRemoteAbi } as const;
     const [morpho, allowed] = await Promise.all([
       clients.publicClient.readContract({ ...vault, functionName: "morpho" }),
       clients.publicClient.readContract({
@@ -119,7 +116,7 @@ export async function runStartup(
     add("vault-wiring", false, describeError(error));
   }
 
-  // One full tick's reads: every ABI the keeper uses, against the live contracts and HyperCore reads.
+  // One full tick's reads: every ABI the keeper uses, against the live contracts (HyperCore via the gateway's snapshot).
   try {
     const { state } = await readState(clients.publicClient, cfg);
     add(

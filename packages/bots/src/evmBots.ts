@@ -1,7 +1,7 @@
 import { erc20Abi, maxUint256, parseEventLogs, type Address } from "viem";
 import {
-  seiz3HookAbi,
-  seiz3VaultAbi,
+  seiz3HookRemoteAbi,
+  seiz3VaultRemoteAbi,
   demoOracleAbi,
   mockNvdAxAbi,
   poolSeederAbi,
@@ -40,7 +40,7 @@ let approved = false;
 export async function rebalancePool(core: bigint): Promise<void> {
   const nvdax0 = nvdaxIsCurrency0(dep.poolKey, dep.nvdax);
   const { sqrtPriceX96, liquidity } = await poolState(dep.poolKey);
-  if (sqrtPriceX96 === 0n || liquidity === 0n) return; // not seeded yet (scripts/testnet-stack.sh seed deep)
+  if (sqrtPriceX96 === 0n || liquidity === 0n) return; // not seeded yet (scripts/base-stack.sh sepolia seed deep)
   const pool = usdcPerNvdaxAt(sqrtPriceX96, nvdax0);
   const target = await poolTarget(core);
   const gap = diffBps(pool, target);
@@ -77,8 +77,8 @@ export async function rebalancePool(core: bigint): Promise<void> {
  */
 async function poolTarget(core: bigint): Promise<bigint> {
   if (env.POOL_ABOVE_ASK_BPS === undefined || dep.hook === undefined) return core;
-  if ((await read<bigint>(dep.vault, seiz3VaultAbi, "inventory")) === 0n) return core;
-  const [, ask] = await read<readonly [bigint, bigint, number, boolean]>(dep.hook, seiz3HookAbi, "quote");
+  if ((await read<bigint>(dep.vault, seiz3VaultRemoteAbi, "inventory")) === 0n) return core;
+  const [, ask] = await read<readonly [bigint, bigint, number, boolean]>(dep.hook, seiz3HookRemoteAbi, "quote");
   return (ask * (BPS + BigInt(env.POOL_ABOVE_ASK_BPS))) / BPS;
 }
 
@@ -86,17 +86,17 @@ async function poolTarget(core: bigint): Promise<bigint> {
 async function recycleFromVault(me: Address, usdc: bigint): Promise<void> {
   const want = BigInt(Math.round(env.USDC_TOPUP * 1e6));
   const floor = BigInt(Math.round(env.VAULT_FLOOR_USDC * 1e6));
-  const instant = await read<bigint>(dep.vault, seiz3VaultAbi, "instantLiquidity");
+  const instant = await read<bigint>(dep.vault, seiz3VaultRemoteAbi, "instantLiquidity");
   if (instant < floor + want) {
     log("pool", `deployer has only ${usd(usdc)} and the vault ${usd(instant)} to spare: refill the deployer by hand`);
     return;
   }
-  const shares = await read<bigint>(dep.vault, seiz3VaultAbi, "convertToShares", [want]);
-  if (shares > (await read<bigint>(dep.vault, seiz3VaultAbi, "maxRedeem", [me]))) {
+  const shares = await read<bigint>(dep.vault, seiz3VaultRemoteAbi, "convertToShares", [want]);
+  if (shares > (await read<bigint>(dep.vault, seiz3VaultRemoteAbi, "maxRedeem", [me]))) {
     log("pool", `deployer has only ${usd(usdc)} and not enough vault shares left: refill it by hand`);
     return;
   }
-  await send(dep.vault, seiz3VaultAbi, "requestWithdraw", [shares]);
+  await send(dep.vault, seiz3VaultRemoteAbi, "requestWithdraw", [shares]);
   log("pool", `deployer ${usd(usdc)} → redeemed ${usd(want)} of its vault shares for rebalancing`);
 }
 
@@ -130,10 +130,10 @@ export async function buyFromVault(): Promise<void> {
   const router = dep.swapRouter;
   if (hook === undefined || router === undefined) return;
   const [inventory, pending, paused, lastUnwindAt, cooldown, block] = await Promise.all([
-    read<bigint>(dep.vault, seiz3VaultAbi, "inventory"),
-    read<readonly [bigint, bigint, bigint, number]>(dep.vault, seiz3VaultAbi, "pendingHedge"),
-    read<boolean>(dep.vault, seiz3VaultAbi, "paused"),
-    read<bigint>(dep.vault, seiz3VaultAbi, "lastUnwindAt"),
+    read<bigint>(dep.vault, seiz3VaultRemoteAbi, "inventory"),
+    read<readonly [bigint, bigint, bigint, number]>(dep.vault, seiz3VaultRemoteAbi, "pendingHedge"),
+    read<boolean>(dep.vault, seiz3VaultRemoteAbi, "paused"),
+    read<bigint>(dep.vault, seiz3VaultRemoteAbi, "lastUnwindAt"),
     read<number>(dep.riskParams, riskParamsAbi, "cooldown"),
     client.getBlock(),
   ]);
@@ -159,7 +159,7 @@ export async function buyFromVault(): Promise<void> {
     return;
   }
   const nvdax0 = nvdaxIsCurrency0(dep.poolKey, dep.nvdax);
-  const [ready, ask] = await read<readonly [bigint, bigint, number, boolean]>(hook, seiz3HookAbi, "quote");
+  const [ready, ask] = await read<readonly [bigint, bigint, number, boolean]>(hook, seiz3HookRemoteAbi, "quote");
   await approveOnce(dep.usdc, dep.poolSeeder as Address);
   await approveOnce(dep.usdc, router);
 
@@ -171,7 +171,7 @@ export async function buyFromVault(): Promise<void> {
       sqrtPriceAt((ask * (BPS + BigInt(env.BUYER_PUSH_BPS))) / BPS, nvdax0),
     ]);
   }
-  const [capacity] = await read<readonly [bigint, bigint, number, boolean]>(hook, seiz3HookAbi, "quote");
+  const [capacity] = await read<readonly [bigint, bigint, number, boolean]>(hook, seiz3HookRemoteAbi, "quote");
   lastBuyAt = Date.now();
   if (capacity === 0n) {
     log("buyer", "the hook has nothing to sell right now (a keeper unwind landed first): next round");
@@ -185,7 +185,7 @@ export async function buyFromVault(): Promise<void> {
     "0x",
   ]);
   const receipt = await client.getTransactionReceipt({ hash });
-  const [fill] = parseEventLogs({ abi: seiz3HookAbi, eventName: "InventoryFill", logs: receipt.logs });
+  const [fill] = parseEventLogs({ abi: seiz3HookRemoteAbi, eventName: "InventoryFill", logs: receipt.logs });
   if (fill === undefined) {
     log("buyer", `bought on the curve, not from the vault (${hash})`);
     return;

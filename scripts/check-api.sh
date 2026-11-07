@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Step 4's check: every value the API's /snapshot reports, against `cast call` at the snapshot's own block.
+# Every value the API's /snapshot reports, against `cast call` at the snapshot's own block.
 #
-#   NETWORK=local pnpm api                                   # the collector, against scripts/local-stack.sh
-#   scripts/check-api.sh deployments/local.json              # default rpc http://127.0.0.1:8545, api http://localhost:8787
-#   scripts/check-api.sh deployments/testnet.json https://rpc.hyperliquid-testnet.xyz/evm
+#   scripts/base-stack.sh local api                          # the collector, against the local Base stack
+#   scripts/check-api.sh deployments/local-base.json         # default rpc http://127.0.0.1:8546, api http://localhost:8788
+# The HyperCore values are checked against the gateway, which is what the API reads on the local stack (on Base
+# Sepolia the panel comes from Hyperliquid's info API instead, so those three can differ by the snapshot's age).
 set -euo pipefail
 DEP=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
-RPC=${2:-http://127.0.0.1:8545}
-API=${3:-http://localhost:8787}
+RPC=${2:-http://127.0.0.1:8546}
+API=${3:-http://localhost:8788}
 SNAP=$(curl -s "$API/snapshot")
 j() { node -e 'const o=JSON.parse(process.argv[1]); console.log(process.argv[2].split(".").reduce((a,k)=>a[k],o))' "$SNAP" "$1"; }
 d() { node -e 'const o=require(process.argv[1]); console.log(process.argv[2].split(".").reduce((a,k)=>a[k],o))' "$DEP" "$1"; }
@@ -46,13 +47,14 @@ for i in 0 1 2; do
   fi
 done
 
-echo "hyperliquid (precompiles)"
+echo "hyperliquid (gateway)"
+GW=$(d hyperCoreGateway)
 PI=$(( $(d hypercore.perpAsset) - 100000 )); DX=$(d hypercore.perpDexIndex); SZ=$(d hypercore.szDecimals)
-SZI=$(cast abi-decode 'f()(int64,uint64,int64,uint32,bool)' $(cast call 0x0000000000000000000000000000000000000813 $(cast abi-encode 'f(address,uint32)' $V $PI) --block $B --rpc-url $RPC) | head -1 | awk '{print $1}')
+SZI=$(cast call $GW 'position(address,uint32)(int64,uint64,int64,uint32,bool)' $V $PI --block $B --rpc-url $RPC | head -1 | awk '{print $1}')
 eq size "$(j hyperliquid.size)" "$(node -e "console.log($SZI/10**$SZ)")"
-AV=$(cast abi-decode 'f()(int64,uint64,uint64,int64)' $(cast call 0x000000000000000000000000000000000000080F $(cast abi-encode 'f(uint32,address)' $DX $V) --block $B --rpc-url $RPC) | head -1 | awk '{print $1}')
+AV=$(cast call $GW 'accountMarginSummary(uint32,address)(int64,uint64,uint64,int64)' $DX $V --block $B --rpc-url $RPC | head -1 | awk '{print $1}')
 eq accountValue "$(j hyperliquid.accountValue)" "$(node -e "console.log($AV/1e6)")"
-OP=$(cast abi-decode 'f()(uint64)' $(cast call 0x0000000000000000000000000000000000000807 $(cast abi-encode 'f(uint32)' $PI) --block $B --rpc-url $RPC) | awk '{print $1}')
+OP=$(c $GW 'oraclePx(uint32)(uint64)' $PI)
 eq oraclePx "$(j hyperliquid.oraclePx)" "$(node -e "console.log($OP/10**(6-$SZ))")"
 
 echo "pool"

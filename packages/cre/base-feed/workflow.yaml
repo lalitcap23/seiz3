@@ -1,5 +1,5 @@
 # CRE workflow settings for Seiz3 on Base Sepolia: the market feed (RiskParams) plus the DON's snapshot of the hedge
-# account on HyperCore (HyperCoreGateway). Same code as market-feed; the config's `gateway` block turns the second on.
+# account on HyperCore (HyperCoreGateway); the config's `gateway` block turns the second on.
 # config.base-sepolia.json is written from deployments/base-sepolia.json by `scripts/base-stack.sh sepolia cre`.
 #   cre workflow simulate base-feed --target base-sepolia-settings              (from packages/cre)
 base-sepolia-settings:

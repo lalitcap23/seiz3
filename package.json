@@ -7,11 +7,9 @@
   },
   "scripts": {
     "test": "pnpm --filter @seiz3/keeper test",
-    "test:scenarios": "pnpm --filter @seiz3/keeper test:scenarios",
     "contracts:build": "cd contracts && forge build",
-    "contracts:test": "cd contracts && forge test --no-match-path 'test/{sim,fork}/*'",
-    "contracts:test:sim": "cd contracts && FOUNDRY_PROFILE=sim forge test --match-path 'test/sim/*'",
-    "contracts:test:fork": "cd contracts && FOUNDRY_PROFILE=sim forge test --match-path 'test/fork/*'",
+    "contracts:test": "cd contracts && forge test --no-match-path 'test/fork/*'",
+    "contracts:test:fork": "cd contracts && forge test --match-path 'test/fork/*'",
     "contracts:fmt": "cd contracts && forge fmt",
     "codegen": "pnpm contracts:build && pnpm --filter @seiz3/shared codegen",
     "build": "pnpm -r build",
@@ -22,15 +20,13 @@
     "keeper": "pnpm --filter @seiz3/keeper start",
     "api": "pnpm --filter @seiz3/api dev",
     "web": "pnpm --filter @seiz3/web dev",
-    "replay": "pnpm --filter @seiz3/replay start",
-    "testnet:up": "docker compose -f docker-compose.testnet.yml up -d --build",
-    "testnet:logs": "docker compose -f docker-compose.testnet.yml logs -f --tail 50",
-    "testnet:down": "docker compose -f docker-compose.testnet.yml down",
-    "testnet:ps": "docker compose -f docker-compose.testnet.yml ps",
     "base:up": "docker compose -f docker-compose.base.yml up -d --build",
     "base:logs": "docker compose -f docker-compose.base.yml logs -f --tail 50",
     "base:ps": "docker compose -f docker-compose.base.yml ps",
-    "base:down": "docker compose -f docker-compose.base.yml stop bots && docker compose -f docker-compose.base.yml run --rm --no-deps relayer scripts/base-stack.sh sepolia mm-cancel; docker compose -f docker-compose.base.yml down"
+    "base:down": "docker compose -f docker-compose.base.yml stop bots && docker compose -f docker-compose.base.yml run --rm --no-deps relayer scripts/base-stack.sh sepolia mm-cancel; docker compose -f docker-compose.base.yml down",
+    "vps:deploy": "scripts/vps-deploy.sh",
+    "vps:logs": "ssh -i guest_ed25519 guest@159.195.200.178 -t 'cd afterbell && docker compose -f docker-compose.base.yml -f docker-compose.vps.yml logs -f --tail 50'",
+    "vps:ps": "ssh -i guest_ed25519 guest@159.195.200.178 'cd afterbell && docker compose -f docker-compose.base.yml -f docker-compose.vps.yml ps'"
   },
   "devDependencies": {
     "prettier": "^3.9.10"

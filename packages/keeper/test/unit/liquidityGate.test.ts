@@ -35,13 +35,10 @@ describe("buy-back liquidity gate", () => {
     expect(buyNeeded({ kind: "liquidate" } as never, state, 3, 100n)).toBe(0n);
   });
 
-  it("a sync whose buy-back already filled on HyperCore just confirms: no ask needed", () => {
-    // 0.129 held, 66 bought back: HyperCore already shows −129
+  it("a sync counts the whole pending buy, whatever the vault holds", () => {
+    // 0.129 held, short 0.195, 66 to buy back
     const state = makeState({ inventory: 129n * NVDAX / 1000n, confirmedShort: -195n, pendingHedge: { delta: 66n }, risk: { maxUnhedged: 500n } });
-    expect(buyNeeded(sync, state, 3, 100n, -129n)).toBe(0n);
-    expect(buyNeeded(sync, state, 3, 100n, -195n)).toBe(0n); // unfilled but within tolerance: confirms too
-    expect(buyNeeded(sync, makeState({ ...state, risk: { maxUnhedged: 50n } }), 3, 100n, -195n)).toBe(66n);
-    expect(buyNeeded(sync, state, 3, 100n, null)).toBe(66n); // HyperCore unreadable: assume the whole buy
+    expect(buyNeeded(sync, state, 3, 100n)).toBe(66n);
   });
 
   it("passes when asks within oracle + hedgeCap cover the buy, counting every level under the cap", async () => {

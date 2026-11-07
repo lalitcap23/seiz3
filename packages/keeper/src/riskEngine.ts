@@ -5,7 +5,6 @@ import type {
   Address,
   Config,
   Hex,
-  PolicyConfig,
   RiskDecision,
   RiskRequest,
   ScanReport,
@@ -66,8 +65,6 @@ export function buildRiskRequest(
       borrowers: scan.borrowers,
     },
     keeper: {
-      idleReserveUsdc: cfg.idleReserveUsdc,
-      coreReserveUsdc: cfg.coreReserveUsdc,
       now,
     },
   };
@@ -77,13 +74,6 @@ export function serializeRiskRequest(request: RiskRequest): string {
   return JSON.stringify(request, (_key, value: unknown) =>
     typeof value === "bigint" ? value.toString() : value,
   );
-}
-
-export function policyConfigFromRequest(request: RiskRequest): PolicyConfig {
-  return {
-    idleReserveUsdc: request.keeper.idleReserveUsdc,
-    coreReserveUsdc: request.keeper.coreReserveUsdc,
-  };
 }
 
 export function stateFromRiskRequest(request: RiskRequest): VaultState {
@@ -148,10 +138,6 @@ function parseAction(value: unknown): Action | null {
       return { kind: "syncHedge" };
     case "unwindStep":
       return { kind: "unwindStep" };
-    case "topUpMargin":
-      return { kind: "topUpMargin", amount: toBigInt(record["amount"], "topUpMargin.amount") };
-    case "withdrawMargin":
-      return { kind: "withdrawMargin", amount: toBigInt(record["amount"], "withdrawMargin.amount") };
     case "liquidate": {
       const marketId = toHex32(record["marketId"], "liquidate.marketId");
       const borrower = toAddress(record["borrower"], "liquidate.borrower");
@@ -336,8 +322,6 @@ const requestSchema = z.object({
     borrowers: z.array(reportSchema),
   }),
   keeper: z.object({
-    idleReserveUsdc: zUint,
-    coreReserveUsdc: zUint,
     now: zUint,
   }),
 });

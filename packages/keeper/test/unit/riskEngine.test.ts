@@ -6,7 +6,6 @@ import {
   buildRiskRequest,
   parseRiskDecision,
   parseRiskRequest,
-  policyConfigFromRequest,
   serializeRiskRequest,
   stateFromRiskRequest,
 } from "../../src/riskEngine.js";
@@ -97,16 +96,6 @@ describe("riskEngine: request builder", () => {
     expect(rebuilt.blockTimestamp).toBe(NOW);
   });
 
-  it("extracts the policy config", () => {
-    const state = makeState();
-    const request = buildRiskRequest(state, scanFor(state), NOW, cfg);
-
-    expect(policyConfigFromRequest(request)).toEqual({
-      idleReserveUsdc: cfg.idleReserveUsdc,
-      coreReserveUsdc: cfg.coreReserveUsdc,
-    });
-  });
-
   it("rejects a malformed request", () => {
     expect(() => parseRiskRequest({ blockNumber: "1" })).toThrow(RiskEngineProtocolError);
   });
@@ -146,22 +135,19 @@ describe("riskEngine: decision parser", () => {
     });
   });
 
-  it("parses margin actions", () => {
+  it("parses a syncHedge action", () => {
     expect(parseRiskDecision({ action: { kind: "syncHedge" }, reason: "sync-ready" }).action).toEqual({
       kind: "syncHedge",
     });
-    expect(
-      parseRiskDecision({ action: { kind: "topUpMargin", amount: "1000000" }, reason: "topup" }).action,
-    ).toEqual({ kind: "topUpMargin", amount: 1_000_000n });
-    expect(
-      parseRiskDecision({ action: { kind: "withdrawMargin", amount: 5 }, reason: "withdraw" }).action,
-    ).toEqual({ kind: "withdrawMargin", amount: 5n });
   });
 
-  it("rejects unknown action kinds", () => {
+  it("rejects unknown action kinds, the retired margin moves included", () => {
     expect(() =>
       parseRiskDecision({ action: { kind: "dumpEverything" }, reason: "bad" }),
     ).toThrow(RiskEngineProtocolError);
+    expect(() =>
+      parseRiskDecision({ action: { kind: "topUpMargin", amount: "1000000" }, reason: "topup" }),
+    ).toThrow(/unknown action kind/);
   });
 
   it("rejects a bad borrower address", () => {
@@ -180,7 +166,10 @@ describe("riskEngine: decision parser", () => {
 
   it("rejects a non-integer amount", () => {
     expect(() =>
-      parseRiskDecision({ action: { kind: "topUpMargin", amount: "1.5" }, reason: "bad" }),
+      parseRiskDecision({
+        action: { kind: "liquidate", marketId: `0x${"11".repeat(32)}`, borrower: BORROWER_A, seizedAssets: "1.5" },
+        reason: "bad",
+      }),
     ).toThrow(/integer string/);
   });
 

@@ -3,12 +3,12 @@ pragma solidity ^0.8.28;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {MarketParams} from "@morpho-blue/interfaces/IMorpho.sol";
-import {Seiz3Base} from "../utils/Seiz3Base.sol";
+import {RemoteBase} from "./RemoteBase.sol";
 import {NaiveLiquidator} from "../../src/mocks/NaiveLiquidator.sol";
 import {UnwindLib} from "../../src/libs/UnwindLib.sol";
 
 /// @notice Demo Market A vs Market C on a thin weekend pool: same crash, same seizure, different outcome.
-contract NaiveLiquidatorTest is Seiz3Base {
+contract NaiveLiquidatorTest is RemoteBase {
     NaiveLiquidator internal naive;
     address internal borrower2 = makeAddr("borrower2");
 

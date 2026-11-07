@@ -4,16 +4,15 @@ pragma solidity ^0.8.28;
 import {Script, console} from "forge-std/Script.sol";
 import {IMorpho, MarketParams, Id} from "@morpho-blue/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "@morpho-blue/libraries/MarketParamsLib.sol";
-import {Seiz3Vault} from "../src/Seiz3Vault.sol";
+import {Seiz3VaultRemote} from "../src/remote/Seiz3VaultRemote.sol";
 import {DemoOracle} from "../src/mocks/DemoOracle.sol";
 import {DeployHelpers} from "./DeployHelpers.sol";
 
 /// @notice Creates the three demo Morpho markets (A naive, B conservative, C Seiz3), allow-lists C on the
-///         vault and merges `markets` into deployments/<NETWORK>.json. Run after Deploy.s.sol.
+///         vault and merges `markets` into deployments/<NETWORK>.json. Run after DeployRemote.s.sol.
 /// Each market gets its OWN DemoOracle, otherwise A and C (same tokens + LLTV) collapse into one market id.
-/// VERIFY (spike 5): enabled LLTVs + IRM on Morpho's HyperEVM deployment.
 ///
-///   NETWORK=testnet MORPHO_IRM_ADDRESS=0x… forge script script/CreateMarkets.s.sol --rpc-url hyperevm_testnet --broadcast
+///   NETWORK=base-sepolia MORPHO_IRM_ADDRESS=0x… forge script script/CreateMarkets.s.sol --rpc-url $RPC --broadcast
 contract CreateMarkets is Script {
     using MarketParamsLib for MarketParams;
 
@@ -23,7 +22,7 @@ contract CreateMarkets is Script {
     uint256 constant MORPHO_SCALE = 1e18;
 
     function run() external {
-        string memory network = vm.envOr("NETWORK", string("testnet"));
+        string memory network = vm.envOr("NETWORK", string("base-sepolia"));
         string memory path = DeployHelpers.deploymentPath(vm.projectRoot(), network);
         string memory dep = vm.readFile(path);
 
@@ -35,7 +34,7 @@ contract CreateMarkets is Script {
         IMorpho morpho = IMorpho(vm.parseJsonAddress(dep, ".morpho"));
         address usdc = vm.parseJsonAddress(dep, ".usdc");
         address nvdax = vm.parseJsonAddress(dep, ".nvdax");
-        Seiz3Vault vault = Seiz3Vault(vm.parseJsonAddress(dep, ".vault"));
+        Seiz3VaultRemote vault = Seiz3VaultRemote(vm.parseJsonAddress(dep, ".vault"));
         address irm = vm.envAddress("MORPHO_IRM_ADDRESS");
         uint256 startPrice = vm.envOr("START_PRICE_USD6", uint256(217e6)) * MORPHO_SCALE;
 

@@ -1,8 +1,5 @@
 import { z } from "zod";
 import type { Address, Hex } from "viem";
-import testnet from "../../../deployments/testnet.json" with { type: "json" };
-import mainnet from "../../../deployments/mainnet.json" with { type: "json" };
-import type { Network } from "./chains.js";
 
 const address = z
   .string()
@@ -23,7 +20,7 @@ export const deploymentSchema = z.object({
   nvdax: address,
   riskParams: address,
   vault: address,
-  /** Seiz3Hook on the vault's pool (Deploy.s.sol since the hook); absent in older deployments. */
+  /** Seiz3HookRemote on the vault's pool. */
   hook: address.optional(),
   poolKey: z.object({
     currency0: address,
@@ -38,22 +35,13 @@ export const deploymentSchema = z.object({
     szDecimals: z.number(),
   }),
   markets: z.object({ A_naive: market, B_conservative: market, C_seiz3: market }).optional(),
-  // testnet extras (TestnetExtras.s.sol): what the public tester page calls
+  // what the public tester page calls (RemoteExtras.s.sol / DeployRemote.s.sol)
   faucet: address.optional(),
   swapRouter: address.optional(),
-  // Base Sepolia architecture (DeployRemote.s.sol): HyperCore through the gateway, the short in the hedge account
-  hyperCoreGateway: address.optional(),
-  hedgeAccount: address.optional(),
+  // DeployRemote.s.sol: HyperCore through the gateway, the short in the hedge account
+  hyperCoreGateway: address,
+  hedgeAccount: address,
 });
 
 export type Deployment = z.infer<typeof deploymentSchema>;
 export type MarketName = "A_naive" | "B_conservative" | "C_seiz3";
-
-/** Bundled for the browser; Base Sepolia's file is read at runtime (`@seiz3/shared/node`'s loadDeployment). */
-const raw: Partial<Record<Network, unknown>> = { testnet, mainnet };
-
-/** Single source of addresses for every off-chain package. Written by contracts/script/Deploy.s.sol. */
-export function getDeployment(network: Network): Deployment {
-  if (raw[network] === undefined) throw new Error(`no bundled deployment for ${network}: use loadDeployment`);
-  return deploymentSchema.parse(raw[network]);
-}

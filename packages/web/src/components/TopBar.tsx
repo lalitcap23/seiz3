@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useLive, useSnapshot } from "@/lib/api";
-import { CHAIN_LABEL, EVM_NAME, NETWORK } from "@/lib/chain";
+import { CHAIN_LABEL } from "@/lib/chain";
 import { shortHash } from "@/lib/format";
 import { useWallet } from "@/lib/wallet";
 import { NotificationBell, NotificationToasts } from "./Notifications";
@@ -93,7 +93,7 @@ export function TopBar({ active }: { active?: (typeof TABS)[number]["key"] }) {
               </span>
             )}
             <span className="hidden rounded-[2px] border border-line-strong px-2 py-0.5 text-muted lg:inline">
-              {NETWORK === "base-sepolia" ? CHAIN_LABEL : `${EVM_NAME} ${NETWORK}`}
+              {CHAIN_LABEL}
             </span>
             <NotificationBell />
             <WalletChip />

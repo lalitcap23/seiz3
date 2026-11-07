@@ -7,11 +7,11 @@ import {IMorpho, MarketParams, Id} from "@morpho-blue/interfaces/IMorpho.sol";
 
 import {Faucet} from "../src/mocks/Faucet.sol";
 import {MockNVDAx} from "../src/mocks/MockNVDAx.sol";
-import {MockUSDC} from "../test/utils/Seiz3Base.sol";
+import {MockUSDC} from "../src/mocks/MockUSDC.sol";
 import {Seiz3VaultRemote} from "../src/remote/Seiz3VaultRemote.sol";
 import {DeployHelpers} from "./DeployHelpers.sol";
 
-/// @notice TestnetExtras.s.sol for the Base Sepolia architecture: what people trying the /try page need, after
+/// @notice What people trying the /try page need, after
 ///         DeployRemote → CreateMarkets.
 ///   - a Faucet (NVDAx to borrow against, USDC to lend / deposit / buy with, Base ETH for gas), funded, with the API's
 ///     relay key as its operator so a brand-new wallet can start without gas;

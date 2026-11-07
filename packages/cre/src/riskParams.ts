@@ -66,9 +66,9 @@ export interface RiskBands {
 }
 
 /**
- * @param at the block to read at: the last finalized one (HyperEVM, final in a block), or the latest (Base Sepolia,
- *           whose finalized head trails by hours: a fresh deployment wouldn't exist there yet). The bands are the
- *           owner's settings, which rarely change, so the latest block is safe to agree on.
+ * @param at the block to read at: the last finalized one, or the latest (Base Sepolia, whose finalized head trails
+ *           by hours: a fresh deployment wouldn't exist there yet). The bands are the owner's settings, which rarely
+ *           change, so the latest block is safe to agree on.
  */
 export function readRiskBands(
   runtime: Runtime<unknown>,

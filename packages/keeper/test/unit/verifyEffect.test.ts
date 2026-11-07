@@ -6,7 +6,6 @@ import type { Action } from "../../src/types.js";
 import {
   BORROWER_A,
   MARKET_ID,
-  USDC,
   NVDAX,
   makeState,
   readyPending,
@@ -75,19 +74,5 @@ describe("executor: verifyEffect", () => {
 
     expect(verifyEffect(before, after, { kind: "unwindStep" }).ok).toBe(true);
     expect(verifyEffect(after, before, { kind: "unwindStep" }).ok).toBe(false);
-  });
-
-  it("checks a top-up on the EVM side, where it lands in the same block", () => {
-    const before = makeState({ idleUsdc: USDC(1000) });
-    const after = makeState({ idleUsdc: USDC(900) });
-
-    expect(verifyEffect(before, after, { kind: "topUpMargin", amount: USDC(100) }).ok).toBe(true);
-    expect(verifyEffect(before, before, { kind: "topUpMargin", amount: USDC(100) }).ok).toBe(false);
-  });
-
-  it("accepts a withdrawal whose Core debit hasn't landed yet", () => {
-    const state = makeState({ coreUsdc: USDC(500) });
-
-    expect(verifyEffect(state, state, { kind: "withdrawMargin", amount: USDC(90) }).ok).toBe(true);
   });
 });

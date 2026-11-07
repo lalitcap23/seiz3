@@ -1,13 +1,29 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { formatUnits, parseUnits } from "viem";
 import { evmTxUrl } from "@/lib/chain";
 import { useWallet } from "@/lib/wallet";
 import { shortHash } from "@/lib/format";
 import { KV, Panel } from "../ui";
 
+const BareContext = createContext(false);
+
+/** Cards inside render as plain content, without their own panel and header (the "Other roles" list frames them). */
+export function Bare({ children }: { children: ReactNode }) {
+  return <BareContext value={true}>{children}</BareContext>;
+}
+
 export function Card({ title, meta, hint, children }: { title: ReactNode; meta?: ReactNode; hint?: string; children?: ReactNode }) {
+  const bare = useContext(BareContext);
+  if (bare) {
+    return (
+      <div className="flex flex-col gap-3">
+        {hint && <p className="text-[12px] text-muted">{hint}</p>}
+        {children}
+      </div>
+    );
+  }
   return (
     <Panel title={title} meta={meta} bodyClassName="flex flex-col gap-3 p-3">
       {hint && <p className="text-[12px] text-muted">{hint}</p>}
