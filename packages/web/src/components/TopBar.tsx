@@ -65,7 +65,7 @@ export function TopBar({ active }: { active?: (typeof TABS)[number]["key"] }) {
         <div className="mx-auto flex h-12 max-w-[1440px] items-center gap-4 px-3 sm:gap-6 sm:px-4">
           <Link href="/" className="flex items-center gap-2">
             <Mark />
-            <span className="hidden text-[15px] font-semibold tracking-tight sm:inline">afterbell</span>
+            <span className="hidden text-[15px] font-semibold tracking-tight sm:inline">seiz3</span>
           </Link>
           <nav className="flex h-full items-center">
             {TABS.map((t) => (

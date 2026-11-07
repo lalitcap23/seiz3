@@ -1,11 +1,11 @@
 /**
  * The keeper against the real contracts on a local anvil: real Morpho Blue and Uniswap v4 bytecode, the
- * AfterbellVault the deploy scripts put there, and MockHyperCore copied over the HyperCore precompiles.
+ * Seiz3Vault the deploy scripts put there, and MockHyperCore copied over the HyperCore precompiles.
  *
  *   anvil
  *   scripts/local-stack.sh up
- *   pnpm --filter @afterbell/keeper risk-engine:stub
- *   pnpm --filter @afterbell/keeper test:scenarios
+ *   pnpm --filter @seiz3/keeper risk-engine:stub
+ *   pnpm --filter @seiz3/keeper test:scenarios
  *
  * Don't run `local-stack.sh tick` alongside: HyperCore moves only when a test calls `coreProcess()`.
  * Every test starts from the same anvil snapshot.
@@ -23,7 +23,7 @@ import {
   type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { demoOracleAbi, riskParamsAbi } from "@afterbell/shared/abis";
+import { demoOracleAbi, riskParamsAbi } from "@seiz3/shared/abis";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { makeChain, makeClients, SingleNonceManager } from "../../src/clients.js";
@@ -59,7 +59,7 @@ const anvil = createTestClient({ mode: "anvil", chain, transport });
 
 const deployment = json("deployments/local.json") as {
   riskParams: Address;
-  markets: { C_afterbell: { oracle: Address } };
+  markets: { C_seiz3: { oracle: Address } };
   borrowers: { address: Address }[];
 };
 const core = (json("deployments/local-chain.json") as { core: Address }).core;
@@ -93,7 +93,7 @@ async function coreProcess(): Promise<void> {
 async function setPrice(usd6: bigint, { coreToo = true } = {}): Promise<void> {
   await mined(
     await admin.writeContract({
-      address: deployment.markets.C_afterbell.oracle,
+      address: deployment.markets.C_seiz3.oracle,
       abi: demoOracleAbi,
       functionName: "setPrice",
       args: [usd6 * 10n ** 18n],

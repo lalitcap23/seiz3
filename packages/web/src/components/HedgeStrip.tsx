@@ -1,6 +1,6 @@
 "use client";
 
-import type { VaultSnapshot } from "@afterbell/shared";
+import type { VaultSnapshot } from "@seiz3/shared";
 import { Line, LineChart, ReferenceLine, ResponsiveContainer, YAxis } from "recharts";
 import { useHistory } from "@/lib/api";
 import { coreSize, nvdax, usd } from "@/lib/format";

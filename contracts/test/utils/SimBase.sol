@@ -17,8 +17,8 @@ import {HLConstants} from "@hyper-evm-lib/src/common/HLConstants.sol";
 import {HyperCore} from "@hyper-evm-lib/test/simulation/HyperCore.sol";
 import {CoreSimulatorLib} from "@hyper-evm-lib/test/simulation/CoreSimulatorLib.sol";
 
-import {AfterbellVault} from "../../src/AfterbellVault.sol";
-import {AfterbellHook, AFTERBELL_HOOK_FLAGS} from "../../src/AfterbellHook.sol";
+import {Seiz3Vault} from "../../src/Seiz3Vault.sol";
+import {Seiz3Hook, SEIZ3_HOOK_FLAGS} from "../../src/Seiz3Hook.sol";
 import {RiskParams} from "../../src/RiskParams.sol";
 import {MockNVDAx} from "../../src/mocks/MockNVDAx.sol";
 import {DemoOracle} from "../../src/mocks/DemoOracle.sol";
@@ -53,10 +53,10 @@ abstract contract SimBase is Test {
     DemoOracle oracle;
     MarketParams market;
     IPoolManager pm;
-    AfterbellHook hook;
+    Seiz3Hook hook;
     PoolKey key;
     RiskParams risk;
-    AfterbellVault vault;
+    Seiz3Vault vault;
 
     uint8 szDec;
     uint64 corePx; // live raw oracle px
@@ -77,9 +77,9 @@ abstract contract SimBase is Test {
         _deployPool();
 
         risk = new RiskParams(owner, creForwarder, DeployHelpers.defaultRisk());
-        vault = new AfterbellVault(
+        vault = new Seiz3Vault(
             owner,
-            AfterbellVault.Wiring({
+            Seiz3Vault.Wiring({
                 usdc: usdc,
                 nvdax: IERC20(address(nvdax)),
                 morpho: morpho,
@@ -147,11 +147,11 @@ abstract contract SimBase is Test {
     function _deployPool() internal {
         pm = _poolManager();
         address at = address(
-            uint160(uint256(keccak256(abi.encode(address(pm), "afterbell-hook")))) & ~Hooks.ALL_HOOK_MASK
-                | AFTERBELL_HOOK_FLAGS
+            uint160(uint256(keccak256(abi.encode(address(pm), "seiz3-hook")))) & ~Hooks.ALL_HOOK_MASK
+                | SEIZ3_HOOK_FLAGS
         );
-        deployCodeTo("AfterbellHook.sol:AfterbellHook", abi.encode(pm, owner), at);
-        hook = AfterbellHook(at);
+        deployCodeTo("Seiz3Hook.sol:Seiz3Hook", abi.encode(pm, owner), at);
+        hook = Seiz3Hook(at);
         key = DeployHelpers.poolKey(address(usdc), address(nvdax), address(hook));
     }
 

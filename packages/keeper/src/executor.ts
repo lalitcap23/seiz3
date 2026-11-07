@@ -1,6 +1,6 @@
 import type { PublicClient, WalletClient } from "viem";
 import type { PrivateKeyAccount } from "viem/accounts";
-import { afterbellVaultAbi, iMorphoAbi } from "@afterbell/shared/abis";
+import { seiz3VaultAbi, iMorphoAbi } from "@seiz3/shared/abis";
 
 import { PAUSE_HEDGE, PAUSE_MARGIN, guards } from "./riskCalc.js";
 import { describeError } from "./riskEngine.js";
@@ -91,7 +91,7 @@ async function simulate(
   cfg: Config,
   account: PrivateKeyAccount,
 ) {
-  const base = { address: cfg.vault, abi: afterbellVaultAbi, account } as const;
+  const base = { address: cfg.vault, abi: seiz3VaultAbi, account } as const;
   switch (action.kind) {
     case "syncHedge":
       return publicClient.simulateContract({ ...base, functionName: "syncHedge" });

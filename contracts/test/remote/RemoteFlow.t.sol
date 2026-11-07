@@ -7,13 +7,13 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {HLConstants} from "@hyper-evm-lib/src/common/HLConstants.sol";
 
-import {IAfterbellVault} from "../../src/interfaces/IAfterbellVault.sol";
+import {ISeiz3Vault} from "../../src/interfaces/ISeiz3Vault.sol";
 import {RiskParams} from "../../src/RiskParams.sol";
 import {HedgeLib} from "../../src/libs/HedgeLib.sol";
 import {Units} from "../../src/libs/Units.sol";
 import {HyperCoreGateway} from "../../src/remote/HyperCoreGateway.sol";
-import {AfterbellVaultRemote} from "../../src/remote/AfterbellVaultRemote.sol";
-import {AfterbellHookRemote} from "../../src/remote/AfterbellHookRemote.sol";
+import {Seiz3VaultRemote} from "../../src/remote/Seiz3VaultRemote.sol";
+import {Seiz3HookRemote} from "../../src/remote/Seiz3HookRemote.sol";
 import {MockHyperCore} from "../utils/MockHyperCore.sol";
 import {RemoteBase} from "./RemoteBase.sol";
 
@@ -95,19 +95,19 @@ contract RemoteFlowTest is RemoteBase {
 
         assertFalse(vault.canSync());
         vm.prank(keeper);
-        vm.expectRevert(IAfterbellVault.TooEarly.selector);
+        vm.expectRevert(ISeiz3Vault.TooEarly.selector);
         vault.syncHedge();
 
         _relay();
         assertTrue(vault.canSync());
         vm.expectEmit(address(vault));
-        emit IAfterbellVault.HedgeConfirmed(-40_000, -40_000);
+        emit ISeiz3Vault.HedgeConfirmed(-40_000, -40_000);
         _sync();
 
         assertEq(vault.confirmedShort(), -40_000);
         assertEq(core.szi(hedge), -40_000, "the hedge account holds the short");
         assertEq(core.lastOrder().cloid, HedgeLib.makeCloid(vault.hedgeId(), 1), "placed with the vault's cloid");
-        assertEq(uint8(vault.hedgeState()), uint8(IAfterbellVault.HedgeState.Idle));
+        assertEq(uint8(vault.hedgeState()), uint8(ISeiz3Vault.HedgeState.Idle));
         assertEq(vault.pauseFlags(), 0);
     }
 
@@ -127,7 +127,7 @@ contract RemoteFlowTest is RemoteBase {
         _relay();
         _sync();
         assertEq(vault.confirmedShort(), -40_000);
-        assertEq(uint8(vault.hedgeState()), uint8(IAfterbellVault.HedgeState.Idle));
+        assertEq(uint8(vault.hedgeState()), uint8(ISeiz3Vault.HedgeState.Idle));
     }
 
     function test_syncHedge_pausesAfterMaxTries() public {
@@ -139,7 +139,7 @@ contract RemoteFlowTest is RemoteBase {
             _sync();
         }
         assertEq(vault.pauseFlags() & vault.PAUSE_HEDGE(), vault.PAUSE_HEDGE());
-        assertEq(uint8(vault.hedgeState()), uint8(IAfterbellVault.HedgeState.Paused));
+        assertEq(uint8(vault.hedgeState()), uint8(ISeiz3Vault.HedgeState.Paused));
     }
 
     // ─── stock leaves the vault: hook fills and unwinds ───────────────────
@@ -154,7 +154,7 @@ contract RemoteFlowTest is RemoteBase {
 
         uint256 idle = usdc.balanceOf(address(vault));
         vm.expectEmit(address(hook));
-        emit AfterbellHookRemote.InventoryFill(address(swapRouter), 1.5e18, 1.5e18 * ask / 1e18, ask, false);
+        emit Seiz3HookRemote.InventoryFill(address(swapRouter), 1.5e18, 1.5e18 * ask / 1e18, ask, false);
         _buy(1.5e18);
 
         assertEq(nvdax.balanceOf(buyer), 1.5e18);
@@ -196,7 +196,7 @@ contract RemoteFlowTest is RemoteBase {
         assertEq(steps, 20, "40 NVDA in 2 NVDA chunks");
         assertEq(vault.confirmedShort(), 0);
         assertEq(core.szi(hedge), 0, "short closed on HyperCore");
-        assertEq(uint8(vault.hedgeState()), uint8(IAfterbellVault.HedgeState.Idle));
+        assertEq(uint8(vault.hedgeState()), uint8(ISeiz3Vault.HedgeState.Idle));
         assertEq(gateway.actionCount(), 21, "the short + one buy-back per chunk");
         // pool fee + impact on the way out, nothing else
         assertApproxEqRel(vault.totalAssets(), valueBefore, 0.01e18);
@@ -211,7 +211,7 @@ contract RemoteFlowTest is RemoteBase {
         _post(gateway.executedNonce());
 
         vm.warp(block.timestamp + 10);
-        vm.expectRevert(IAfterbellVault.HedgeDrift.selector);
+        vm.expectRevert(ISeiz3Vault.HedgeDrift.selector);
         vault.unwindStep();
 
         _sync(); // drift found while idle: a new hedge cycle tops the short back up
@@ -279,7 +279,7 @@ contract RemoteFlowTest is RemoteBase {
         assertEq(gateway.lastSnapshot().szi, -40_000, "state from the DON");
         assertEq(gateway.executedNonce(), 0, "only the relayer acknowledges orders");
         assertFalse(gateway.settled());
-        vm.expectRevert(IAfterbellVault.TooEarly.selector);
+        vm.expectRevert(ISeiz3Vault.TooEarly.selector);
         vault.syncHedge();
 
         // the relayer's late acknowledgement of the same observation: ignored as state, counted as an ack
@@ -295,22 +295,22 @@ contract RemoteFlowTest is RemoteBase {
 
     function test_marginMoves_haveNoBridge() public {
         vm.startPrank(owner);
-        vm.expectRevert(AfterbellVaultRemote.NoBridge.selector);
+        vm.expectRevert(Seiz3VaultRemote.NoBridge.selector);
         vault.topUpMargin(1e6);
-        vm.expectRevert(AfterbellVaultRemote.NoBridge.selector);
+        vm.expectRevert(Seiz3VaultRemote.NoBridge.selector);
         vault.withdrawMargin(1e6);
-        vm.expectRevert(AfterbellVaultRemote.NoBridge.selector);
+        vm.expectRevert(Seiz3VaultRemote.NoBridge.selector);
         vault.sweepSpotToDex();
-        vm.expectRevert(AfterbellVaultRemote.NoBridge.selector);
+        vm.expectRevert(Seiz3VaultRemote.NoBridge.selector);
         vault.addApiWallet(address(1), "x");
-        vm.expectRevert(AfterbellVaultRemote.NoBridge.selector);
+        vm.expectRevert(Seiz3VaultRemote.NoBridge.selector);
         vault.setMarginDepositDex(DEX);
         vm.stopPrank();
     }
 
     function test_activateCore_needsTheHedgeAccountOnHyperCore() public {
         HyperCoreGateway g = new HyperCoreGateway(owner, creForwarder, relayer, PERP_INDEX, DEX);
-        AfterbellVaultRemote.Wiring memory w = AfterbellVaultRemote.Wiring({
+        Seiz3VaultRemote.Wiring memory w = Seiz3VaultRemote.Wiring({
             usdc: IERC20(address(usdc)),
             nvdax: IERC20(address(nvdax)),
             morpho: morpho,
@@ -322,10 +322,10 @@ contract RemoteFlowTest is RemoteBase {
             perpDexIndex: DEX,
             szDecimals: SZ_DEC
         });
-        AfterbellVaultRemote v = new AfterbellVaultRemote(owner, w);
+        Seiz3VaultRemote v = new Seiz3VaultRemote(owner, w);
         vm.startPrank(owner);
         g.setAccount(address(v));
-        vm.expectRevert(IAfterbellVault.CoreAccountMissing.selector);
+        vm.expectRevert(ISeiz3Vault.CoreAccountMissing.selector);
         v.activateCore(0);
         vm.stopPrank();
         assertEq(v.coreUsdc(), 0, "nothing counted before activation");
@@ -333,7 +333,7 @@ contract RemoteFlowTest is RemoteBase {
 
     function test_constructor_rejectsAGatewayForAnotherPerp() public {
         HyperCoreGateway g = new HyperCoreGateway(owner, creForwarder, relayer, PERP_INDEX + 1, DEX);
-        AfterbellVaultRemote.Wiring memory w = AfterbellVaultRemote.Wiring({
+        Seiz3VaultRemote.Wiring memory w = Seiz3VaultRemote.Wiring({
             usdc: IERC20(address(usdc)),
             nvdax: IERC20(address(nvdax)),
             morpho: morpho,
@@ -345,8 +345,8 @@ contract RemoteFlowTest is RemoteBase {
             perpDexIndex: DEX,
             szDecimals: SZ_DEC
         });
-        vm.expectRevert(IAfterbellVault.BadWiring.selector);
-        new AfterbellVaultRemote(owner, w);
+        vm.expectRevert(ISeiz3Vault.BadWiring.selector);
+        new Seiz3VaultRemote(owner, w);
     }
 
     // ─── margin ───────────────────────────────────────────────────────────

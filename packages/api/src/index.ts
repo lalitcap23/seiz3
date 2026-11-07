@@ -6,9 +6,9 @@ import { streamSSE } from "hono/streaming";
 import { serve } from "@hono/node-server";
 import { createPublicClient, http, type PublicClient } from "viem";
 import { foundry } from "viem/chains";
-import { chains, HL_INFO_API, rpcUrlFor } from "@afterbell/shared";
+import { chains, HL_INFO_API, rpcUrlFor } from "@seiz3/shared";
 import { env } from "./env.js";
-import { DEPLOYMENTS_DIR, loadDeployment } from "@afterbell/shared/node";
+import { DEPLOYMENTS_DIR, loadDeployment } from "@seiz3/shared/node";
 import { Collector } from "./collector.js";
 import { FaucetRelay } from "./faucet.js";
 import { Watchlist } from "./watch.js";
@@ -168,7 +168,7 @@ let replaying: string | null = null;
 /** `pnpm replay <step>` in the repo, with this process's env; resolves with its exit status and output tail. */
 function runReplay(step: string): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
-    const child = spawn("pnpm", ["--silent", "--filter", "@afterbell/replay", "start", step], {
+    const child = spawn("pnpm", ["--silent", "--filter", "@seiz3/replay", "start", step], {
       cwd: fileURLToPath(new URL("../../../", import.meta.url)),
       env: process.env,
     });

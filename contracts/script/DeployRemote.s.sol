@@ -10,19 +10,19 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 
-import {AFTERBELL_HOOK_FLAGS} from "../src/AfterbellHook.sol";
+import {SEIZ3_HOOK_FLAGS} from "../src/Seiz3Hook.sol";
 import {RiskParams} from "../src/RiskParams.sol";
 import {HedgeLib} from "../src/libs/HedgeLib.sol";
 import {MockNVDAx} from "../src/mocks/MockNVDAx.sol";
 import {NaiveLiquidator} from "../src/mocks/NaiveLiquidator.sol";
 import {PoolSeeder} from "../src/mocks/PoolSeeder.sol";
 import {HyperCoreGateway} from "../src/remote/HyperCoreGateway.sol";
-import {AfterbellVaultRemote} from "../src/remote/AfterbellVaultRemote.sol";
-import {AfterbellHookRemote} from "../src/remote/AfterbellHookRemote.sol";
+import {Seiz3VaultRemote} from "../src/remote/Seiz3VaultRemote.sol";
+import {Seiz3HookRemote} from "../src/remote/Seiz3HookRemote.sol";
 import {DeployHelpers} from "./DeployHelpers.sol";
 
-/// @notice Deploy.s.sol for the Base Sepolia architecture: MockNVDAx, RiskParams, HyperCoreGateway, AfterbellHookRemote
-///         (at a mined CREATE2 address), AfterbellVaultRemote, NaiveLiquidator, PoolSeeder and the public swap router,
+/// @notice Deploy.s.sol for the Base Sepolia architecture: MockNVDAx, RiskParams, HyperCoreGateway, Seiz3HookRemote
+///         (at a mined CREATE2 address), Seiz3VaultRemote, NaiveLiquidator, PoolSeeder and the public swap router,
 ///         against the official Morpho Blue and Uniswap v4 PoolManager; seeds the vault; writes
 ///         deployments/<NETWORK>.json with the same fields Deploy.s.sol writes, plus `hyperCoreGateway`,
 ///         `hedgeAccount` and `relayer`. CreateMarkets.s.sol and SeedPool.s.sol then run unchanged.
@@ -55,8 +55,8 @@ contract DeployRemote is Script {
     struct Deployed {
         RiskParams risk;
         HyperCoreGateway gateway;
-        AfterbellHookRemote hook;
-        AfterbellVaultRemote vault;
+        Seiz3HookRemote hook;
+        Seiz3VaultRemote vault;
         NaiveLiquidator naive;
         PoolSeeder seeder;
         address router;
@@ -80,9 +80,9 @@ contract DeployRemote is Script {
         d.hook = _deployHook(IPoolManager(c.poolManager), deployer);
         PoolKey memory key = DeployHelpers.poolKey(c.usdc, nvdax, address(d.hook));
 
-        d.vault = new AfterbellVaultRemote(
+        d.vault = new Seiz3VaultRemote(
             deployer,
-            AfterbellVaultRemote.Wiring({
+            Seiz3VaultRemote.Wiring({
                 usdc: IERC20(c.usdc),
                 nvdax: IERC20(nvdax),
                 morpho: IMorpho(c.morpho),
@@ -120,11 +120,11 @@ contract DeployRemote is Script {
     }
 
     /// @dev CREATE2 through the deterministic deployer at an address whose low bits are the hook's permissions.
-    function _deployHook(IPoolManager pm, address owner_) internal returns (AfterbellHookRemote hook) {
+    function _deployHook(IPoolManager pm, address owner_) internal returns (Seiz3HookRemote hook) {
         bytes32 initCodeHash =
-            keccak256(abi.encodePacked(type(AfterbellHookRemote).creationCode, abi.encode(pm, owner_)));
-        (address mined, bytes32 salt) = DeployHelpers.mineHookSalt(CREATE2_FACTORY, AFTERBELL_HOOK_FLAGS, initCodeHash);
-        hook = new AfterbellHookRemote{salt: salt}(pm, owner_);
+            keccak256(abi.encodePacked(type(Seiz3HookRemote).creationCode, abi.encode(pm, owner_)));
+        (address mined, bytes32 salt) = DeployHelpers.mineHookSalt(CREATE2_FACTORY, SEIZ3_HOOK_FLAGS, initCodeHash);
+        hook = new Seiz3HookRemote{salt: salt}(pm, owner_);
         require(address(hook) == mined, "hook not at its mined address: is the CREATE2 deployer on this chain?");
     }
 
@@ -153,7 +153,7 @@ contract DeployRemote is Script {
     }
 
     function _write(string memory network, Deployed memory d) internal {
-        AfterbellVaultRemote vault = d.vault;
+        Seiz3VaultRemote vault = d.vault;
         string memory o = "deployment";
         vm.serializeString(o, "architecture", "remote");
         vm.serializeUint(o, "chainId", block.chainid);
@@ -197,7 +197,7 @@ contract DeployRemote is Script {
         return vm.serializeAddress(k, "hooks", address(hooks));
     }
 
-    function _hypercoreJson(AfterbellVaultRemote vault) internal returns (string memory) {
+    function _hypercoreJson(Seiz3VaultRemote vault) internal returns (string memory) {
         string memory h = "hypercore";
         vm.serializeUint(h, "perpAsset", vault.perpAsset());
         vm.serializeUint(h, "perpIndex", vault.perpIndex());

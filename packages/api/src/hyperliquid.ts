@@ -1,4 +1,4 @@
-import { corePxToNumber, hl, PERP_COIN, type HyperliquidPanel } from "@afterbell/shared";
+import { corePxToNumber, hl, PERP_COIN, type HyperliquidPanel } from "@seiz3/shared";
 import type { Address } from "viem";
 import type { CoreRead } from "./chain.js";
 

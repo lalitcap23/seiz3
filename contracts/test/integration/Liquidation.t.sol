@@ -2,16 +2,16 @@
 pragma solidity ^0.8.28;
 
 import {MarketParams} from "@morpho-blue/interfaces/IMorpho.sol";
-import {AfterbellBase} from "../utils/AfterbellBase.sol";
+import {Seiz3Base} from "../utils/Seiz3Base.sol";
 import {MockHyperCore} from "../utils/MockHyperCore.sol";
-import {IAfterbellVault} from "../../src/interfaces/IAfterbellVault.sol";
+import {ISeiz3Vault} from "../../src/interfaces/ISeiz3Vault.sol";
 import {RiskParams} from "../../src/RiskParams.sol";
 import {DemoOracle} from "../../src/mocks/DemoOracle.sol";
 import {HedgeLib} from "../../src/libs/HedgeLib.sol";
 import {Units} from "../../src/libs/Units.sol";
 
 /// @notice Liquidation flow (Tx 1) and hedge confirmation (Tx 2) against real Morpho Blue bytecode.
-contract LiquidationTest is AfterbellBase {
+contract LiquidationTest is Seiz3Base {
     int64 internal constant SEIZE_UNITS = 40_000;
 
     // ─── Tx 1: liquidate ──────────────────────────────────────────────────
@@ -22,7 +22,7 @@ contract LiquidationTest is AfterbellBase {
         uint256 idleBefore = usdc.balanceOf(address(vault));
 
         vm.expectEmit(false, true, false, false, address(vault));
-        emit IAfterbellVault.LiquidationTaken(bytes32(0), borrower, SEIZE, 0, -SEIZE_UNITS, 0);
+        emit ISeiz3Vault.LiquidationTaken(bytes32(0), borrower, SEIZE, 0, -SEIZE_UNITS, 0);
         _liquidate(SEIZE);
 
         // lenders made whole in the same tx; the vault paid at Morpho's 7.4% bonus
@@ -36,7 +36,7 @@ contract LiquidationTest is AfterbellBase {
         (int64 delta, uint8 tries) = _pending();
         assertEq(delta, -SEIZE_UNITS, "pending = -sz");
         assertEq(tries, 1);
-        assertEq(uint8(vault.hedgeState()), uint8(IAfterbellVault.HedgeState.Pending));
+        assertEq(uint8(vault.hedgeState()), uint8(ISeiz3Vault.HedgeState.Pending));
 
         // nothing reaches HyperCore until the block ends
         assertEq(core.orderCount(), 0);
@@ -58,14 +58,14 @@ contract LiquidationTest is AfterbellBase {
         _setPrice(CRASH_PX);
         vm.prank(owner);
         vault.pause();
-        vm.expectRevert(IAfterbellVault.VaultPaused.selector);
+        vm.expectRevert(ISeiz3Vault.VaultPaused.selector);
         _liquidate(SEIZE);
     }
 
     function test_liquidate_revertsWithHedgeInFlight() public {
         _setPrice(CRASH_PX);
         _liquidate(10e18);
-        vm.expectRevert(IAfterbellVault.HedgePending.selector);
+        vm.expectRevert(ISeiz3Vault.HedgePending.selector);
         _liquidate(10e18);
     }
 
@@ -74,13 +74,13 @@ contract LiquidationTest is AfterbellBase {
         DemoOracle other = new DemoOracle(owner, CRASH_PX * 1e18);
         MarketParams memory mp = MarketParams(address(usdc), address(nvdax), address(other), irm, LLTV);
         vm.prank(keeper);
-        vm.expectRevert(IAfterbellVault.MarketNotAllowed.selector);
+        vm.expectRevert(ISeiz3Vault.MarketNotAllowed.selector);
         vault.liquidate(mp, borrower, SEIZE);
     }
 
     function test_liquidate_revertsBelowOneCoreUnit() public {
         _setPrice(CRASH_PX);
-        vm.expectRevert(IAfterbellVault.ZeroSize.selector);
+        vm.expectRevert(ISeiz3Vault.ZeroSize.selector);
         _liquidate(0.0009e18);
     }
 
@@ -89,7 +89,7 @@ contract LiquidationTest is AfterbellBase {
         RiskParams.Params memory p = _risk();
         p.maxLiquidation = 5000e6;
         _setRisk(p);
-        vm.expectRevert(IAfterbellVault.OverCap.selector);
+        vm.expectRevert(ISeiz3Vault.OverCap.selector);
         _liquidate(SEIZE); // ~$7.8k
     }
 
@@ -101,7 +101,7 @@ contract LiquidationTest is AfterbellBase {
         risk.onReport("", abi.encode(false, uint256(5000e6), uint64(block.timestamp)));
 
         uint256 snap = vm.snapshotState();
-        vm.expectRevert(IAfterbellVault.OverCap.selector);
+        vm.expectRevert(ISeiz3Vault.OverCap.selector);
         _liquidate(SEIZE); // ~$7.8k into a book that takes $5k
 
         vm.revertToState(snap);
@@ -110,21 +110,21 @@ contract LiquidationTest is AfterbellBase {
 
         vm.revertToState(snap);
         vm.warp(block.timestamp + risk.maxReportAge() + 1);
-        vm.expectRevert(IAfterbellVault.OverCap.selector);
+        vm.expectRevert(ISeiz3Vault.OverCap.selector);
         _liquidate(SEIZE / 2);
     }
 
     function test_liquidate_revertsWhenLendingOracleDisagreesWithCore() public {
         _setPrice(CRASH_PX);
         core.setPx(_raw(CRASH_PX * 102 / 100)); // Core 2% above Morpho, band is 1.5%
-        vm.expectRevert(IAfterbellVault.OracleBand.selector);
+        vm.expectRevert(ISeiz3Vault.OracleBand.selector);
         _liquidate(SEIZE);
     }
 
     function test_liquidate_revertsOnLowMargin() public {
         _setPrice(CRASH_PX);
         core.forceDexBalance(address(vault), 2000e6); // short of ~$7.8k needs $3.1k at 3x + 20%
-        vm.expectRevert(IAfterbellVault.LowMargin.selector);
+        vm.expectRevert(ISeiz3Vault.LowMargin.selector);
         _liquidate(SEIZE);
     }
 
@@ -134,7 +134,7 @@ contract LiquidationTest is AfterbellBase {
         vault.setMarketAllowed(market, true);
         _deposit(lp, LP_DEPOSIT);
         _setPrice(CRASH_PX);
-        vm.expectRevert(IAfterbellVault.CoreAccountMissing.selector);
+        vm.expectRevert(ISeiz3Vault.CoreAccountMissing.selector);
         _liquidate(SEIZE);
     }
 
@@ -143,7 +143,7 @@ contract LiquidationTest is AfterbellBase {
         RiskParams.Params memory p = _risk();
         p.minDiscountBps = 800; // Morpho only gives ~6.9% at 77% LLTV
         _setRisk(p);
-        vm.expectRevert(IAfterbellVault.DiscountTooLow.selector);
+        vm.expectRevert(ISeiz3Vault.DiscountTooLow.selector);
         _liquidate(SEIZE);
     }
 
@@ -153,7 +153,7 @@ contract LiquidationTest is AfterbellBase {
         vm.prank(lp);
         vault.requestWithdraw(shares);
         assertLt(usdc.balanceOf(address(vault)), 8000e6);
-        vm.expectRevert(IAfterbellVault.ExceedsIdle.selector);
+        vm.expectRevert(ISeiz3Vault.ExceedsIdle.selector);
         _liquidate(SEIZE); // repays ~$7.3k
     }
 
@@ -162,7 +162,7 @@ contract LiquidationTest is AfterbellBase {
     function test_sync_revertsInTheSameBlock() public {
         _setPrice(CRASH_PX);
         _liquidate(SEIZE);
-        vm.expectRevert(IAfterbellVault.SameBlock.selector);
+        vm.expectRevert(ISeiz3Vault.SameBlock.selector);
         vault.syncHedge();
         assertFalse(vault.canSync());
     }
@@ -171,7 +171,7 @@ contract LiquidationTest is AfterbellBase {
         _setPrice(CRASH_PX);
         _liquidate(SEIZE);
         _nextBlock(1);
-        vm.expectRevert(IAfterbellVault.TooEarly.selector);
+        vm.expectRevert(ISeiz3Vault.TooEarly.selector);
         vault.syncHedge();
     }
 
@@ -182,13 +182,13 @@ contract LiquidationTest is AfterbellBase {
         assertTrue(vault.canSync());
 
         vm.expectEmit(address(vault));
-        emit IAfterbellVault.HedgeConfirmed(-SEIZE_UNITS, -SEIZE_UNITS);
+        emit ISeiz3Vault.HedgeConfirmed(-SEIZE_UNITS, -SEIZE_UNITS);
         vault.syncHedge();
 
         assertEq(vault.confirmedShort(), -SEIZE_UNITS);
         (int64 delta,) = _pending();
         assertEq(delta, 0);
-        assertEq(uint8(vault.hedgeState()), uint8(IAfterbellVault.HedgeState.Idle));
+        assertEq(uint8(vault.hedgeState()), uint8(ISeiz3Vault.HedgeState.Idle));
         assertFalse(vault.paused());
         assertEq(core.orderCount(), 1, "no extra orders");
     }
@@ -204,7 +204,7 @@ contract LiquidationTest is AfterbellBase {
         (int64 delta, uint8 tries) = _pending();
         assertEq(delta, -20_000, "remainder re-sent");
         assertEq(tries, 2);
-        assertEq(uint8(vault.hedgeState()), uint8(IAfterbellVault.HedgeState.Retrying));
+        assertEq(uint8(vault.hedgeState()), uint8(ISeiz3Vault.HedgeState.Retrying));
 
         core.setFillBps(10_000);
         _nextBlock(5);
@@ -227,15 +227,15 @@ contract LiquidationTest is AfterbellBase {
         }
         _nextBlock(5);
         vm.expectEmit(address(vault));
-        emit IAfterbellVault.HedgeStuck(-SEIZE_UNITS);
+        emit ISeiz3Vault.HedgeStuck(-SEIZE_UNITS);
         vault.syncHedge(); // third miss
         assertTrue(vault.paused());
         assertEq(vault.pauseFlags(), vault.PAUSE_HEDGE());
-        assertEq(uint8(vault.hedgeState()), uint8(IAfterbellVault.HedgeState.Paused));
+        assertEq(uint8(vault.hedgeState()), uint8(ISeiz3Vault.HedgeState.Paused));
 
         // paused stops new risk but keeps syncing
         assertEq(vault.maxDeposit(lp2), 0);
-        vm.expectRevert(IAfterbellVault.VaultPaused.selector);
+        vm.expectRevert(ISeiz3Vault.VaultPaused.selector);
         _liquidate(1e18);
 
         core.setDropNext(0); // book refills
@@ -299,7 +299,7 @@ contract LiquidationTest is AfterbellBase {
         // keepers can't park more than 110% of the target on Core
         uint256 allIdle = usdc.balanceOf(address(vault));
         vm.prank(keeper);
-        vm.expectRevert(IAfterbellVault.OverTarget.selector);
+        vm.expectRevert(ISeiz3Vault.OverTarget.selector);
         vault.topUpMargin(allIdle);
 
         uint256 topUp = shortfall * 110 / 100;
@@ -329,7 +329,7 @@ contract LiquidationTest is AfterbellBase {
         _nextBlock(1);
         assertEq(core.spotWei(address(vault)), 0);
         assertEq(core.dexBalance(address(vault), DEX), CORE_MARGIN + 4e6);
-        vm.expectRevert(IAfterbellVault.ZeroAmount.selector);
+        vm.expectRevert(ISeiz3Vault.ZeroAmount.selector);
         vault.sweepSpotToDex();
     }
 

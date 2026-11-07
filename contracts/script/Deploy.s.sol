@@ -11,15 +11,15 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {HLConstants} from "@hyper-evm-lib/src/common/HLConstants.sol";
 
-import {AfterbellVault} from "../src/AfterbellVault.sol";
-import {AfterbellHook, AFTERBELL_HOOK_FLAGS} from "../src/AfterbellHook.sol";
+import {Seiz3Vault} from "../src/Seiz3Vault.sol";
+import {Seiz3Hook, SEIZ3_HOOK_FLAGS} from "../src/Seiz3Hook.sol";
 import {RiskParams} from "../src/RiskParams.sol";
 import {MockNVDAx} from "../src/mocks/MockNVDAx.sol";
 import {NaiveLiquidator} from "../src/mocks/NaiveLiquidator.sol";
 import {PoolSeeder} from "../src/mocks/PoolSeeder.sol";
 import {DeployHelpers} from "./DeployHelpers.sol";
 
-/// @notice Deploys MockNVDAx, RiskParams, AfterbellHook (at a mined CREATE2 address), the vault, NaiveLiquidator,
+/// @notice Deploys MockNVDAx, RiskParams, Seiz3Hook (at a mined CREATE2 address), the vault, NaiveLiquidator,
 ///         PoolSeeder and a PoolSwapTest router; seeds the vault (inflation guard) and starts HyperCore account
 ///         activation; writes deployments/<NETWORK>.json.
 /// Flip the deployer into big-block mode first (see README): the vault exceeds the 3M small-block cap.
@@ -56,12 +56,12 @@ contract Deploy is Script {
         address forwarder = c.creForwarder != address(0) ? c.creForwarder : DeployHelpers.creForwarder(deployer);
         RiskParams risk = new RiskParams(deployer, forwarder, DeployHelpers.defaultRisk());
         // the vault's pool key names the hook, and the hook trusts only that vault: hook first, vault, then bind
-        AfterbellHook hook = _deployHook(IPoolManager(c.poolManager), deployer);
+        Seiz3Hook hook = _deployHook(IPoolManager(c.poolManager), deployer);
         PoolKey memory key = DeployHelpers.poolKey(c.usdc, nvdax, address(hook));
 
-        AfterbellVault vault = new AfterbellVault(
+        Seiz3Vault vault = new Seiz3Vault(
             deployer,
-            AfterbellVault.Wiring({
+            Seiz3Vault.Wiring({
                 usdc: IERC20(c.usdc),
                 nvdax: IERC20(nvdax),
                 morpho: IMorpho(c.morpho),
@@ -100,10 +100,10 @@ contract Deploy is Script {
 
     /// @dev CREATE2 through the deterministic deployer at an address whose low bits are the hook's permissions.
     ///      VERIFY on a new chain: `cast code 0x4e59b44847b379578588920cA78FbF26c0B4956C` must not be empty.
-    function _deployHook(IPoolManager pm, address owner_) internal returns (AfterbellHook hook) {
-        bytes32 initCodeHash = keccak256(abi.encodePacked(type(AfterbellHook).creationCode, abi.encode(pm, owner_)));
-        (address mined, bytes32 salt) = DeployHelpers.mineHookSalt(CREATE2_FACTORY, AFTERBELL_HOOK_FLAGS, initCodeHash);
-        hook = new AfterbellHook{salt: salt}(pm, owner_);
+    function _deployHook(IPoolManager pm, address owner_) internal returns (Seiz3Hook hook) {
+        bytes32 initCodeHash = keccak256(abi.encodePacked(type(Seiz3Hook).creationCode, abi.encode(pm, owner_)));
+        (address mined, bytes32 salt) = DeployHelpers.mineHookSalt(CREATE2_FACTORY, SEIZ3_HOOK_FLAGS, initCodeHash);
+        hook = new Seiz3Hook{salt: salt}(pm, owner_);
         require(address(hook) == mined, "hook not at its mined address: is the CREATE2 deployer on this chain?");
     }
 
@@ -125,8 +125,8 @@ contract Deploy is Script {
 
     function _write(
         string memory network,
-        AfterbellVault vault,
-        AfterbellHook hook,
+        Seiz3Vault vault,
+        Seiz3Hook hook,
         NaiveLiquidator naive,
         PoolSeeder seeder,
         PoolSwapTest router
@@ -156,7 +156,7 @@ contract Deploy is Script {
         console.log("next: CreateMarkets.s.sol, then SeedPool.s.sol");
     }
 
-    function _poolKeyJson(AfterbellVault vault) internal returns (string memory) {
+    function _poolKeyJson(Seiz3Vault vault) internal returns (string memory) {
         (Currency c0, Currency c1, uint24 fee, int24 tickSpacing, IHooks hooks) = vault.poolKey();
         string memory k = "poolKey";
         vm.serializeAddress(k, "currency0", Currency.unwrap(c0));
@@ -176,7 +176,7 @@ contract Deploy is Script {
         return vm.serializeAddress(k, "hooks", address(hooks));
     }
 
-    function _hypercoreJson(AfterbellVault vault) internal returns (string memory) {
+    function _hypercoreJson(Seiz3Vault vault) internal returns (string memory) {
         string memory h = "hypercore";
         vm.serializeUint(h, "perpAsset", vault.perpAsset());
         vm.serializeUint(h, "perpIndex", vault.perpIndex());

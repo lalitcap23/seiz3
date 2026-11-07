@@ -7,7 +7,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 import {Faucet} from "../../src/mocks/Faucet.sol";
 import {MockNVDAx} from "../../src/mocks/MockNVDAx.sol";
-import {MockUSDC} from "../utils/AfterbellBase.sol";
+import {MockUSDC} from "../utils/Seiz3Base.sol";
 
 contract FaucetTest is Test {
     uint256 constant NVDAX_DRIP = 0.1e18;

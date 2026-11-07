@@ -20,24 +20,32 @@ import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockC
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
-import {IAfterbellVault} from "./interfaces/IAfterbellVault.sol";
-import {RiskParams} from "./RiskParams.sol";
-import {HedgeLib} from "./libs/HedgeLib.sol";
-import {UnwindLib} from "./libs/UnwindLib.sol";
-import {Units} from "./libs/Units.sol";
+import {ISeiz3Vault} from "../interfaces/ISeiz3Vault.sol";
+import {RiskParams} from "../RiskParams.sol";
+import {HedgeLib} from "../libs/HedgeLib.sol";
+import {UnwindLib} from "../libs/UnwindLib.sol";
+import {Units} from "../libs/Units.sol";
+import {HyperCoreGateway} from "./HyperCoreGateway.sol";
 
-/// @title AfterbellVault
-/// @notice ERC-4626 USDC vault that buys seized stock collateral from Morpho, shorts the same stock on
-///         HyperCore (xyz:NVDA) in the same tx, and later unwinds into Uniswap v4 while closing the short.
-/// @dev The vault's address is also its HyperCore trading account. Only one hedge order is ever in flight.
-///      Pausing stops new risk (`liquidate`, deposits). `unwindStep` reduces risk, so it still runs while the
-///      vault is paused for low margin (that is how it raises cash), but never during an owner pause or with
-///      an unconfirmed hedge. `syncHedge` always runs.
-contract AfterbellVault is
+/// @title Seiz3VaultRemote
+/// @notice Seiz3Vault for an EVM chain without HyperCore (Base Sepolia): the same ERC-4626 USDC vault that buys
+///         seized stock collateral from Morpho, shorts the same stock on HyperCore (xyz:NVDA) and unwinds into
+///         Uniswap v4 while closing the short. Every door into HyperCore goes through `HyperCoreGateway` instead of
+///         the precompiles and CoreWriter: orders are queued there for the relayer, which places them from the hedge
+///         account, and reads come from the gateway's last attested snapshot of that account.
+/// @dev Same external interface as Seiz3Vault (keeper, API, hook and scripts drive either one), with three
+///      differences that follow from the chain:
+///        - the short is placed by the relayer a few seconds after `liquidate`, not in the same transaction, and
+///          `syncHedge` waits for the gateway to acknowledge the order (`settled`) before it reads the result;
+///        - there is no USDC bridge to HyperCore from here: the hedge account is funded on HyperCore, and the margin
+///          moves (`topUpMargin`, `withdrawMargin`, `sweepSpotToDex`, `addApiWallet`) revert `NoBridge`;
+///        - `activateCore` only starts counting the hedge account's HyperCore USDC, once the gateway has seen it.
+///      Everything else (pauses, invariants, LP queue, unwind and hook rules) is Seiz3Vault's, line for line.
+contract Seiz3VaultRemote is
     ERC4626,
     Ownable,
     ReentrancyGuardTransient,
-    IAfterbellVault,
+    ISeiz3Vault,
     IMorphoLiquidateCallback,
     IUnlockCallback
 {
@@ -50,17 +58,16 @@ contract AfterbellVault is
     uint8 public constant PAUSE_OWNER = 4; // emergency stop; only `unpause` clears it
 
     uint256 internal constant BPS = 10_000;
-    /// @dev Non-owners may top margin up to 110% of `marginTarget()`.
-    uint256 internal constant TOPUP_SLACK_BPS = 1000;
 
     // ─── immutable wiring ─────────────────────────────────────────────────
     IERC20 public immutable usdc; // 6 dec
     IERC20 public immutable nvdax; // 18 dec
     IMorpho public immutable morpho;
     IPoolManager public immutable poolManager;
-    address public immutable coreDepositWallet; // Circle's HyperEVM → HyperCore USDC entry
+    HyperCoreGateway public immutable gateway; // HyperCore's precompiles + CoreWriter on this chain
+    address public immutable coreDepositWallet; // Seiz3Vault's USDC entry to Core; here the gateway
     uint32 public immutable perpAsset; // order id: 100000 + perpDexIndex*10000 + indexInMeta
-    uint32 public immutable perpIndex; // precompile read id: perpDexIndex*10000 + indexInMeta
+    uint32 public immutable perpIndex; // read id: perpDexIndex*10000 + indexInMeta
     uint32 public immutable perpDexIndex;
     uint8 public immutable szDecimals;
     bool public immutable nvdaxIsCurrency0;
@@ -70,19 +77,16 @@ contract AfterbellVault is
 
     // ─── position state ───────────────────────────────────────────────────
     uint256 public inventory; // NVDAx held as hedged inventory, 18 dec
-    int64 public confirmedShort; // last szi read from the position precompile (negative = short)
+    int64 public confirmedShort; // last szi read through the gateway (negative = short)
     Pending public pendingHedge; // last order sent but not yet seen
     bytes32 public hedgeId; // current hedge cycle; cloid = keccak(hedgeId, tries)
     uint256 public hedgeNonce;
-    uint256 public marginFloat; // USDC (6 dec) on the xyz perp account incl. in-flight deposits, refreshed on sync
+    uint256 public marginFloat; // USDC (6 dec) on the xyz perp account, refreshed on sync
     uint8 public pauseFlags;
     uint64 public lastUnwindAt;
-    uint32 public marginDepositDex; // CoreDepositWallet destination for top-ups: perpDexIndex or SPOT_DEX
-    bool public coreFunded; // set by the first deposit to Core; until then there is nothing on Core to read
+    uint32 public marginDepositDex; // kept for Seiz3Vault's interface: always perpDexIndex
+    bool public coreFunded; // set by `activateCore`; until then the hedge account's USDC isn't counted
     mapping(Id => bool) public marketAllowed;
-
-    uint256 internal _transitAmount; // USDC sent HyperEVM → HyperCore, not yet visible in precompile reads
-    uint64 internal _transitUntilBlock;
 
     // ─── LP state ─────────────────────────────────────────────────────────
     uint256 public queuedShares; // shares waiting in the withdrawal queue (held by the vault itself)
@@ -99,14 +103,17 @@ contract AfterbellVault is
         IPoolManager poolManager;
         PoolKey poolKey;
         RiskParams risk;
-        address coreDepositWallet;
+        HyperCoreGateway gateway;
         uint32 perpAsset;
         uint32 perpDexIndex;
-        uint8 szDecimals; // read from the perpAssetInfo precompile / info API in the deploy script
+        uint8 szDecimals; // from Hyperliquid's info API (`meta`) in the deploy script
     }
 
+    /// @notice No USDC route to HyperCore from this chain: margin is funded on HyperCore, to the hedge account.
+    error NoBridge();
+
     constructor(address owner_, Wiring memory w)
-        ERC20("Afterbell Vault USDC", "abUSDC")
+        ERC20("Seiz3 Vault USDC", "abUSDC")
         ERC4626(w.usdc)
         Ownable(owner_)
     {
@@ -119,7 +126,8 @@ contract AfterbellVault is
                 || IERC20Metadata(address(w.nvdax)).decimals() != Units.NVDAX_DECIMALS
                 || (!nvdax0 && !(c0 == address(w.usdc) && c1 == address(w.nvdax)))
                 || w.szDecimals > Units.PERP_PX_DECIMALS || address(w.risk) == address(0)
-                || w.coreDepositWallet == address(0)
+                || address(w.gateway) == address(0) || w.gateway.perpIndex() != index
+                || w.gateway.perpDexIndex() != w.perpDexIndex
                 || (w.perpAsset >= HedgeLib.HIP3_ASSET_OFFSET && index / 10_000 != w.perpDexIndex)
         ) revert BadWiring();
 
@@ -127,7 +135,8 @@ contract AfterbellVault is
         nvdax = w.nvdax;
         morpho = w.morpho;
         poolManager = w.poolManager;
-        coreDepositWallet = w.coreDepositWallet;
+        gateway = w.gateway;
+        coreDepositWallet = address(w.gateway);
         poolKey = w.poolKey;
         risk = w.risk;
         perpAsset = w.perpAsset;
@@ -144,27 +153,26 @@ contract AfterbellVault is
 
     // ═══ LP accounting ═════════════════════════════════════════════════════
 
-    /// @notice idle USDC + Core USDC (xyz account value incl. uPnL, plus Core spot) + inventory × Core oraclePx
-    ///         + USDC in transit to Core. Reverts if a precompile read fails, so share math fails closed.
+    /// @notice idle USDC + Core USDC (xyz account value incl. uPnL, plus Core spot) + inventory × Core oraclePx.
+    ///         Reverts if the gateway's snapshot is stale, so share math fails closed.
     function totalAssets() public view override returns (uint256 assets) {
-        assets = usdc.balanceOf(address(this)) + coreUsdc() + inTransit();
+        assets = usdc.balanceOf(address(this)) + coreUsdc();
         uint256 inv = inventory;
-        if (inv != 0) assets += Units.value(inv, _corePxUsdc(HedgeLib.oraclePx(perpIndex)));
+        if (inv != 0) assets += Units.value(inv, _corePxUsdc(_oraclePx()));
     }
 
-    /// @notice USDC the vault holds on HyperCore: account value on the xyz DEX (already includes the short's
-    ///         uPnL) plus any spot USDC. Zero before the first deposit to Core, which also keeps the seed
-    ///         deposit free of precompile reads (forge scripts run in a plain EVM).
+    /// @notice USDC the hedge account holds on HyperCore: account value on the xyz DEX (already includes the short's
+    ///         uPnL) plus any spot USDC. Zero until `activateCore`, which also keeps the seed deposit free of gateway
+    ///         reads (nothing has been observed yet when the deploy script runs).
     function coreUsdc() public view returns (uint256) {
         if (!coreFunded) return 0;
-        uint256 spot = Units.spotWeiToUsdc(HedgeLib.spotBalance(address(this), HedgeLib.USDC_TOKEN).total);
+        uint256 spot = Units.spotWeiToUsdc(gateway.spotBalance(address(this), HedgeLib.USDC_TOKEN).total);
         return _dexAccountValue() + spot;
     }
 
-    /// @notice USDC deposited to Core in the last `transitBlocks` blocks: gone from the EVM balance, not yet
-    ///         in precompile reads. Core → EVM needs no entry: the Core debit and the EVM credit land together.
-    function inTransit() public view returns (uint256) {
-        return block.number < _transitUntilBlock ? _transitAmount : 0;
+    /// @notice Always 0: nothing moves to HyperCore from this chain (Seiz3Vault's interface).
+    function inTransit() public pure returns (uint256) {
+        return 0;
     }
 
     function maxDeposit(address receiver) public view override returns (uint256) {
@@ -230,7 +238,7 @@ contract AfterbellVault is
 
     // ═══ liquidation ═══════════════════════════════════════════════════════
 
-    /// @notice Buy `seized` NVDAx from an unhealthy Morpho borrower and short the same size on HyperCore.
+    /// @notice Buy `seized` NVDAx from an unhealthy Morpho borrower and queue the matching short on HyperCore.
     ///         Every check that can fail runs before Morpho is touched.
     function liquidate(MarketParams calldata params, address borrower, uint256 seized) external nonReentrant {
         MarketParams memory mp = params;
@@ -270,20 +278,22 @@ contract AfterbellVault is
 
     /// @notice The vault's only way to learn what HyperCore did. Aims at `−inventory`, so a dropped
     ///         liquidation order, a dropped unwind order and a double fill all heal the same way.
+    /// @dev With an order in flight it waits for the gateway to acknowledge it (`settled`): the snapshot it then reads
+    ///      was taken after HyperCore saw the order.
     function syncHedge() external nonReentrant {
         Pending memory p = pendingHedge;
         RiskParams.Params memory r = risk.get();
         if (p.delta != 0) {
             if (block.number <= p.sentBlock) revert SameBlock();
-            if (block.timestamp < uint256(p.sentAt) + r.orderDelaySec) revert TooEarly();
+            if (block.timestamp < uint256(p.sentAt) + r.orderDelaySec || !gateway.settled()) revert TooEarly();
         }
 
-        int64 actual = HedgeLib.position(address(this), perpIndex).szi;
+        int64 actual = gateway.position(address(this), perpIndex).szi;
         confirmedShort = actual;
         int64 target = _target();
         int64 gap = target - actual; // < 0: need more short, > 0: over-short
 
-        uint64 corePx = HedgeLib.oraclePx(perpIndex);
+        uint64 corePx = _oraclePx();
         _checkMargin(actual, corePx, r);
 
         if (_isHedged(target, gap, r)) {
@@ -310,50 +320,19 @@ contract AfterbellVault is
         _sendHedge(gap, corePx, tries, r);
     }
 
-    /// @notice Move idle USDC to the perp account through CoreDepositWallet. Anyone may call it, but only
-    ///         the owner may go past 110% of `marginTarget()`.
-    function topUpMargin(uint256 amount) external nonReentrant {
-        if (amount == 0) revert ZeroAmount();
-        if (amount > usdc.balanceOf(address(this))) revert ExceedsIdle();
-        if (!HedgeLib.coreUserExists(address(this))) revert CoreAccountMissing();
-        if (msg.sender != owner()) {
-            uint256 cap = marginTarget() * (BPS + TOPUP_SLACK_BPS) / BPS;
-            if (_dexAccountValue() + inTransit() + amount > cap) revert OverTarget();
-        }
-
-        uint32 dex = marginDepositDex;
-        _depositToCore(amount, dex);
-        if (dex == HedgeLib.SPOT_DEX) {
-            // Two-hop route. Core credits EVM deposits before it runs the block's CoreWriter actions (VERIFY);
-            // if this hop is dropped the USDC waits on Core spot for `sweepSpotToDex`.
-            HedgeLib.sendAsset(
-                address(this), HedgeLib.SPOT_DEX, perpDexIndex, HedgeLib.USDC_TOKEN, Units.usdcToSpotWei(amount)
-            );
-        }
-        emit MarginMoved(amount, true);
+    /// @notice No USDC route to HyperCore from this chain: the hedge account is funded on HyperCore.
+    function topUpMargin(uint256) external pure {
+        revert NoBridge();
     }
 
-    /// @notice Core → EVM, only once flat. Arrival is async; the next `claimQueued` sees the new idle balance.
-    function withdrawMargin(uint256 amount) external nonReentrant {
-        if (amount == 0) revert ZeroAmount();
-        if (inventory != 0 || pendingHedge.delta != 0) revert NotFlat();
-        if (HedgeLib.position(address(this), perpIndex).szi != 0) revert NotFlat();
-        if (amount > _dexAccountValue()) revert ExceedsCore();
-
-        uint64 amountWei = Units.usdcToSpotWei(amount);
-        HedgeLib.sendAsset(address(this), perpDexIndex, HedgeLib.SPOT_DEX, HedgeLib.USDC_TOKEN, amountWei);
-        HedgeLib.spotSend(HedgeLib.USDC_SYSTEM_ADDRESS, HedgeLib.USDC_TOKEN, amountWei);
-        emit MarginMoved(amount, false);
+    /// @notice No USDC route back from HyperCore to this chain.
+    function withdrawMargin(uint256) external pure {
+        revert NoBridge();
     }
 
-    /// @notice Move USDC sitting on the vault's Core spot balance onto the xyz DEX (activation leftovers, a
-    ///         dropped second hop). Only adds margin, so anyone may call it.
-    function sweepSpotToDex() external nonReentrant {
-        uint64 bal = HedgeLib.spotBalance(address(this), HedgeLib.USDC_TOKEN).total;
-        uint64 amountWei = bal - bal % uint64(Units.SPOT_WEI_PER_USDC); // whole perp units only
-        if (amountWei == 0) revert ZeroAmount();
-        HedgeLib.sendAsset(address(this), HedgeLib.SPOT_DEX, perpDexIndex, HedgeLib.USDC_TOKEN, amountWei);
-        emit CoreUsdcSwept(amountWei);
+    /// @notice The relayer keeps the hedge account's USDC on the xyz DEX.
+    function sweepSpotToDex() external pure {
+        revert NoBridge();
     }
 
     // ═══ unwind ════════════════════════════════════════════════════════════
@@ -370,13 +349,13 @@ contract AfterbellVault is
         RiskParams.Params memory r = risk.get();
         if (block.timestamp < uint256(lastUnwindAt) + risk.cooldown()) revert Cooldown();
 
-        uint64 corePx = HedgeLib.oraclePx(perpIndex);
+        uint64 corePx = _oraclePx();
         uint256 pxUsdc = _corePxUsdc(corePx);
         (uint160 sqrtPriceX96, uint256 poolPx) = UnwindLib.poolPrice(poolManager, poolKey, nvdaxIsCurrency0);
         if (Units.diffBps(poolPx, pxUsdc) > r.oracleBandBps) revert OracleBand();
 
         // never sell stock the short doesn't cover: the confirmed hedge must still be in place on Core
-        int64 actual = HedgeLib.position(address(this), perpIndex).szi;
+        int64 actual = gateway.position(address(this), perpIndex).szi;
         if (_abs(_target() - actual) > r.maxUnhedged) revert HedgeDrift();
 
         uint256 chunk = Math.min(inv, Units.fromCoreSize(r.maxUnhedged, szDecimals));
@@ -391,7 +370,7 @@ contract AfterbellVault is
         emit Unwound(sold, usdcOut);
     }
 
-    /// @notice The pool's hook sold `sold` NVDAx to a buyer at its ask (`AfterbellHook.beforeSwap`) and has paid
+    /// @notice The pool's hook sold `sold` NVDAx to a buyer at its ask (`Seiz3HookRemote.beforeSwap`) and has paid
     ///         `usdcIn` USDC to the vault. Send the stock to the PoolManager and queue the matching reduce-only buy.
     /// @dev The same rules as `unwindStep`, which the hook checks first; re-checked here because the stock is ours.
     ///      Only the hook named in `poolKey` may call it, and only at or above the Core oracle price.
@@ -403,9 +382,9 @@ contract AfterbellVault is
         RiskParams.Params memory r = risk.get();
         if (sold == 0 || sold > inv || sold > Units.fromCoreSize(r.maxUnhedged, szDecimals)) revert OverCap();
 
-        int64 actual = HedgeLib.position(address(this), perpIndex).szi;
+        int64 actual = gateway.position(address(this), perpIndex).szi;
         if (_abs(_target() - actual) > r.maxUnhedged) revert HedgeDrift();
-        uint64 corePx = HedgeLib.oraclePx(perpIndex);
+        uint64 corePx = _oraclePx();
         if (usdcIn < Units.value(sold, _corePxUsdc(corePx))) revert Slippage();
 
         nvdax.safeTransfer(address(poolManager), sold);
@@ -434,27 +413,27 @@ contract AfterbellVault is
         return p.tries > 1 ? HedgeState.Retrying : HedgeState.Pending;
     }
 
-    /// @notice True when the keeper's `syncHedge` would not revert on timing.
+    /// @notice True when the keeper's `syncHedge` would not revert on timing: the order delay has passed and the
+    ///         gateway has acknowledged the order.
     function canSync() external view returns (bool) {
         Pending memory p = pendingHedge;
-        return
-            p.delta != 0 && block.number > p.sentBlock
-                && block.timestamp >= uint256(p.sentAt) + risk.get().orderDelaySec;
+        return p.delta != 0 && block.number > p.sentBlock
+            && block.timestamp >= uint256(p.sentAt) + risk.get().orderDelaySec && gateway.settled();
     }
 
     /// @notice Margin to hold the target short plus one max-size liquidation, with buffer.
     function marginTarget() public view returns (uint256) {
         RiskParams.Params memory r = risk.get();
-        uint256 targetNotional = inventory == 0 ? 0 : Units.value(inventory, _corePxUsdc(HedgeLib.oraclePx(perpIndex)));
+        uint256 targetNotional = inventory == 0 ? 0 : Units.value(inventory, _corePxUsdc(_oraclePx()));
         return _requiredMargin(targetNotional + r.maxLiquidation, r);
     }
 
-    /// @notice USDC the keeper should top up to restore the buffer on the target short (add 10% on top).
+    /// @notice USDC the hedge account is short of to keep the buffer on the target short (funded on HyperCore).
     function marginShortfall() external view returns (uint256) {
         if (inventory == 0) return 0;
         RiskParams.Params memory r = risk.get();
-        uint256 required = _requiredMargin(Units.value(inventory, _corePxUsdc(HedgeLib.oraclePx(perpIndex))), r);
-        uint256 have = _dexAccountValue() + inTransit();
+        uint256 required = _requiredMargin(Units.value(inventory, _corePxUsdc(_oraclePx())), r);
+        uint256 have = _dexAccountValue();
         return required > have ? required - have : 0;
     }
 
@@ -475,29 +454,22 @@ contract AfterbellVault is
         emit MarketAllowed(Id.unwrap(id), allowed);
     }
 
-    /// @notice VERIFY (open question 2): perpDexIndex = CoreDepositWallet credits xyz directly;
-    ///         SPOT_DEX = deposit to spot, then `sendAsset` spot → xyz.
-    function setMarginDepositDex(uint32 dex) external onlyOwner {
-        if (dex != perpDexIndex && dex != HedgeLib.SPOT_DEX) revert BadDex();
-        marginDepositDex = dex;
-        emit MarginDepositDexSet(dex);
+    /// @notice Margin always sits on the perp DEX here (Seiz3Vault's interface).
+    function setMarginDepositDex(uint32) external pure {
+        revert NoBridge();
     }
 
-    /// @notice Create the vault's HyperCore account: deposit a few USDC to Core spot (1 USDC activation fee),
-    ///         wait for `coreUserExists`, then `sweepSpotToDex` / `topUpMargin`. Mainnet only: testnet's
-    ///         CoreDepositWallet never credits Core, so there a HyperCore-side send to the vault creates the account.
-    function activateCore(uint256 amount) external onlyOwner nonReentrant {
-        if (amount == 0) revert ZeroAmount();
-        if (amount > usdc.balanceOf(address(this))) revert ExceedsIdle();
-        _depositToCore(amount, HedgeLib.SPOT_DEX);
-        emit MarginMoved(amount, true);
+    /// @notice Start counting the hedge account's HyperCore USDC in `totalAssets`, once the gateway has seen the
+    ///         account (fund it on HyperCore first). The argument is Seiz3Vault's deposit size, unused here.
+    function activateCore(uint256) external onlyOwner nonReentrant {
+        if (!gateway.coreUserExists(address(this))) revert CoreAccountMissing();
+        coreFunded = true;
+        emit MarginMoved(0, true);
     }
 
-    /// @notice Agent wallet for the L1 actions CoreWriter lacks (e.g. leverage / isolated margin on xyz).
-    ///         Agents can trade but not withdraw. VERIFY whether the spike needs it at all.
-    function addApiWallet(address wallet, string calldata name) external onlyOwner {
-        HedgeLib.addApiWallet(wallet, name);
-        emit ApiWalletAdded(wallet, name);
+    /// @notice The relayer holds the hedge account's keys; there is no agent wallet to add from here.
+    function addApiWallet(address, string calldata) external pure {
+        revert NoBridge();
     }
 
     function pause() external onlyOwner {
@@ -520,7 +492,7 @@ contract AfterbellVault is
 
     // ═══ internals ═════════════════════════════════════════════════════════
 
-    /// @dev The liquidation pre-checks: not paused, no hedge in flight, allow-listed market, Core account live,
+    /// @dev The liquidation pre-checks: not paused, no hedge in flight, allow-listed market, hedge account live,
     ///      notional ≤ cap, lending oracle within band of the Core oracle, margin for the short after this one.
     function _preLiquidate(MarketParams memory mp, uint256 seized) internal returns (uint64 sz, uint64 corePx) {
         if (pauseFlags != 0) revert VaultPaused();
@@ -530,9 +502,9 @@ contract AfterbellVault is
         RiskParams.Params memory r = risk.get();
         sz = Units.toCoreSize(seized, szDecimals);
         if (sz == 0) revert ZeroSize();
-        if (!HedgeLib.coreUserExists(address(this))) revert CoreAccountMissing();
+        if (!gateway.coreUserExists(address(this))) revert CoreAccountMissing();
 
-        corePx = HedgeLib.oraclePx(perpIndex);
+        corePx = _oraclePx();
         uint256 pxUsdc = _corePxUsdc(corePx);
         uint256 notional = Units.value(seized, pxUsdc);
         if (notional > r.maxLiquidation) revert OverCap();
@@ -540,19 +512,19 @@ contract AfterbellVault is
             revert OracleBand();
         }
 
-        uint256 margin = _dexAccountValue() + inTransit();
+        uint256 margin = _dexAccountValue();
         marginFloat = margin;
         if (margin < _requiredMargin(_shortNotional(confirmedShort, pxUsdc) + notional, r)) revert LowMargin();
     }
 
-    /// @dev Sends one IOC order of `delta` (negative = sell / more short) priced `hedgeCapBps` off the oracle,
+    /// @dev Queues one IOC order of `delta` (negative = sell / more short) priced `hedgeCapBps` off the oracle,
     ///      and records it as the single hedge in flight. Every buy is reduce-only: the vault is only ever short,
     ///      so a late double fill can never flip it long.
     function _sendHedge(int64 delta, uint64 corePx, uint8 tries, RiskParams.Params memory r) internal {
         bool isBuy = delta > 0;
         uint64 wirePx = Units.pxToWire(Units.offsetPx(corePx, r.hedgeCapBps, isBuy, szDecimals), szDecimals);
         uint128 cloid = HedgeLib.makeCloid(hedgeId, tries);
-        HedgeLib.limitOrderIoc(perpAsset, isBuy, wirePx, Units.sizeToWire(_abs(delta), szDecimals), isBuy, cloid);
+        gateway.placeOrder(perpAsset, isBuy, wirePx, Units.sizeToWire(_abs(delta), szDecimals), isBuy, cloid);
         pendingHedge = Pending(delta, uint64(block.number), uint64(block.timestamp), tries);
         emit HedgeSent(delta, wirePx, isBuy, tries, cloid);
     }
@@ -573,24 +545,13 @@ contract AfterbellVault is
 
     /// @dev Refreshes `marginFloat` and sets or clears PAUSE_MARGIN for the short as it stands on Core.
     function _checkMargin(int64 actual, uint64 corePx, RiskParams.Params memory r) internal {
-        uint256 value = _dexAccountValue() + inTransit();
+        uint256 value = _dexAccountValue();
         uint256 required = _requiredMargin(_shortNotional(actual, _corePxUsdc(corePx)), r);
         bool ok = value >= required;
         marginFloat = value;
         if (ok) _clearPause(PAUSE_MARGIN);
         else _setPause(PAUSE_MARGIN);
         emit MarginChecked(value, required, ok);
-    }
-
-    function _depositToCore(uint256 amount, uint32 dex) internal {
-        coreFunded = true;
-        if (block.number < _transitUntilBlock) {
-            _transitAmount += amount;
-        } else {
-            _transitAmount = amount;
-        }
-        _transitUntilBlock = uint64(block.number + risk.get().transitBlocks);
-        HedgeLib.depositUsdc(usdc, coreDepositWallet, amount, dex);
     }
 
     function _setPause(uint8 flag) internal {
@@ -624,9 +585,15 @@ contract AfterbellVault is
         return target == 0 ? gap == 0 : _abs(gap) <= r.maxUnhedged;
     }
 
+    /// @dev The Core oracle through the gateway; 0 means unknown, as with the precompile (HedgeLib.oraclePx).
+    function _oraclePx() internal view returns (uint64 px) {
+        px = gateway.oraclePx(perpIndex);
+        if (px == 0) revert HyperCoreGateway.UnknownAsset(perpIndex);
+    }
+
     /// @dev Isolated margin on a HIP-3 DEX: account value there already includes the position's uPnL.
     function _dexAccountValue() internal view returns (uint256) {
-        int64 v = HedgeLib.marginSummary(perpDexIndex, address(this)).accountValue;
+        int64 v = gateway.accountMarginSummary(perpDexIndex, address(this)).accountValue;
         return v > 0 ? uint256(uint64(v)) : 0;
     }
 

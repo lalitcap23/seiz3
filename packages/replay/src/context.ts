@@ -15,8 +15,8 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 import { z } from "zod";
-import { chains, rpcUrlFor, type MarketName } from "@afterbell/shared";
-import { DEPLOYMENTS_DIR, loadDeployment, type DeploymentFile } from "@afterbell/shared/node";
+import { chains, rpcUrlFor, type MarketName } from "@seiz3/shared";
+import { DEPLOYMENTS_DIR, loadDeployment, type DeploymentFile } from "@seiz3/shared/node";
 
 const ANVIL_DEPLOYER = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 

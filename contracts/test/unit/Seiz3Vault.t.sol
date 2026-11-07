@@ -10,16 +10,16 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
-import {AfterbellBase, MockUSDC} from "../utils/AfterbellBase.sol";
-import {AfterbellVault} from "../../src/AfterbellVault.sol";
-import {IAfterbellVault} from "../../src/interfaces/IAfterbellVault.sol";
+import {Seiz3Base, MockUSDC} from "../utils/Seiz3Base.sol";
+import {Seiz3Vault} from "../../src/Seiz3Vault.sol";
+import {ISeiz3Vault} from "../../src/interfaces/ISeiz3Vault.sol";
 import {RiskParams} from "../../src/RiskParams.sol";
 import {HedgeLib} from "../../src/libs/HedgeLib.sol";
 import {HLConstants} from "@hyper-evm-lib/src/common/HLConstants.sol";
 import {DeployHelpers} from "../../script/DeployHelpers.sol";
 
 /// @notice Ring 1: LP accounting, guards and admin. Morpho / v4 are real, HyperCore is MockHyperCore.
-contract AfterbellVaultTest is AfterbellBase {
+contract Seiz3VaultTest is Seiz3Base {
     // ─── LP accounting ────────────────────────────────────────────────────
 
     function test_totalAssets_countsEveryBox() public view {
@@ -100,10 +100,10 @@ contract AfterbellVaultTest is AfterbellBase {
 
     function test_requestWithdraw_rejectsZeroAndOverBalance() public {
         vm.startPrank(lp);
-        vm.expectRevert(IAfterbellVault.ZeroAmount.selector);
+        vm.expectRevert(ISeiz3Vault.ZeroAmount.selector);
         vault.requestWithdraw(0);
         uint256 tooMany = vault.balanceOf(lp) + 1;
-        vm.expectRevert(IAfterbellVault.ExceedsBalance.selector);
+        vm.expectRevert(ISeiz3Vault.ExceedsBalance.selector);
         vault.requestWithdraw(tooMany);
         vm.stopPrank();
     }
@@ -130,7 +130,7 @@ contract AfterbellVaultTest is AfterbellBase {
         assertEq(vault.queued(lp), 0);
 
         vm.prank(lp);
-        vm.expectRevert(IAfterbellVault.NothingToClaim.selector);
+        vm.expectRevert(ISeiz3Vault.NothingToClaim.selector);
         vault.claimQueued();
     }
 
@@ -155,24 +155,24 @@ contract AfterbellVaultTest is AfterbellBase {
     // ─── callback guards ──────────────────────────────────────────────────
 
     function test_callback_rejectsNonMorpho() public {
-        vm.expectRevert(IAfterbellVault.NotMorpho.selector);
+        vm.expectRevert(ISeiz3Vault.NotMorpho.selector);
         vault.onMorphoLiquidate(1, abi.encode(bytes32(0), uint256(0)));
     }
 
     function test_callback_rejectsOutsideLiquidation() public {
         vm.prank(address(morpho));
-        vm.expectRevert(IAfterbellVault.NotInLiquidation.selector);
+        vm.expectRevert(ISeiz3Vault.NotInLiquidation.selector);
         vault.onMorphoLiquidate(1, abi.encode(bytes32(0), uint256(0)));
     }
 
     function test_unlockCallback_rejectsNonPoolManager() public {
-        vm.expectRevert(IAfterbellVault.NotPoolManager.selector);
+        vm.expectRevert(ISeiz3Vault.NotPoolManager.selector);
         vault.unlockCallback(abi.encode(uint256(1), uint256(0)));
     }
 
     function test_unlockCallback_rejectsOutsideUnwind() public {
         vm.prank(address(pm));
-        vm.expectRevert(IAfterbellVault.NotInUnwind.selector);
+        vm.expectRevert(ISeiz3Vault.NotInUnwind.selector);
         vault.unlockCallback(abi.encode(uint256(1), uint160(0)));
     }
 
@@ -204,13 +204,13 @@ contract AfterbellVaultTest is AfterbellBase {
         MarketParams memory mp = market;
         mp.collateralToken = address(usdc);
         vm.prank(owner);
-        vm.expectRevert(IAfterbellVault.BadMarket.selector);
+        vm.expectRevert(ISeiz3Vault.BadMarket.selector);
         vault.setMarketAllowed(mp, true);
     }
 
     function test_setMarginDepositDex_onlyXyzOrSpot() public {
         vm.startPrank(owner);
-        vm.expectRevert(IAfterbellVault.BadDex.selector);
+        vm.expectRevert(ISeiz3Vault.BadDex.selector);
         vault.setMarginDepositDex(0);
         vault.setMarginDepositDex(type(uint32).max);
         assertEq(vault.marginDepositDex(), type(uint32).max);
@@ -244,11 +244,11 @@ contract AfterbellVaultTest is AfterbellBase {
     function test_rescue_protectsLpFundsAndInventory() public {
         _takeAndHedge();
         vm.startPrank(owner);
-        vm.expectRevert(IAfterbellVault.NotRescuable.selector);
+        vm.expectRevert(ISeiz3Vault.NotRescuable.selector);
         vault.rescue(IERC20(address(usdc)), owner, 1);
-        vm.expectRevert(IAfterbellVault.NotRescuable.selector);
+        vm.expectRevert(ISeiz3Vault.NotRescuable.selector);
         vault.rescue(IERC20(address(vault)), owner, 1);
-        vm.expectRevert(IAfterbellVault.NotRescuable.selector);
+        vm.expectRevert(ISeiz3Vault.NotRescuable.selector);
         vault.rescue(IERC20(address(nvdax)), owner, 1);
         vm.stopPrank();
 
@@ -264,7 +264,7 @@ contract AfterbellVaultTest is AfterbellBase {
 
     function test_addApiWallet_sendsAction9() public {
         vm.prank(owner);
-        vault.addApiWallet(keeper, "afterbell-agent");
+        vault.addApiWallet(keeper, "seiz3-agent");
         _nextBlock(1);
         assertEq(core.apiWalletCount(), 1);
         assertEq(core.apiWallets(0), keeper);
@@ -272,20 +272,20 @@ contract AfterbellVaultTest is AfterbellBase {
 
     function test_topUp_andActivate_guards() public {
         vm.startPrank(owner);
-        vm.expectRevert(IAfterbellVault.ZeroAmount.selector);
+        vm.expectRevert(ISeiz3Vault.ZeroAmount.selector);
         vault.topUpMargin(0);
-        vm.expectRevert(IAfterbellVault.ExceedsIdle.selector);
+        vm.expectRevert(ISeiz3Vault.ExceedsIdle.selector);
         vault.topUpMargin(LP_DEPOSIT);
-        vm.expectRevert(IAfterbellVault.ZeroAmount.selector);
+        vm.expectRevert(ISeiz3Vault.ZeroAmount.selector);
         vault.activateCore(0);
-        vm.expectRevert(IAfterbellVault.ExceedsIdle.selector);
+        vm.expectRevert(ISeiz3Vault.ExceedsIdle.selector);
         vault.activateCore(LP_DEPOSIT);
         vm.stopPrank();
 
         vault = _newVault();
         _deposit(lp2, 1000e6);
         vm.prank(owner);
-        vm.expectRevert(IAfterbellVault.CoreAccountMissing.selector);
+        vm.expectRevert(ISeiz3Vault.CoreAccountMissing.selector);
         vault.topUpMargin(100e6);
     }
 
@@ -299,7 +299,7 @@ contract AfterbellVaultTest is AfterbellBase {
     // ─── wiring ───────────────────────────────────────────────────────────
 
     function test_constructor_rejectsBadWiring() public {
-        AfterbellVault.Wiring memory w = _wiring();
+        Seiz3Vault.Wiring memory w = _wiring();
         w.szDecimals = 7;
         _expectBadWiring(w);
 
@@ -322,8 +322,8 @@ contract AfterbellVaultTest is AfterbellBase {
         assertEq(vault.marginDepositDex(), DEX);
     }
 
-    function _wiring() internal view returns (AfterbellVault.Wiring memory) {
-        return AfterbellVault.Wiring({
+    function _wiring() internal view returns (Seiz3Vault.Wiring memory) {
+        return Seiz3Vault.Wiring({
             usdc: IERC20(address(usdc)),
             nvdax: IERC20(address(nvdax)),
             morpho: morpho,
@@ -337,8 +337,8 @@ contract AfterbellVaultTest is AfterbellBase {
         });
     }
 
-    function _expectBadWiring(AfterbellVault.Wiring memory w) internal {
-        vm.expectRevert(IAfterbellVault.BadWiring.selector);
-        new AfterbellVault(owner, w);
+    function _expectBadWiring(Seiz3Vault.Wiring memory w) internal {
+        vm.expectRevert(ISeiz3Vault.BadWiring.selector);
+        new Seiz3Vault(owner, w);
     }
 }

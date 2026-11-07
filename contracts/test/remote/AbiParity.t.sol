@@ -2,12 +2,12 @@
 pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {IAfterbellVault} from "../../src/interfaces/IAfterbellVault.sol";
-import {AfterbellHook} from "../../src/AfterbellHook.sol";
-import {AfterbellHookRemote} from "../../src/remote/AfterbellHookRemote.sol";
-import {AfterbellVaultRemote} from "../../src/remote/AfterbellVaultRemote.sol";
+import {ISeiz3Vault} from "../../src/interfaces/ISeiz3Vault.sol";
+import {Seiz3Hook} from "../../src/Seiz3Hook.sol";
+import {Seiz3HookRemote} from "../../src/remote/Seiz3HookRemote.sol";
+import {Seiz3VaultRemote} from "../../src/remote/Seiz3VaultRemote.sol";
 
-/// @notice The keeper, API, bots, replay and the deploy scripts talk to AfterbellVault and AfterbellHook through ABIs
+/// @notice The keeper, API, bots, replay and the deploy scripts talk to Seiz3Vault and Seiz3Hook through ABIs
 ///         generated from them. The Base Sepolia contracts must answer every one of those calls and emit every one of
 ///         those events, so the same off-chain code drives either chain.
 contract AbiParityTest is Test {
@@ -27,31 +27,31 @@ contract AbiParityTest is Test {
         }
     }
 
-    function test_vault_answersEveryAfterbellVaultCall() public view {
+    function test_vault_answersEverySeiz3VaultCall() public view {
         _assertSuperset(
-            "AfterbellVault.sol/AfterbellVault.json",
-            "AfterbellVaultRemote.sol/AfterbellVaultRemote.json",
+            "Seiz3Vault.sol/Seiz3Vault.json",
+            "Seiz3VaultRemote.sol/Seiz3VaultRemote.json",
             ".methodIdentifiers"
         );
     }
 
-    function test_hook_answersEveryAfterbellHookCall() public view {
+    function test_hook_answersEverySeiz3HookCall() public view {
         _assertSuperset(
-            "AfterbellHook.sol/AfterbellHook.json", "AfterbellHookRemote.sol/AfterbellHookRemote.json", ".methodIdentifiers"
+            "Seiz3Hook.sol/Seiz3Hook.json", "Seiz3HookRemote.sol/Seiz3HookRemote.json", ".methodIdentifiers"
         );
     }
 
-    /// @dev The vaults' events all come from IAfterbellVault, which both implement; the hooks declare their own.
+    /// @dev The vaults' events all come from ISeiz3Vault, which both implement; the hooks declare their own.
     function test_hook_emitsTheSameEvents() public pure {
-        assertEq(AfterbellHook.InventoryFill.selector, AfterbellHookRemote.InventoryFill.selector);
-        assertEq(AfterbellHook.VaultSet.selector, AfterbellHookRemote.VaultSet.selector);
-        assertEq(AfterbellHook.SettingsSet.selector, AfterbellHookRemote.SettingsSet.selector);
+        assertEq(Seiz3Hook.InventoryFill.selector, Seiz3HookRemote.InventoryFill.selector);
+        assertEq(Seiz3Hook.VaultSet.selector, Seiz3HookRemote.VaultSet.selector);
+        assertEq(Seiz3Hook.SettingsSet.selector, Seiz3HookRemote.SettingsSet.selector);
     }
 
-    function test_vault_isAnIAfterbellVault() public pure {
-        assertEq(type(IAfterbellVault).interfaceId, type(IAfterbellVault).interfaceId); // compile-time: both implement it
-        AfterbellVaultRemote v;
-        IAfterbellVault i = v; // fails to compile if AfterbellVaultRemote stopped implementing the interface
+    function test_vault_isAnISeiz3Vault() public pure {
+        assertEq(type(ISeiz3Vault).interfaceId, type(ISeiz3Vault).interfaceId); // compile-time: both implement it
+        Seiz3VaultRemote v;
+        ISeiz3Vault i = v; // fails to compile if Seiz3VaultRemote stopped implementing the interface
         assertEq(address(i), address(0));
     }
 }

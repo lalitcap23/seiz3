@@ -1,6 +1,6 @@
 "use client";
 
-import type { Snapshot } from "@afterbell/shared";
+import type { Snapshot } from "@seiz3/shared";
 import { useLive, useSnapshot } from "@/lib/api";
 import { ActivityFeed } from "./ActivityFeed";
 import { HedgeStrip } from "./HedgeStrip";

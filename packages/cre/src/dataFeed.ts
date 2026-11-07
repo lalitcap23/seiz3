@@ -2,7 +2,7 @@
 // the EVM capability. It is an independent check on HyperCore's oracle, the price the vault buys and hedges at: when
 // the two disagree by more than the vault's own oracle band, the report carries zero hedge capacity and the vault
 // stops buying. The check only applies while the feed is fresh, because a 24/5 feed doesn't update on weekends,
-// which is exactly when Afterbell has to keep working.
+// which is exactly when Seiz3 has to keep working.
 
 import { bytesToHex, encodeCallMsg, LAST_FINALIZED_BLOCK_NUMBER, type EVMClient, type Runtime } from "@chainlink/cre-sdk";
 import { decodeFunctionResult, encodeFunctionData, zeroAddress, type Address, type Hex } from "viem";

@@ -15,8 +15,8 @@ export default defineConfig({
       project: "../../contracts",
       forge: { build: false },
       include: [
-        "AfterbellVault.sol/**",
-        "AfterbellHook.sol/**",
+        "Seiz3Vault.sol/**",
+        "Seiz3Hook.sol/**",
         "RiskParams.sol/**",
         "MockNVDAx.sol/**",
         "DemoOracle.sol/**",
@@ -26,8 +26,8 @@ export default defineConfig({
         "PoolSwapTest.sol/**",
         // Base Sepolia architecture (contracts/src/remote): same vault/hook ABI plus the HyperCore gateway
         "HyperCoreGateway.sol/**",
-        "AfterbellVaultRemote.sol/**",
-        "AfterbellHookRemote.sol/**",
+        "Seiz3VaultRemote.sol/**",
+        "Seiz3HookRemote.sol/**",
       ],
     }),
   ],

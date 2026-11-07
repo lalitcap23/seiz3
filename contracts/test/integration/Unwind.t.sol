@@ -3,15 +3,15 @@ pragma solidity ^0.8.28;
 
 import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
-import {AfterbellBase} from "../utils/AfterbellBase.sol";
+import {Seiz3Base} from "../utils/Seiz3Base.sol";
 import {MockHyperCore} from "../utils/MockHyperCore.sol";
-import {IAfterbellVault} from "../../src/interfaces/IAfterbellVault.sol";
+import {ISeiz3Vault} from "../../src/interfaces/ISeiz3Vault.sol";
 import {RiskParams} from "../../src/RiskParams.sol";
 import {UnwindLib} from "../../src/libs/UnwindLib.sol";
 import {Units} from "../../src/libs/Units.sol";
 
 /// @notice Unwind loop against the real v4 PoolManager: stock and short shrink together, then settle.
-contract UnwindTest is AfterbellBase {
+contract UnwindTest is Seiz3Base {
     using PoolIdLibrary for *;
     using StateLibrary for *;
 
@@ -34,7 +34,7 @@ contract UnwindTest is AfterbellBase {
     // ─── guards ───────────────────────────────────────────────────────────
 
     function test_unwind_revertsWhilePoolIsOffOracle() public {
-        vm.expectRevert(IAfterbellVault.OracleBand.selector); // weekend pool still at $217
+        vm.expectRevert(ISeiz3Vault.OracleBand.selector); // weekend pool still at $217
         vault.unwindStep();
     }
 
@@ -44,7 +44,7 @@ contract UnwindTest is AfterbellBase {
         _setPrice(CRASH_PX * 90 / 100);
         vm.prank(keeper);
         vault.liquidate(market, lp2, 10e18);
-        vm.expectRevert(IAfterbellVault.HedgePending.selector);
+        vm.expectRevert(ISeiz3Vault.HedgePending.selector);
         vault.unwindStep();
     }
 
@@ -53,7 +53,7 @@ contract UnwindTest is AfterbellBase {
         vault.unwindStep();
         _nextBlock(5);
         vault.syncHedge();
-        vm.expectRevert(IAfterbellVault.Cooldown.selector); // 10s while open
+        vm.expectRevert(ISeiz3Vault.Cooldown.selector); // 10s while open
         vault.unwindStep();
         vm.warp(block.timestamp + 5);
         vault.unwindStep();
@@ -63,14 +63,14 @@ contract UnwindTest is AfterbellBase {
         vm.prank(owner);
         risk.setMarketOpen(false);
         vm.warp(block.timestamp + 60);
-        vm.expectRevert(IAfterbellVault.Cooldown.selector); // 300s while closed
+        vm.expectRevert(ISeiz3Vault.Cooldown.selector); // 300s while closed
         vault.unwindStep();
     }
 
     function test_unwind_revertsWhenTheShortDrifted() public {
         _monday();
         core.forcePosition(address(vault), -30_000, 30_000 * _raw(CRASH_PX));
-        vm.expectRevert(IAfterbellVault.HedgeDrift.selector); // never sell stock the short doesn't cover
+        vm.expectRevert(ISeiz3Vault.HedgeDrift.selector); // never sell stock the short doesn't cover
         vault.unwindStep();
     }
 
@@ -78,7 +78,7 @@ contract UnwindTest is AfterbellBase {
         _monday();
         vm.prank(owner);
         vault.pause();
-        vm.expectRevert(IAfterbellVault.VaultPaused.selector);
+        vm.expectRevert(ISeiz3Vault.VaultPaused.selector);
         vault.unwindStep();
         vm.prank(owner);
         vault.unpause();
@@ -95,13 +95,13 @@ contract UnwindTest is AfterbellBase {
         RiskParams.Params memory p = _risk();
         p.maxSlippageBps = 10; // pool fee alone is 30 bps
         _setRisk(p);
-        vm.expectRevert(IAfterbellVault.Slippage.selector);
+        vm.expectRevert(ISeiz3Vault.Slippage.selector);
         vault.unwindStep();
     }
 
     function test_unwind_revertsWithNoInventory() public {
-        AfterbellBase.setUp(); // fresh vault, nothing taken
-        vm.expectRevert(IAfterbellVault.NoInventory.selector);
+        Seiz3Base.setUp(); // fresh vault, nothing taken
+        vm.expectRevert(ISeiz3Vault.NoInventory.selector);
         vault.unwindStep();
     }
 
@@ -193,13 +193,13 @@ contract UnwindTest is AfterbellBase {
     }
 
     function test_withdrawMargin_onlyWhenFlat() public {
-        vm.expectRevert(IAfterbellVault.NotFlat.selector);
+        vm.expectRevert(ISeiz3Vault.NotFlat.selector);
         vault.withdrawMargin(1000e6);
     }
 
     function test_withdrawMargin_cannotExceedCore() public {
-        AfterbellBase.setUp(); // flat vault with CORE_MARGIN on xyz
-        vm.expectRevert(IAfterbellVault.ExceedsCore.selector);
+        Seiz3Base.setUp(); // flat vault with CORE_MARGIN on xyz
+        vm.expectRevert(ISeiz3Vault.ExceedsCore.selector);
         vault.withdrawMargin(CORE_MARGIN + 1);
         vault.withdrawMargin(CORE_MARGIN);
         _nextBlock(1);

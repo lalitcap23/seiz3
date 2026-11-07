@@ -1,4 +1,4 @@
-// The Afterbell relayer: HyperCoreGateway (Base Sepolia) ↔ the hedge account on HyperCore.
+// The Seiz3 relayer: HyperCoreGateway (Base Sepolia) ↔ the hedge account on HyperCore.
 //
 //   gateway.orders(n) ─► place on HyperCore (IOC, vault's cloid) ─► read the account ─► gateway.relay(snapshot, ack n)
 //   every HEARTBEAT_MS ─► gateway.relay(snapshot)         (keeps the vault's view of HyperCore inside maxStateAge)
@@ -6,7 +6,7 @@
 // BACKEND=hyperliquid trades the real hedge account (HL_PRIVATE_KEY); BACKEND=mock trades MockHyperCore on a local anvil.
 import { createPublicClient, createWalletClient, defineChain, http, type PublicClient } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { hyperCoreGatewayAbi } from "@afterbell/shared/abis";
+import { hyperCoreGatewayAbi } from "@seiz3/shared/abis";
 
 import { asHex, infraCore, loadDeployment, loadEnv } from "./config.js";
 import { HyperliquidBackend } from "./hyperliquid.js";

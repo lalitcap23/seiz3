@@ -1,4 +1,4 @@
-import type { ActivityEvent } from "@afterbell/shared";
+import type { ActivityEvent } from "@seiz3/shared";
 import { coreSize, nvdax, price, usd } from "@/lib/format";
 import { OpBadge, SoldToTag, type SoldTo } from "./OperationCard";
 import { Panel, TxLink } from "./ui";

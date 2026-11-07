@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { Snapshot } from "@afterbell/shared";
+import type { Snapshot } from "@seiz3/shared";
 import { API_URL, useSnapshot } from "@/lib/api";
 import { CHAIN_LABEL, dep, GAS } from "@/lib/chain";
 import { useMe, type Me } from "@/lib/me";
@@ -79,7 +79,7 @@ export function TryPage() {
   // the API's snapshot arrives every second over SSE; when something that touches this wallet changed (a vault event,
   // the vault's stock, this address's collateral or health), re-read the wallet's balances and position right away.
   // Not debt: interest moves it every second, and the browser shares the public RPC's rate limit.
-  const marketC = snapshot?.markets.find((m) => m.name === "C_afterbell");
+  const marketC = snapshot?.markets.find((m) => m.name === "C_seiz3");
   const myRow = marketC?.borrowers?.find((b) => b.address.toLowerCase() === address?.toLowerCase());
   const changed = snapshot
     ? [

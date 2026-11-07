@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import type { Snapshot } from "@afterbell/shared";
+import type { Snapshot } from "@seiz3/shared";
 import type { Tone } from "@/components/ui";
 import { nvdax, usd } from "./format";
 
@@ -50,7 +50,7 @@ let toasts: Note[] = [];
 let state: Notes = SERVER;
 const watchers = new Set<() => void>();
 
-const storageKey = (address: string) => `afterbell:notes:${address}`;
+const storageKey = (address: string) => `seiz3:notes:${address}`;
 
 function changed(persist = true) {
   if (persist && owner !== null) {
@@ -144,7 +144,7 @@ export function loanNotes(snapshot: Snapshot, address: string): Note[] {
       id: `op:${op.id}`,
       tone: "down",
       title: "Your loan was liquidated",
-      body: `${op.id}: the Afterbell vault bought ${nvdax(op.nvdax).toFixed(4)} NVDAx of your collateral, repaying ${usd(op.usdc, 2)} of your debt.`,
+      body: `${op.id}: the Seiz3 vault bought ${nvdax(op.nvdax).toFixed(4)} NVDAx of your collateral, repaying ${usd(op.usdc, 2)} of your debt.`,
       time: op.timestamp,
       tx: op.txHash,
     });
@@ -193,7 +193,7 @@ export function riskNote(status: string, ltv: number, lltv: number, now: number)
       id: `risk:liq:${now}`,
       tone: "down",
       title: "Your loan is liquidatable",
-      body: `LTV ${at} is past the ${limit} LLTV: the keeper liquidates it through the Afterbell vault.`,
+      body: `LTV ${at} is past the ${limit} LLTV: the keeper liquidates it through the Seiz3 vault.`,
       time: now,
     };
   }

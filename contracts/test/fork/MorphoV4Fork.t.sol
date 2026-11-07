@@ -69,7 +69,7 @@ contract MorphoV4ForkTest is SimBase {
         assertLt(vault.inventory(), SEIZE);
     }
 
-    /// @dev AfterbellHook on the deployed PoolManager: the pool initialises through it and a buy fills from the vault.
+    /// @dev Seiz3Hook on the deployed PoolManager: the pool initialises through it and a buy fills from the vault.
     function test_hookFill_onTheDeployedPoolManager() public {
         _hookFillAndSync();
     }

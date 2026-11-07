@@ -6,9 +6,9 @@ import {
   type HyperliquidPanel,
   type MarketSnapshot,
   type Snapshot,
-} from "@afterbell/shared";
+} from "@seiz3/shared";
 import { readChain, type ChainRead, type MarketRead } from "./chain.js";
-import type { DeploymentFile } from "@afterbell/shared/node";
+import type { DeploymentFile } from "@seiz3/shared/node";
 import { panelFromApi, panelFromCore } from "./hyperliquid.js";
 import { LogScanner, type LogScannerOptions } from "./logs.js";
 import { buildOperations, type CoreFill } from "./operations.js";

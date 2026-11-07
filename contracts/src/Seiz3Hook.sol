@@ -20,36 +20,36 @@ import {
     toBeforeSwapDelta
 } from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 
-import {AfterbellVault} from "./AfterbellVault.sol";
+import {Seiz3Vault} from "./Seiz3Vault.sol";
 import {RiskParams} from "./RiskParams.sol";
 import {HedgeLib} from "./libs/HedgeLib.sol";
 import {UnwindLib} from "./libs/UnwindLib.sol";
 import {Units} from "./libs/Units.sol";
 
-/// @dev The callbacks AfterbellHook's address must carry, and the only ones it implements. File-level so deploy
+/// @dev The callbacks Seiz3Hook's address must carry, and the only ones it implements. File-level so deploy
 ///      scripts and tests can mine or place the address before the hook exists.
-uint160 constant AFTERBELL_HOOK_FLAGS =
+uint160 constant SEIZ3_HOOK_FLAGS =
     Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG;
 
-/// @title AfterbellHook
+/// @title Seiz3Hook
 /// @notice Uniswap v4 hook on the vault's NVDAx/USDC pool. Buyers of NVDAx are filled from the vault's hedged
 ///         inventory at the HyperCore oracle price plus a spread, off the curve (`beforeSwap` returns a delta), and
-///         each fill queues the matching reduce-only buy on HyperCore through `AfterbellVault.onHookFill`. Whatever
+///         each fill queues the matching reduce-only buy on HyperCore through `Seiz3Vault.onHookFill`. Whatever
 ///         the hook doesn't fill goes to the curve at a fee set by market hours: wide after the bell, tight while
 ///         the stock market is open.
 /// @dev Fills follow `unwindStep`'s rules: no owner pause, no hedge in flight, the short within `maxUnhedged` of
 ///      −inventory, at most `maxUnhedged` per fill. A fill sets the vault's pending hedge, so the next one waits for
 ///      `syncHedge`. The hook only sells at its ask when the pool's own price is at or above it, so a buyer never
 ///      pays more than the curve's current price. It holds no tokens between swaps.
-contract AfterbellHook is IHooks, Ownable {
+contract Seiz3Hook is IHooks, Ownable {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
     using LPFeeLibrary for uint24;
 
     uint256 internal constant BPS = 10_000;
-    uint8 internal constant PAUSE_OWNER = 4; // AfterbellVault.PAUSE_OWNER
+    uint8 internal constant PAUSE_OWNER = 4; // Seiz3Vault.PAUSE_OWNER
 
-    uint160 public constant FLAGS = AFTERBELL_HOOK_FLAGS;
+    uint160 public constant FLAGS = SEIZ3_HOOK_FLAGS;
 
     struct Settings {
         uint16 spreadOpenBps; // ask over the Core oracle while the stock market is open
@@ -62,7 +62,7 @@ contract AfterbellHook is IHooks, Ownable {
     IPoolManager public immutable poolManager;
 
     // set once by `setVault`
-    AfterbellVault public vault;
+    Seiz3Vault public vault;
     PoolId public poolId;
     IERC20 public usdc;
     IERC20 public nvdax;
@@ -107,7 +107,7 @@ contract AfterbellHook is IHooks, Ownable {
 
     /// @notice Bind the hook to its vault, once. The vault's pool key must already name this hook with a dynamic
     ///         fee; until this runs, the pool can't be initialised or swapped.
-    function setVault(AfterbellVault v) external onlyOwner {
+    function setVault(Seiz3Vault v) external onlyOwner {
         if (address(vault) != address(0)) revert VaultAlreadySet();
         (Currency c0, Currency c1, uint24 fee, int24 tickSpacing, IHooks hooks) = v.poolKey();
         if (address(hooks) != address(this) || !fee.isDynamicFee() || address(v.poolManager()) != address(poolManager))
@@ -142,7 +142,7 @@ contract AfterbellHook is IHooks, Ownable {
     /// @return fee      LP fee (pips) a non-vault curve swap pays now
     /// @return open     the stock market flag the spread and fee were picked from
     function quote() public view returns (uint256 capacity, uint256 ask, uint24 fee, bool open) {
-        AfterbellVault v = vault;
+        Seiz3Vault v = vault;
         if (address(v) == address(0)) revert VaultNotSet();
         RiskParams risk = v.risk();
         open = risk.marketOpen();
@@ -159,7 +159,7 @@ contract AfterbellHook is IHooks, Ownable {
 
     /// @dev NVDAx the vault can sell at `ask` right now, on the Core size grid. `unwindStep`'s rules, plus the
     ///      pool's own price and the PoolManager's USDC.
-    function _capacity(AfterbellVault v, RiskParams.Params memory r, uint256 ask) internal view returns (uint256) {
+    function _capacity(Seiz3Vault v, RiskParams.Params memory r, uint256 ask) internal view returns (uint256) {
         if (v.pauseFlags() & PAUSE_OWNER != 0) return 0;
         (int64 pending,,,) = v.pendingHedge();
         uint256 inv = v.inventory();
@@ -232,7 +232,7 @@ contract AfterbellHook is IHooks, Ownable {
 
         // pay the vault from the PoolManager, then move the stock from the vault into it; the buyer's own
         // settlement after the swap closes both deltas
-        AfterbellVault v = vault;
+        Seiz3Vault v = vault;
         poolManager.take(Currency.wrap(address(usdc)), address(v), usdcIn);
         poolManager.sync(Currency.wrap(address(nvdax)));
         v.onHookFill(nvdaxOut, usdcIn);

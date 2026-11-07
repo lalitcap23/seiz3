@@ -19,7 +19,7 @@
 #   … and post a bid ≥ 1 NVDA on xyz:NVDA near the oracle (the bots' market maker does)
 #   scripts/testnet-stack.sh sweep           # the vault's spot USDC → xyz margin
 #   scripts/testnet-stack.sh status
-#   pnpm --filter @afterbell/keeper risk-engine:stub   # its own terminal
+#   pnpm --filter @seiz3/keeper risk-engine:stub   # its own terminal
 #   scripts/testnet-stack.sh keeper                    # its own terminal
 #   scripts/testnet-stack.sh crash           # market C oracle 1.4% under HyperCore's: the keeper liquidates and hedges
 #   scripts/testnet-stack.sh release         # after the liquidation: the bots move market C back to HyperCore's price
@@ -104,7 +104,7 @@ using_big_blocks() {
 }
 
 big_blocks() {
-  (cd "$ROOT" && pnpm --silent --filter @afterbell/bots hl-admin big-blocks "$1")
+  (cd "$ROOT" && pnpm --silent --filter @seiz3/bots hl-admin big-blocks "$1")
   echo "deployer $DEPLOYER using big blocks: $(using_big_blocks)"
 }
 
@@ -141,7 +141,7 @@ actors() {
     const fs = require("fs");
     const [path, address, px] = process.argv.slice(1);
     const dep = JSON.parse(fs.readFileSync(path, "utf8"));
-    dep.borrowers = [{ address, label: "C_afterbell" }];
+    dep.borrowers = [{ address, label: "C_seiz3" }];
     dep.demo = { borrowPriceUsd6: px };
     fs.writeFileSync(path, JSON.stringify(dep, null, 2) + "\n");
   ' "$DEP_JSON" "$DEPLOYER" "$px"
@@ -155,7 +155,7 @@ actors() {
 # the vault's margin, sent on HyperCore from HL_FUNDER_PRIVATE_KEY's spot USDC (not an API wallet); also creates its HyperCore account
 fund_core() {
   : "${HL_FUNDER_PRIVATE_KEY:=${HL_MM_PRIVATE_KEY:?set HL_FUNDER_PRIVATE_KEY (the wallet holding HyperCore USDC) in .env.local}}"
-  (cd "$ROOT" && pnpm --silent --filter @afterbell/bots hl-admin send-usdc "$(json "$DEP_JSON" vault)" \
+  (cd "$ROOT" && pnpm --silent --filter @seiz3/bots hl-admin send-usdc "$(json "$DEP_JSON" vault)" \
     "${1:-$CORE_MARGIN_USDC}")
 }
 
@@ -257,14 +257,14 @@ borrow() {
   local amount=${1:?usage: borrow <nvdax>} px oracle_px morpho id params nvdax wei pos mkt amt
   [[ -f $HOLD_FILE ]] && { echo "market C's oracle is on hold (after a crash): scripts/testnet-stack.sh release first" >&2; exit 1; }
   px=$(oracle_usd6)
-  oracle_px=$(call "$(json "$DEP_JSON" markets.C_afterbell.oracle)" "price()(uint256)")
+  oracle_px=$(call "$(json "$DEP_JSON" markets.C_seiz3.oracle)" "price()(uint256)")
   # DemoOracle price = usd6 × 1e18: wait for the oracle follower if market C isn't at HyperCore's price yet
   if [[ $oracle_px != "${px}000000000000000000" ]]; then
     echo "market C's oracle isn't at HyperCore's \$$(cast format-units "$px" 6) yet (the bots' oracle follower moves it)" >&2
     exit 1
   fi
   morpho=$(json "$DEP_JSON" morpho)
-  id=$(json "$DEP_JSON" markets.C_afterbell.id)
+  id=$(json "$DEP_JSON" markets.C_seiz3.id)
   params="($(cast call "$morpho" "idToMarketParams(bytes32)(address,address,address,address,uint256)" "$id" \
     --rpc-url "$RPC" | awk '{print $1}' | paste -sd, -))"
   nvdax=$(json "$DEP_JSON" nvdax)
@@ -368,7 +368,7 @@ crash() {
       "liquidatable (needs < \$$(cast format-units "$threshold" 6)) and anything lower is outside the oracle band" >&2
     exit 1
   fi
-  oracle=$(json "$DEP_JSON" markets.C_afterbell.oracle)
+  oracle=$(json "$DEP_JSON" markets.C_seiz3.oracle)
   echo crash >"$HOLD_FILE" # or the oracle follower puts it straight back
   send "$oracle" "setPrice(uint256)" "${target}000000000000000000"
   echo "market C oracle \$$(cast format-units "$target" 6), HyperCore \$$(cast format-units "$live" 6): the keeper should liquidate"
@@ -385,7 +385,7 @@ bots() {
   local which=${BOTS:-oracle,pool,alerts}
   [[ -n ${HL_MM_PRIVATE_KEY:-} && -z ${BOTS:-} ]] && which=oracle,pool,mm,alerts
   RPC_URL=$RPC NETWORK=testnet DEPLOYMENTS_PATH=$DEP_JSON HOLD_FILE=$HOLD_FILE BOTS=$which \
-    exec pnpm --filter @afterbell/bots start
+    exec pnpm --filter @seiz3/bots start
 }
 
 status() {
@@ -402,7 +402,7 @@ status() {
     "inventory()(uint256)" --rpc-url "$RPC" | awk '{print $1}')" 18)  confirmedShort=$(cast call "$vault" \
     "confirmedShort()(int64)" --rpc-url "$RPC")  paused=$(cast call "$vault" "paused()(bool)" --rpc-url "$RPC")"
   echo "prices       HyperCore=\$$(cast format-units "$(oracle_usd6)" 6)  market C=\$$(cast format-units \
-    "$(cast call "$(json "$DEP_JSON" markets.C_afterbell.oracle)" "price()(uint256)" --rpc-url "$RPC" |
+    "$(cast call "$(json "$DEP_JSON" markets.C_seiz3.oracle)" "price()(uint256)" --rpc-url "$RPC" |
       awk '{print $1}')" 24)"
   curl -s -m 15 "$API" -H 'Content-Type: application/json' -d '{"type":"l2Book","coin":"xyz:NVDA"}' | node -e '
     let s = "";
@@ -485,7 +485,7 @@ reclaim() {
 
   # Morpho: repay the deployer's own loans, then take back whatever supply isn't lent out
   local name id params shares borrowShares supply borrow free
-  for name in A_naive B_conservative C_afterbell; do
+  for name in A_naive B_conservative C_seiz3; do
     id=$(json "$DEP_JSON" "markets.$name.id")
     params="($(cast call "$morpho" "idToMarketParams(bytes32)(address,address,address,address,uint256)" "$id" \
       --rpc-url "$RPC" | awk '{print $1}' | paste -sd, -))"
@@ -561,7 +561,7 @@ cre_loop() {
   set +e
   while true; do
     out=$(cre_feed --broadcast 2>&1)
-    line=$(grep -E "Afterbell market feed:|workflow execution failed" <<<"$out" | tail -1 | sed -E 's/^.*\] //')
+    line=$(grep -E "Seiz3 market feed:|workflow execution failed" <<<"$out" | tail -1 | sed -E 's/^.*\] //')
     echo "$(date -u +%H:%M:%S) ${line:-no result: $(grep -v '^[[:space:]]*$' <<<"$out" | tail -1 | cut -c1-200)}"
     sleep "$interval"
   done
@@ -600,7 +600,7 @@ keeper() {
   RPC_URL=$RPC LOGS_RPC_URL=${LOGS_RPC_URL:-https://998.rpc.thirdweb.com} \
     KEEPER_PK=$KEEPER_PRIVATE_KEY DEPLOYMENTS_PATH=$DEP_JSON KILL_SWITCH_FILE=$ROOT/deployments/KILL \
     MORPHO_API_ENABLED=0 IDLE_RESERVE_USDC=1000000000 TICK_MS=${TICK_MS:-2000} \
-    exec pnpm --filter @afterbell/keeper start
+    exec pnpm --filter @seiz3/keeper start
 }
 
 case "${1:-}" in

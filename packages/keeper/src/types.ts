@@ -1,5 +1,5 @@
 /**
- * Frozen type surface for the Afterbell keeper.
+ * Frozen type surface for the Seiz3 keeper.
  *
  * All on-chain numbers are bigint. Never Number, never floating point.
  *
@@ -15,7 +15,7 @@
 export type Address = `0x${string}`;
 export type Hex = `0x${string}`;
 
-/** Mirrors IAfterbellVault.Pending. */
+/** Mirrors ISeiz3Vault.Pending. */
 export interface PendingHedge {
   readonly delta: bigint;
   readonly sentBlock: bigint;
@@ -130,7 +130,7 @@ export interface DeploymentInfo {
   readonly chainId: bigint;
   readonly vault: Address;
   readonly morpho: Address;
-  /** markets.C_afterbell.id: the one market the vault allow-lists */
+  /** markets.C_seiz3.id: the one market the vault allow-lists */
   readonly marketId: Hex;
   /** Morpho can't enumerate a market's borrowers; setup scripts list the ones they opened. */
   readonly borrowers: readonly DeploymentBorrower[];
@@ -139,7 +139,7 @@ export interface DeploymentInfo {
   /** xyz:NVDA size decimals and order id (deployments hypercore). */
   readonly szDecimals?: number;
   readonly perpAsset?: number;
-  /** AfterbellHook on the vault's pool (deployments hook), if the deployment has one. */
+  /** Seiz3Hook on the vault's pool (deployments hook), if the deployment has one. */
   readonly hook?: Address;
 }
 

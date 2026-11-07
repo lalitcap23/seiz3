@@ -5,7 +5,7 @@ import {MarketParams} from "@morpho-blue/interfaces/IMorpho.sol";
 
 /// @notice Frozen at hour 0–1. Keeper, API and replay build against this + the events below.
 ///         Additions since the freeze are append-only (new views, events and errors); nothing was renamed.
-interface IAfterbellVault {
+interface ISeiz3Vault {
     struct Pending {
         int64 delta; // signed Core size of the unconfirmed order (negative = more short)
         uint64 sentBlock;
@@ -82,7 +82,7 @@ interface IAfterbellVault {
     function syncHedge() external;
     function unwindStep() external;
 
-    // ─── hook-facing (AfterbellHook, the pool key's hook) ─────────────────
+    // ─── hook-facing (Seiz3Hook, the pool key's hook) ─────────────────
     function onHookFill(uint256 sold, uint256 usdcIn) external;
     function topUpMargin(uint256 amount) external;
     function withdrawMargin(uint256 amount) external;

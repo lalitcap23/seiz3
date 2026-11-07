@@ -1,4 +1,4 @@
-import type { HyperliquidPanel as Position } from "@afterbell/shared";
+import type { HyperliquidPanel as Position } from "@seiz3/shared";
 import { price } from "@/lib/format";
 import { KV, Label, Panel, Tag } from "./ui";
 

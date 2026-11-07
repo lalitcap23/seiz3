@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { erc20Abi, maxUint256 } from "viem";
-import { poolSwapTestAbi } from "@afterbell/shared/abis";
-import { priceLimit } from "@afterbell/shared/pool";
+import { poolSwapTestAbi } from "@seiz3/shared/abis";
+import { priceLimit } from "@seiz3/shared/pool";
 import { dep } from "@/lib/chain";
 import { useHookQuote } from "@/lib/hook";
 import type { Me } from "@/lib/me";
@@ -16,7 +16,7 @@ const CORE_UNIT = 1e-3; // the hook sells whole Core size units (szDecimals 3)
 const TITLE = "Swap · Uniswap v4";
 
 /**
- * USDC ↔ NVDAx on the vault's Uniswap v4 pool, through v4-core's PoolSwapTest router. With AfterbellHook on the pool,
+ * USDC ↔ NVDAx on the vault's Uniswap v4 pool, through v4-core's PoolSwapTest router. With Seiz3Hook on the pool,
  * a buy is filled first from the vault's hedged stock at its ask, and the rest goes to the curve at the hook's fee.
  */
 export function SwapCard({ me }: { me: Me | undefined }) {

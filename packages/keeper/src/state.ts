@@ -8,11 +8,11 @@ import {
   type ReadContractParameters,
 } from "viem";
 import {
-  afterbellVaultAbi,
+  seiz3VaultAbi,
   demoOracleAbi,
   iMorphoAbi,
   riskParamsAbi,
-} from "@afterbell/shared/abis";
+} from "@seiz3/shared/abis";
 
 import { accruedBorrowAssets, borrowAssetsOf, buildReports, mergeCandidates } from "./riskCalc.js";
 import { describeError } from "./riskEngine.js";
@@ -250,7 +250,7 @@ function read<
 function vaultRead(
   address: Address,
   functionName: Extract<
-    ContractFunctionName<typeof afterbellVaultAbi, "pure" | "view">,
+    ContractFunctionName<typeof seiz3VaultAbi, "pure" | "view">,
     | "pendingHedge"
     | "inventory"
     | "confirmedShort"
@@ -263,7 +263,7 @@ function vaultRead(
     | "usdc"
   >,
 ): ReadCall {
-  return read({ address, abi: afterbellVaultAbi, functionName });
+  return read({ address, abi: seiz3VaultAbi, functionName });
 }
 
 async function multiCall(

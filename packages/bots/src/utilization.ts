@@ -1,5 +1,5 @@
 import { erc20Abi, maxUint256, parseAbi, type Address } from "viem";
-import { demoOracleAbi, iMorphoAbi, mockNvdAxAbi } from "@afterbell/shared/abis";
+import { demoOracleAbi, iMorphoAbi, mockNvdAxAbi } from "@seiz3/shared/abis";
 import { dep, log, owner, read, send, usd } from "./chain.js";
 import { env } from "./env.js";
 
@@ -31,7 +31,7 @@ let approved = false;
 export async function holdUtilization(): Promise<void> {
   if (env.UTIL_FREE_USDC === undefined) return;
   const target = BigInt(Math.round(env.UTIL_FREE_USDC * 1e6));
-  const id = dep.markets.C_afterbell.id;
+  const id = dep.markets.C_seiz3.id;
   const me = owner!.address;
   const [params, market, position] = await Promise.all([
     read<MarketParams>(dep.morpho, iMorphoAbi, "idToMarketParams", [id]),

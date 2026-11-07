@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { HedgeOrder, Operation } from "@afterbell/shared";
+import type { HedgeOrder, Operation } from "@seiz3/shared";
 import { EVM_EXPLORER, EVM_NAME, HL_ACCOUNT_URL, HL_EXPLORER_TX } from "@/lib/chain";
 import { shortHash, usd } from "@/lib/format";
 import { CoreLink, Tag, TxLink } from "./ui";
@@ -16,7 +16,7 @@ export type SoldTo = "buyer" | "pool";
 /** Where an unwind's stock went: into the Uniswap v4 curve (the keeper's push), or straight to a buyer (the hook). */
 export function SoldToTag({ to }: { to: SoldTo }) {
   return to === "buyer" ? (
-    <Tag tone="up" title="AfterbellHook sold the vault's stock to a buyer at HyperCore's oracle + spread, off the curve">
+    <Tag tone="up" title="Seiz3Hook sold the vault's stock to a buyer at HyperCore's oracle + spread, off the curve">
       → user · hook
     </Tag>
   ) : (

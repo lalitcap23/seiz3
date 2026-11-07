@@ -92,7 +92,7 @@ export async function checkBuyLiquidity(
 }
 
 /**
- * A hook fill (AfterbellHook) sells stock to a buyer inside their swap and sends the buy-back at once, so no gate runs
+ * A hook fill (Seiz3Hook) sells stock to a buyer inside their swap and sends the buy-back at once, so no gate runs
  * before it. While the vault holds stock its hook can sell, keep an ask request standing for the most one fill can
  * take (min(stock, maxUnhedged)), so asks are on the book whenever a buyer comes. Returns the size requested, NVDA.
  */

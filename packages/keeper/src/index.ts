@@ -133,7 +133,7 @@ async function main(): Promise<void> {
     try {
       await tick();
     } catch (error) {
-      metrics.inc("afterbell_keeper_tick_errors_total");
+      metrics.inc("seiz3_keeper_tick_errors_total");
       logger.error({ event: "tick-error", error: describeError(error) });
     } finally {
       if (!stopped) timer = setTimeout(() => void loop(), cfg.tickMs);
@@ -141,7 +141,7 @@ async function main(): Promise<void> {
   };
 
   async function tick(): Promise<void> {
-    metrics.inc("afterbell_keeper_ticks_total");
+    metrics.inc("seiz3_keeper_ticks_total");
     const nowMs = Date.now();
     if (killSwitchActive(cfg)) {
       telemetry.tick(null);
@@ -180,12 +180,12 @@ async function main(): Promise<void> {
     telemetry.setSnapshot(serializePollExport(buildPollExport(state, scan, morphoApiSnapshot, cfg)));
 
     const request = buildRiskRequest(state, scan, now, cfg);
-    metrics.inc("afterbell_keeper_risk_engine_requests_total");
+    metrics.inc("seiz3_keeper_risk_engine_requests_total");
     const result = await riskEngine.decide(request);
 
     if (!result.ok) {
       riskStatus.lastError = result.error;
-      metrics.inc("afterbell_keeper_risk_engine_errors_total");
+      metrics.inc("seiz3_keeper_risk_engine_errors_total");
       telemetry.decision(null, "risk-engine-error");
       logDecision(state, scan, null, "risk-engine-error", null, {
         error: result.error,
@@ -198,7 +198,7 @@ async function main(): Promise<void> {
     riskStatus.lastOkAtMs = Date.now();
     riskStatus.lastError = null;
     riskStatus.lastLatencyMs = result.latencyMs;
-    metrics.inc("afterbell_keeper_risk_engine_ok_total");
+    metrics.inc("seiz3_keeper_risk_engine_ok_total");
     const decision: RiskDecision = result.decision;
 
     if (decision.action === null) {
@@ -264,7 +264,7 @@ async function main(): Promise<void> {
 
     switch (execution.status) {
       case "skipped": {
-        metrics.inc("afterbell_keeper_actions_skipped_total", { reason: execution.reason });
+        metrics.inc("seiz3_keeper_actions_skipped_total", { reason: execution.reason });
         telemetry.decision(decision.action.kind, execution.reason);
         logDecision(state, scan, decision, execution.reason, null, {
           latencyMs: result.latencyMs,
@@ -276,7 +276,7 @@ async function main(): Promise<void> {
       case "simulation-reverted": {
         // Nothing was sent: the contract's own checks said no (pool out of band, low Core margin, ...).
         // The spec says skip, so this doesn't count toward the breaker.
-        metrics.inc("afterbell_keeper_simulation_reverts_total", { action: decision.action.kind });
+        metrics.inc("seiz3_keeper_simulation_reverts_total", { action: decision.action.kind });
         telemetry.decision(decision.action.kind, "simulation-reverted");
         logDecision(state, scan, decision, "simulation-reverted", null, {
           reason: execution.reason,
@@ -287,7 +287,7 @@ async function main(): Promise<void> {
         return;
       }
       case "dry-run": {
-        metrics.inc("afterbell_keeper_dry_runs_total", { action: decision.action.kind });
+        metrics.inc("seiz3_keeper_dry_runs_total", { action: decision.action.kind });
         telemetry.decision(decision.action.kind, "dry-run");
         logDecision(state, scan, decision, "dry-run", null, {
           gas: execution.gas,
@@ -297,12 +297,12 @@ async function main(): Promise<void> {
         return;
       }
       case "sent": {
-        metrics.inc("afterbell_keeper_sends_total", { action: decision.action.kind });
-        metrics.inc("afterbell_keeper_receipts_ok_total");
+        metrics.inc("seiz3_keeper_sends_total", { action: decision.action.kind });
+        metrics.inc("seiz3_keeper_receipts_ok_total");
         const verdict = await verifySentAction(state, decision.action);
         if (!verdict.ok) {
           breaker.recordFailure(nowMs);
-          metrics.inc("afterbell_keeper_verify_failed_total", { action: decision.action.kind });
+          metrics.inc("seiz3_keeper_verify_failed_total", { action: decision.action.kind });
           telemetry.decision(decision.action.kind, "verify-failed");
           logDecision(state, scan, decision, "verify-failed", execution.hash, {
             gas: execution.gas,
@@ -328,7 +328,7 @@ async function main(): Promise<void> {
       }
       default: {
         breaker.recordFailure(nowMs);
-        metrics.inc("afterbell_keeper_failures_total", { status: execution.status });
+        metrics.inc("seiz3_keeper_failures_total", { status: execution.status });
         telemetry.decision(decision.action.kind, execution.status);
         const failureReason = "reason" in execution ? execution.reason : execution.status;
         logDecision(state, scan, decision, execution.status, "hash" in execution ? execution.hash : null, {
@@ -365,10 +365,10 @@ async function main(): Promise<void> {
     try {
       // the logs RPC can sit a block behind the main one, and refuses a range past its own head
       scannedBorrowers = await borrowerScan.poll(state.blockNumber - 2n);
-      metrics.set("afterbell_keeper_scanned_borrowers", scannedBorrowers.length);
-      metrics.set("afterbell_keeper_borrower_scan_behind_blocks", Number(borrowerScan.behind(state.blockNumber)));
+      metrics.set("seiz3_keeper_scanned_borrowers", scannedBorrowers.length);
+      metrics.set("seiz3_keeper_borrower_scan_behind_blocks", Number(borrowerScan.behind(state.blockNumber)));
     } catch (error) {
-      metrics.inc("afterbell_keeper_borrower_scan_errors_total");
+      metrics.inc("seiz3_keeper_borrower_scan_errors_total");
       logger.error({ event: "borrower-scan-error", error: describeError(error) });
     }
   }
@@ -382,12 +382,12 @@ async function main(): Promise<void> {
           cfg.deployments.marketId,
           cfg.chainId,
         );
-        metrics.set("afterbell_morpho_api_positions", morphoApiSnapshot.positions.length, {
+        metrics.set("seiz3_morpho_api_positions", morphoApiSnapshot.positions.length, {
           market: cfg.deployments.marketId,
         });
         logMorphoApi(morphoApiSnapshot);
       } catch (error) {
-        metrics.inc("afterbell_morpho_api_errors_total");
+        metrics.inc("seiz3_morpho_api_errors_total");
         logger.error({ event: "morpho-api-error", error: describeError(error) });
       }
     }

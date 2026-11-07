@@ -4,11 +4,11 @@ pragma solidity ^0.8.28;
 import {Script, console} from "forge-std/Script.sol";
 import {IMorpho, MarketParams, Id} from "@morpho-blue/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "@morpho-blue/libraries/MarketParamsLib.sol";
-import {AfterbellVault} from "../src/AfterbellVault.sol";
+import {Seiz3Vault} from "../src/Seiz3Vault.sol";
 import {DemoOracle} from "../src/mocks/DemoOracle.sol";
 import {DeployHelpers} from "./DeployHelpers.sol";
 
-/// @notice Creates the three demo Morpho markets (A naive, B conservative, C Afterbell), allow-lists C on the
+/// @notice Creates the three demo Morpho markets (A naive, B conservative, C Seiz3), allow-lists C on the
 ///         vault and merges `markets` into deployments/<NETWORK>.json. Run after Deploy.s.sol.
 /// Each market gets its OWN DemoOracle, otherwise A and C (same tokens + LLTV) collapse into one market id.
 /// VERIFY (spike 5): enabled LLTVs + IRM on Morpho's HyperEVM deployment.
@@ -35,7 +35,7 @@ contract CreateMarkets is Script {
         IMorpho morpho = IMorpho(vm.parseJsonAddress(dep, ".morpho"));
         address usdc = vm.parseJsonAddress(dep, ".usdc");
         address nvdax = vm.parseJsonAddress(dep, ".nvdax");
-        AfterbellVault vault = AfterbellVault(vm.parseJsonAddress(dep, ".vault"));
+        Seiz3Vault vault = Seiz3Vault(vm.parseJsonAddress(dep, ".vault"));
         address irm = vm.envAddress("MORPHO_IRM_ADDRESS");
         uint256 startPrice = vm.envOr("START_PRICE_USD6", uint256(217e6)) * MORPHO_SCALE;
 
@@ -53,7 +53,7 @@ contract CreateMarkets is Script {
     }
 
     function _write(string memory path, string memory dep, Id[3] memory ids, address[3] memory oracles) internal {
-        string[3] memory names = ["A_naive", "B_conservative", "C_afterbell"];
+        string[3] memory names = ["A_naive", "B_conservative", "C_seiz3"];
         string memory marketsJson;
         for (uint256 i; i < 3; ++i) {
             vm.serializeBytes32(names[i], "id", Id.unwrap(ids[i]));

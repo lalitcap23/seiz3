@@ -1,12 +1,12 @@
-# Afterbell: system architecture
+# Seiz3: system architecture
 
 Oct 18, 2026 · @green apple
 
 ## System at a glance
 
-Afterbell is one money-holding contract (`AfterbellVault`) on HyperEVM that buys seized stock collateral from a Morpho market, shorts the same stock on HyperCore in the same transaction, and later sells the stock into Uniswap v4 while closing the short in step. Everything else either feeds it prices, pokes its public functions, or shows what it is doing.
+Seiz3 is one money-holding contract (`Seiz3Vault`) on HyperEVM that buys seized stock collateral from a Morpho market, shorts the same stock on HyperCore in the same transaction, and later sells the stock into Uniswap v4 while closing the short in step. Everything else either feeds it prices, pokes its public functions, or shows what it is doing.
 
-&#91;embedded content: Afterbell system context · 3 layers, 11 components\]
+&#91;embedded content: Seiz3 system context · 3 layers, 11 components\]
 
 Read it top down: off-chain processes only call or read; every arrow that moves money starts or ends at the vault, and HyperCore is reached only through CoreWriter (writes) and the precompiles (reads).
 
@@ -22,11 +22,11 @@ The one rule that shapes the whole design: **a HyperCore order sent from the EVM
 
 ## Components
 
-There are eleven components; only `AfterbellVault` holds LP money, and only the vault's own address trades on HyperCore.
+There are eleven components; only `Seiz3Vault` holds LP money, and only the vault's own address trades on HyperCore.
 
 | Component | Layer | What it owns or does | Talks to | Owner |
 | --- | --- | --- | --- | --- |
-| `AfterbellVault` | HyperEVM | ERC-4626 vault in USDC. Holds idle USDC and NVDAx inventory, owns the HyperCore trading account (same address), enforces risk checks and the hedge invariant | Morpho (liquidate + callback), CoreWriter (writes), read precompiles (reads), Uniswap v4 PoolManager (swaps), CoreDepositWallet (USDC to Core) | Contracts |
+| `Seiz3Vault` | HyperEVM | ERC-4626 vault in USDC. Holds idle USDC and NVDAx inventory, owns the HyperCore trading account (same address), enforces risk checks and the hedge invariant | Morpho (liquidate + callback), CoreWriter (writes), read precompiles (reads), Uniswap v4 PoolManager (swaps), CoreDepositWallet (USDC to Core) | Contracts |
 | `HedgeLib` | HyperEVM (library) | Encodes CoreWriter actions (limit order, USD class transfer, spot send), reads position, oracle price and asset info, converts sizes and prices to Core units | CoreWriter, precompiles (through hyper-evm-lib) | Contracts |
 | `UnwindLib` | HyperEVM (library) | Sells one chunk of NVDAx into the v4 pool via `unlock` → `unlockCallback`, enforces `minAmountOut` | Uniswap v4 PoolManager | Keeper/integration |
 | `RiskParams` | HyperEVM | Owner-set caps: max size, leverage, buffer, max unhedged, slippage, oracle band, retries | Read by the vault | Contracts |
@@ -45,10 +45,10 @@ Two contracts that are *not* ours but sit in the path: the **CoreWriter** system
 Use one monorepo with a Foundry project for contracts and a pnpm workspace for everything TypeScript, so ABIs and addresses flow from one `deployments/*.json` file into every off-chain package.
 
 ```
-afterbell/
+seiz3/
 ├─ contracts/                  # Foundry
 │  ├─ src/
-│  │  ├─ AfterbellVault.sol      # ERC-4626 + liquidate/callback/sync/unwind
+│  │  ├─ Seiz3Vault.sol      # ERC-4626 + liquidate/callback/sync/unwind
 │  │  ├─ RiskParams.sol
 │  │  ├─ libs/HedgeLib.sol       # CoreWriter encode + precompile reads
 │  │  ├─ libs/UnwindLib.sol      # Uniswap v4 swap via unlock callback
@@ -77,7 +77,7 @@ afterbell/
 
 HyperEVM has [two block types](https://docs.chainstack.com/docs/hyperliquid-corewriter): fast blocks (about 1 s, 3M gas) and slow big blocks (about 1 min, 30M gas). Deploying the vault will likely need big blocks, so flip the deployer into big-block mode before `forge script` and back afterwards; keep runtime calls under the small-block limit.
 
-## AfterbellVault internals
+## Seiz3Vault internals
 
 The vault is one contract with four jobs: LP bookkeeping, buying collateral, keeping the hedge matched, and unwinding. Keep it one contract (with libraries) so the HyperCore account and the funds share one address.
 
@@ -165,7 +165,7 @@ function _limitOrder(uint32 asset, bool isBuy, uint64 px, uint64 sz, bool reduce
 }
 ```
 
-| Action id | Name | Params | Afterbell uses it for |
+| Action id | Name | Params | Seiz3 uses it for |
 | --- | --- | --- | --- |
 | 1 | Limit order | `(uint32 asset, bool isBuy, uint64 limitPx, uint64 sz, bool reduceOnly, uint8 tif, uint128 cloid)`; tif 1 = Alo, 2 = Gtc, 3 = Ioc | Opening the short (sell, IOC, price floor = oracle − 1%) and reducing it (buy, reduce-only, IOC, price cap = oracle + 1%) |
 | 6 | Spot send | `(address dest, uint64 token, uint64 wei)` | Pulling USDC back to HyperEVM by sending to the system address `0x2000…0000` |
@@ -178,7 +178,7 @@ Use a `cloid` on every order (for example `keccak(liquidationId, try)` truncated
 
 Read precompiles start at `0x…0800`. Each address is one query; calldata is the raw ABI-encoded arguments with no function selector. They return HyperCore state as of when the EVM block was built, so you can never see the result of a CoreWriter action in the same transaction. A call with an invalid asset or address reverts and consumes all gas given to it, so wrap reads in a gas-limited `staticcall`.
 
-| Address | Read | Afterbell uses it in |
+| Address | Read | Seiz3 uses it in |
 | --- | --- | --- |
 | `0x…0800` | `position(user, perp)` → `szi`, entry notional, isolated margin, leverage | `syncHedge`, `totalAssets` |
 | `0x…0807` | `oraclePx(asset)` | Oracle band check, order price caps, `totalAssets` |
@@ -405,7 +405,7 @@ The dashboard never talks to the chain directly; a small API process polls Hyper
 
 **Screen layout (from the demo script)**
 
-1. Three columns, Market A naive, Market B conservative, Market C Afterbell: debt, collateral value, LTV, bad debt (red when non-zero).
+1. Three columns, Market A naive, Market B conservative, Market C Seiz3: debt, collateral value, LTV, bad debt (red when non-zero).
 2. A Hyperliquid panel: the vault's `xyz:NVDA` position size, entry, uPnL, margin, and a link to the vault address on a Hyperliquid explorer so judges can see it is real.
 3. A strip along the bottom: inventory bar, short bar, hedge ratio (`|short| / inventory`, green within `maxUnhedged`), LP share price.
 
@@ -413,14 +413,14 @@ Show the hedge ratio as the hero number: a judge should see it dip to 0% for a f
 
 ## Demo replay orchestration
 
-The replay is a TypeScript script that drives scripted on-chain actions step by step from a clicker, so the same 3-minute story plays identically every time; only the Afterbell hedge touches a market we don't control.
+The replay is a TypeScript script that drives scripted on-chain actions step by step from a clicker, so the same 3-minute story plays identically every time; only the Seiz3 hedge touches a market we don't control.
 
 **Setup (run once, before judging)**
 
 1. Deploy `MockNVDAx`, three `DemoOracle` instances and three Morpho markets. Morpho identifies a market by its parameters, so give each market its own oracle address; otherwise A and C (same tokens, same LLTV) collapse into one market.
 2. Market A and C: LLTV 77%. Market B: a low LLTV such as 38.5% (**verify** which LLTVs are enabled on Morpho's HyperEVM deployment).
 3. Supply USDC to each market as a lender; create one borrower per market with the same NVDAx collateral, each borrowing close to its limit.
-4. Seed the v4 NVDAx/USDC pool **thin** (weekend conditions), deposit LP USDC into `AfterbellVault`, and fund its HyperCore margin.
+4. Seed the v4 NVDAx/USDC pool **thin** (weekend conditions), deposit LP USDC into `Seiz3Vault`, and fund its HyperCore margin.
 
 **Show (each row is one click)**
 
@@ -429,7 +429,7 @@ The replay is a TypeScript script that drives scripted on-chain actions step by 
 | Scene | Sets all three oracles to the drop price at once | All three borrowers turn red |
 | Market A, naive | `NaiveLiquidator` seizes collateral and dumps it into the thin pool; proceeds fall short of the debt (see below) | Bad debt in red under column A |
 | Market B, conservative | Nothing to liquidate: the borrower is still healthy | No bad debt, but a borrow limit of about 40% |
-| Market C, Afterbell | Keeper calls `vault.liquidate`; then `syncHedge` | Lenders repaid at once; hedge ratio 0% → 100%; the short appears in the Hyperliquid panel |
+| Market C, Seiz3 | Keeper calls `vault.liquidate`; then `syncHedge` | Lenders repaid at once; hedge ratio 0% → 100%; the short appears in the Hyperliquid panel |
 | Monday | Adds deep liquidity to the pool (makers return), flips the market-open flag, runs `unwindStep` in a loop | Inventory and short shrink together; share price ticks up |
 
 For Market A, decide before the event how bad debt is made visible. One straightforward way: `NaiveLiquidator` liquidates in Morpho's callback, swaps the seized collateral for whatever the thin pool pays, and tops up the shortfall from its own balance so the transaction succeeds; the dashboard then reports the shortfall as "bad debt the lenders would have eaten". This keeps the contract simple and the story honest.
@@ -479,7 +479,7 @@ Agree the interfaces in the first hour, then the three people build in parallel 
 
 | Interface | Between | Contents |
 | --- | --- | --- |
-| `IAfterbellVault` | Contracts → keeper, API | `liquidate`, `syncHedge`, `unwindStep`, `topUpMargin`, `withdrawMargin`, view getters for every state field |
+| `ISeiz3Vault` | Contracts → keeper, API | `liquidate`, `syncHedge`, `unwindStep`, `topUpMargin`, `withdrawMargin`, view getters for every state field |
 | Vault events | Contracts → API | `LiquidationTaken`, `HedgeSent`, `HedgeConfirmed`, `HedgeStuck`, `Unwound`, `MarginMoved` with `cloid` where relevant |
 | `deployments/<net>.json` | Deploy script → everyone | Addresses, Morpho market ids, pool key, `perpAsset`, `perpDexIndex`, `szDecimals` |
 | Snapshot JSON | API → web | The shape `/snapshot` and `/stream` return; the frontend builds against a fixture of it from hour 1 |
@@ -496,7 +496,7 @@ Agree the interfaces in the first hour, then the three people build in parallel 
 | 24–30 | Fixes from end-to-end runs | End-to-end runs | Dashboard on live data |
 | 30–36 | Freeze | Rehearse, backup video | README with these diagrams, slides, submission |
 
-If the hedge has not landed by hour 12, switch the demo to the simulator for the Afterbell column and show the testnet order separately, as the PRD says.
+If the hedge has not landed by hour 12, switch the demo to the simulator for the Seiz3 column and show the testnet order separately, as the PRD says.
 
 ## Gotchas and pre-kickoff spikes
 
@@ -521,7 +521,7 @@ Six spikes before 4 Nov settle every **verify** in this doc; do them in throwawa
 
 ## Sources
 
-- [Afterbell: PRD and architecture](https://claude.ai/code/artifact/0f189994-0b56-44ec-ba08-508ad64d9357)
+- [Seiz3: PRD and architecture](https://claude.ai/code/artifact/0f189994-0b56-44ec-ba08-508ad64d9357)
 - [Hyperliquid docs: CoreWriter and read precompiles](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/evm/system-contract)
 - [Hyperliquid docs: interacting with HyperCore](https://hyperliquid.gitbook.io/Hyperliquid-docs/for-developers/hyperevm/interacting-with-hypercore)
 - [Hyperliquid docs: HIP-3 builder-deployed perpetuals](https://hyperliquid.gitbook.io/Hyperliquid-docs/hyperliquid-improvement-proposals-hips/hip-3-builder-deployed-perpetuals)

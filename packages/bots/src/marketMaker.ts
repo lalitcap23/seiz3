@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { ExchangeClient, HttpTransport, InfoClient } from "@nktkas/hyperliquid";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Hex } from "viem";
-import { PERP_COIN, PERP_DEX } from "@afterbell/shared";
-import { afterbellVaultAbi, riskParamsAbi } from "@afterbell/shared/abis";
+import { PERP_COIN, PERP_DEX } from "@seiz3/shared";
+import { seiz3VaultAbi, riskParamsAbi } from "@seiz3/shared/abis";
 import { dep, log, read } from "./chain.js";
 import { env } from "./env.js";
 
@@ -43,8 +43,8 @@ export class MarketMaker {
       this.info.metaAndAssetCtxs({ dex: PERP_DEX }),
       this.info.openOrders({ user: this.user, dex: PERP_DEX }),
       this.account(),
-      read<readonly [bigint, bigint, bigint, number]>(dep.vault, afterbellVaultAbi, "pendingHedge"),
-      read<bigint>(dep.vault, afterbellVaultAbi, "inventory"),
+      read<readonly [bigint, bigint, bigint, number]>(dep.vault, seiz3VaultAbi, "pendingHedge"),
+      read<bigint>(dep.vault, seiz3VaultAbi, "inventory"),
       read<{ maxUnhedged: bigint }>(dep.riskParams, riskParamsAbi, "get"),
     ]);
     // > 0: the vault wants to buy back that many Core size units, now (pending) or in its next unwind (the request)

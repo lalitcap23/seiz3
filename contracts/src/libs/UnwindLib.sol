@@ -15,7 +15,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 /// @notice NVDAx → USDC swaps on the v4 pool plus the price maths around them.
 ///         `swapExactIn` may only be called from inside `unlockCallback`.
 /// @dev The swap and pool reads are `external`, so this deploys as a linked library (delegatecall keeps the
-///      caller's context). That keeps AfterbellVault under the 24 KB code-size limit.
+///      caller's context). That keeps Seiz3Vault under the 24 KB code-size limit.
 library UnwindLib {
     using SafeERC20 for IERC20;
     using PoolIdLibrary for PoolKey;

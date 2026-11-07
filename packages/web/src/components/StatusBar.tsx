@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Snapshot } from "@afterbell/shared";
+import type { Snapshot } from "@seiz3/shared";
 import { nvdax, price, signedPct } from "@/lib/format";
 import { Label, Tag, type Tone } from "./ui";
 

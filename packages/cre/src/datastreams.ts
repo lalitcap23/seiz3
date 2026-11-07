@@ -45,7 +45,7 @@ const nonNegative = (x: bigint) => (x > 0n ? x / E12 : 0n);
 export const MARKET_OPEN = 2;
 
 const REPORT_PATH = "/api/v1/reports/latest";
-const USER_AGENT = "afterbell-cre/1.0";
+const USER_AGENT = "seiz3-cre/1.0";
 
 // ASCII only (method, path, hex, the key's UUID, digits): no TextEncoder needed in the WASM runtime
 const ascii = (s: string): Uint8Array => Uint8Array.from(s, (c) => c.charCodeAt(0));

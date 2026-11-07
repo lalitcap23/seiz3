@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { afterbellHookAbi } from "@afterbell/shared/abis";
+import { seiz3HookAbi } from "@seiz3/shared/abis";
 import { dep, publicClient } from "./chain";
 
 export interface HookQuote {
@@ -12,7 +12,7 @@ export interface HookQuote {
 }
 
 /**
- * AfterbellHook.quote(), every 10 s, on deployments with a hook: what a buyer would get from the vault's hedged stock.
+ * Seiz3Hook.quote(), every 10 s, on deployments with a hook: what a buyer would get from the vault's hedged stock.
  * Null while the hook's HyperCore reads fail (the swap then just uses the curve).
  */
 export function useHookQuote() {
@@ -24,7 +24,7 @@ export function useHookQuote() {
       try {
         const [capacity, askUsd6, fee, open] = await publicClient.readContract({
           address: dep.hook!,
-          abi: afterbellHookAbi,
+          abi: seiz3HookAbi,
           functionName: "quote",
         });
         return { capacity, askUsd6, fee: Number(fee), open };

@@ -26,7 +26,7 @@ export function makeChain(cfg: Pick<Config, "chainId" | "rpcUrl">): Chain {
   }
   return defineChain({
     id,
-    name: "afterbell",
+    name: "seiz3",
     nativeCurrency: { name: "HYPE", symbol: "HYPE", decimals: 18 },
     rpcUrls: { default: { http: [cfg.rpcUrl] } },
     contracts: {

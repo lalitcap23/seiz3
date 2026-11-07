@@ -12,7 +12,7 @@ export function WalletBar({ me }: { me: Me | undefined }) {
   const { address, hasWallet, onChain, connect, switchChain } = useWallet();
 
   if (!hasWallet) {
-    return <Card title="Account" hint={`Install MetaMask or Rabby to try Afterbell on ${CHAIN_LABEL}.`} />;
+    return <Card title="Account" hint={`Install MetaMask or Rabby to try Seiz3 on ${CHAIN_LABEL}.`} />;
   }
   if (address === null) {
     return (

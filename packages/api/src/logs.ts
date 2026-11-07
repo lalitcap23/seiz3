@@ -1,9 +1,9 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { parseAbiItem, toHex, type AbiEvent, type Address, type PublicClient } from "viem";
-import { afterbellHookAbi, afterbellVaultAbi, naiveLiquidatorAbi } from "@afterbell/shared/abis";
-import type { ActivityEvent, MarketLiquidation, MarketName } from "@afterbell/shared";
+import { seiz3HookAbi, seiz3VaultAbi, naiveLiquidatorAbi } from "@seiz3/shared/abis";
+import type { ActivityEvent, MarketLiquidation, MarketName } from "@seiz3/shared";
 import { MARKETS } from "./chain.js";
-import type { DeploymentFile } from "@afterbell/shared/node";
+import type { DeploymentFile } from "@seiz3/shared/node";
 
 const ACTIVITY: readonly string[] = [
   "LiquidationTaken",
@@ -22,12 +22,12 @@ const morphoLiquidate = parseAbiItem(
 const morphoBorrow = parseAbiItem(
   "event Borrow(bytes32 indexed id, address caller, address indexed onBehalf, address indexed receiver, uint256 assets, uint256 shares)",
 );
-const vaultEvents = afterbellVaultAbi.filter(
-  (item): item is Extract<(typeof afterbellVaultAbi)[number], { type: "event" }> =>
+const vaultEvents = seiz3VaultAbi.filter(
+  (item): item is Extract<(typeof seiz3VaultAbi)[number], { type: "event" }> =>
     item.type === "event" && ACTIVITY.includes(item.name),
 );
-const hookFill = afterbellHookAbi.find(
-  (item): item is Extract<(typeof afterbellHookAbi)[number], { type: "event"; name: "InventoryFill" }> =>
+const hookFill = seiz3HookAbi.find(
+  (item): item is Extract<(typeof seiz3HookAbi)[number], { type: "event"; name: "InventoryFill" }> =>
     item.type === "event" && item.name === "InventoryFill",
 );
 const shortfall = naiveLiquidatorAbi.find(

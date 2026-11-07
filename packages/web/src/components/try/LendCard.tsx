@@ -1,7 +1,7 @@
 "use client";
 
 import { erc20Abi, maxUint256 } from "viem";
-import { iMorphoAbi } from "@afterbell/shared/abis";
+import { iMorphoAbi } from "@seiz3/shared/abis";
 import { dep } from "@/lib/chain";
 import type { Me } from "@/lib/me";
 import { useWallet } from "@/lib/wallet";
@@ -10,7 +10,7 @@ import { Action, AmountInput, Card, Note, Rows, fmt, useAmount } from "./ui";
 const TITLE = "Lend · Morpho Market C";
 
 /**
- * Supply USDC to market C, the market borrowers draw on and the vault liquidates. Lenders are who Afterbell protects:
+ * Supply USDC to market C, the market borrowers draw on and the vault liquidates. Lenders are who Seiz3 protects:
  * when a borrower goes under, the vault repays their debt in full and takes the stock, so no bad debt reaches them.
  */
 export function LendCard({ me }: { me: Me | undefined }) {
@@ -68,7 +68,7 @@ export function LendCard({ me }: { me: Me | undefined }) {
         />
       )}
       <Note>
-        Interest accrues every second (Morpho&apos;s AdaptiveCurve rate model). If a borrower goes under, the Afterbell
+        Interest accrues every second (Morpho&apos;s AdaptiveCurve rate model). If a borrower goes under, the Seiz3
         vault liquidates them right away and repays the loan in full, so lenders never sit on bad debt.
       </Note>
     </Card>

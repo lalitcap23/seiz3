@@ -1,6 +1,6 @@
 "use client";
 
-import type { Operation } from "@afterbell/shared";
+import type { Operation } from "@seiz3/shared";
 import { OperationCard } from "../OperationCard";
 import { Label, Panel } from "../ui";
 

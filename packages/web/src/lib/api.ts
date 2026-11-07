@@ -2,10 +2,10 @@
 
 import { replaceEqualDeep, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useSyncExternalStore } from "react";
-import type { HistoryPoint, Snapshot } from "@afterbell/shared";
-import fixtureJson from "@afterbell/shared/fixtures/snapshot.json";
+import type { HistoryPoint, Snapshot } from "@seiz3/shared";
+import fixtureJson from "@seiz3/shared/fixtures/snapshot.json";
 // a subpath, not the package root: Turbopack can't resolve the root's "./x.js" re-exports to TS sources
-import { snapshotSchema } from "@afterbell/shared/types";
+import { snapshotSchema } from "@seiz3/shared/types";
 
 /** The demo snapshot, with the schema's defaults for fields added after it was recorded. */
 const fixture = snapshotSchema.parse(fixtureJson);

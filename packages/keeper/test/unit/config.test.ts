@@ -17,9 +17,9 @@ const deployment = {
   markets: {
     A_naive: { id: `0x${"aa".repeat(32)}`, oracle: VAULT, lltv: "770000000000000000" },
     B_conservative: { id: `0x${"bb".repeat(32)}`, oracle: VAULT, lltv: "385000000000000000" },
-    C_afterbell: { id: MARKET_C, oracle: VAULT, lltv: "770000000000000000" },
+    C_seiz3: { id: MARKET_C, oracle: VAULT, lltv: "770000000000000000" },
   },
-  borrowers: [{ address: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC", label: "C_afterbell" }],
+  borrowers: [{ address: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC", label: "C_seiz3" }],
 };
 
 const baseEnv: NodeJS.ProcessEnv = {
@@ -44,7 +44,7 @@ describe("config: loadConfig", () => {
     expect(cfg.killSwitchEnv).toBe(false);
     expect(cfg.deployments.borrowers[0]).toEqual({
       address: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
-      label: "C_afterbell",
+      label: "C_seiz3",
     });
   });
 

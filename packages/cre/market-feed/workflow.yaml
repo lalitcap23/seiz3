@@ -1,8 +1,8 @@
-# CRE workflow settings for the Afterbell market feed. Paths are relative to this folder.
+# CRE workflow settings for the Seiz3 market feed. Paths are relative to this folder.
 #   cre workflow simulate market-feed --target staging-settings              (from packages/cre)
 staging-settings:
   user-workflow:
-    workflow-name: "afterbell-market-feed-staging"
+    workflow-name: "seiz3-market-feed-staging"
   workflow-artifacts:
     workflow-path: "./main.ts"
     config-path: "./config.staging.json"
@@ -10,7 +10,7 @@ staging-settings:
 
 production-settings:
   user-workflow:
-    workflow-name: "afterbell-market-feed"
+    workflow-name: "seiz3-market-feed"
   workflow-artifacts:
     workflow-path: "./main.ts"
     config-path: "./config.production.json"

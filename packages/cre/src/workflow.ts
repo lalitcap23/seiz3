@@ -1,4 +1,4 @@
-// Afterbell market feed for the Chainlink Runtime Environment (CRE).
+// Seiz3 market feed for the Chainlink Runtime Environment (CRE).
 //
 // The vault needs two facts it can't read on-chain, and has to trust both:
 //   1. Is the US stock market open?  Chainlink Data Streams' `marketStatus` for NVDA, or, while the Data Streams key
@@ -187,7 +187,7 @@ export function onCronTrigger(runtime: Runtime<Config>): string {
     (check ? `, Chainlink gap ${check.gapBps} bps` : "") +
     (reply.txHash && reply.txHash.length > 0 ? `, tx ${bytesHex(reply.txHash)}` : "") +
     attested;
-  runtime.log(`Afterbell market feed: ${summary}`);
+  runtime.log(`Seiz3 market feed: ${summary}`);
   return summary;
 }
 

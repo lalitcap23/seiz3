@@ -14,7 +14,7 @@ COPY packages/bots/package.json packages/bots/
 COPY packages/shared/package.json packages/shared/
 COPY packages/web/package.json packages/web/
 
-RUN pnpm install --frozen-lockfile --filter @afterbell/web...
+RUN pnpm install --frozen-lockfile --filter @seiz3/web...
 
 COPY packages/shared ./packages/shared
 COPY packages/web ./packages/web
@@ -31,8 +31,8 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
     NEXT_PUBLIC_USE_FIXTURE=0 \
     NEXT_TELEMETRY_DISABLED=1
 
-RUN pnpm --filter @afterbell/web build
+RUN pnpm --filter @seiz3/web build
 
 USER node
 EXPOSE 3000
-CMD ["pnpm", "--filter", "@afterbell/web", "start", "--port", "3000"]
+CMD ["pnpm", "--filter", "@seiz3/web", "start", "--port", "3000"]

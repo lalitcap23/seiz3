@@ -10,8 +10,8 @@ import {
   type PublicClient,
 } from "viem";
 import {
-  afterbellHookAbi,
-  afterbellVaultAbi,
+  seiz3HookAbi,
+  seiz3VaultAbi,
   demoOracleAbi,
   faucetAbi,
   iMorphoAbi,
@@ -19,8 +19,8 @@ import {
   poolSeederAbi,
   poolSwapTestAbi,
   riskParamsAbi,
-} from "@afterbell/shared/abis";
-import type { DeploymentFile } from "@afterbell/shared/node";
+} from "@seiz3/shared/abis";
+import type { DeploymentFile } from "@seiz3/shared/node";
 
 /** Everything the web's /tx/<hash> page shows: HyperEVM testnet has no working public explorer. */
 export interface TxView {
@@ -60,8 +60,8 @@ const morphoEventsAbi = parseAbi([
 ]);
 
 const ABIS: Abi[] = [
-  afterbellVaultAbi,
-  afterbellHookAbi,
+  seiz3VaultAbi,
+  seiz3HookAbi,
   morphoEventsAbi,
   iMorphoAbi,
   naiveLiquidatorAbi,
@@ -73,12 +73,12 @@ const ABIS: Abi[] = [
   erc20Abi,
 ];
 
-/** What the deployment's addresses are, for "to: Afterbell vault" instead of a bare hex. */
+/** What the deployment's addresses are, for "to: Seiz3 vault" instead of a bare hex. */
 function names(dep: DeploymentFile): Map<string, { name: string; abi: Abi }> {
   const m = new Map<string, { name: string; abi: Abi }>();
   const add = (a: string | undefined, name: string, abi: Abi) => a && m.set(a.toLowerCase(), { name, abi });
-  add(dep.vault, "Afterbell vault", afterbellVaultAbi);
-  add(dep.hook, "AfterbellHook (v4 hook)", afterbellHookAbi);
+  add(dep.vault, "Seiz3 vault", seiz3VaultAbi);
+  add(dep.hook, "Seiz3Hook (v4 hook)", seiz3HookAbi);
   add(dep.morpho, "Morpho Blue", [...iMorphoAbi, ...morphoEventsAbi]);
   add(dep.naiveLiquidator, "NaiveLiquidator (market A)", naiveLiquidatorAbi);
   add(dep.faucet, "Faucet", faucetAbi);

@@ -28,7 +28,7 @@ export const marketLiquidationSchema = z.object({
 });
 
 export const marketSnapshotSchema = z.object({
-  name: z.enum(["A_naive", "B_conservative", "C_afterbell"]),
+  name: z.enum(["A_naive", "B_conservative", "C_seiz3"]),
   lltv: z.number(), // 0.77
   totalBorrow: bigintString, // USDC 6 dec
   totalCollateral: bigintString, // NVDAx 18 dec
@@ -88,7 +88,7 @@ export const activityEventSchema = z.object({
     "HedgeStuck",
     "Unwound",
     "MarginMoved",
-    "InventoryFill", // AfterbellHook: a buyer was filled from the vault's stock
+    "InventoryFill", // Seiz3Hook: a buyer was filled from the vault's stock
   ]),
   txHash: z.string(),
   blockNumber: bigintString,
@@ -135,7 +135,7 @@ export const operationSchema = z.object({
   soldTo: z.enum(["buyer", "pool"]).nullable().default(null),
 });
 
-/** AfterbellHook's quote: what a buyer of NVDAx gets from the vault right now. */
+/** Seiz3Hook's quote: what a buyer of NVDAx gets from the vault right now. */
 export const hookSnapshotSchema = z.object({
   address: z.string(),
   ask: z.number(), // USD per NVDAx the vault sells at: Core oracle × (1 + spread)

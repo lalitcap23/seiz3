@@ -1,7 +1,7 @@
 "use client";
 
 import { erc20Abi, maxUint256 } from "viem";
-import { afterbellVaultAbi } from "@afterbell/shared/abis";
+import { seiz3VaultAbi } from "@seiz3/shared/abis";
 import { dep } from "@/lib/chain";
 import type { Me } from "@/lib/me";
 import { useWallet } from "@/lib/wallet";
@@ -23,7 +23,7 @@ export function VaultCard({ me }: { me: Me | undefined }) {
     if (me!.allowance.usdcVault < amount) {
       if (!(await write("Approve USDC", dep.usdc, erc20Abi, "approve", [dep.vault, maxUint256]))) return;
     }
-    if (await write("Deposit", dep.vault, afterbellVaultAbi, "deposit", [amount, address])) deposit.setText("");
+    if (await write("Deposit", dep.vault, seiz3VaultAbi, "deposit", [amount, address])) deposit.setText("");
   }
 
   return (
@@ -51,7 +51,7 @@ export function VaultCard({ me }: { me: Me | undefined }) {
             <Action
               tone="plain"
               label={instant ? "Withdraw all" : "Withdraw all (queued)"}
-              onClick={() => write("Withdraw", dep.vault, afterbellVaultAbi, "requestWithdraw", [v.shares])}
+              onClick={() => write("Withdraw", dep.vault, seiz3VaultAbi, "requestWithdraw", [v.shares])}
               className="flex-1"
             />
           )}
@@ -59,7 +59,7 @@ export function VaultCard({ me }: { me: Me | undefined }) {
             <Action
               tone="plain"
               label="Claim queued"
-              onClick={() => write("Claim", dep.vault, afterbellVaultAbi, "claimQueued", [])}
+              onClick={() => write("Claim", dep.vault, seiz3VaultAbi, "claimQueued", [])}
               className="flex-1"
             />
           )}

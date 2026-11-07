@@ -16,8 +16,8 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 
-import {AfterbellVault} from "../../src/AfterbellVault.sol";
-import {AfterbellHook, AFTERBELL_HOOK_FLAGS} from "../../src/AfterbellHook.sol";
+import {Seiz3Vault} from "../../src/Seiz3Vault.sol";
+import {Seiz3Hook, SEIZ3_HOOK_FLAGS} from "../../src/Seiz3Hook.sol";
 import {RiskParams} from "../../src/RiskParams.sol";
 import {UnwindLib} from "../../src/libs/UnwindLib.sol";
 import {Units} from "../../src/libs/Units.sol";
@@ -39,10 +39,10 @@ contract MockUSDC is ERC20 {
     }
 }
 
-/// @notice Real Morpho Blue + real Uniswap v4 PoolManager (deployed from their own artifacts) + AfterbellHook on the
+/// @notice Real Morpho Blue + real Uniswap v4 PoolManager (deployed from their own artifacts) + Seiz3Hook on the
 ///         vault's pool + MockHyperCore. After setUp the vault holds LP_DEPOSIT, its Core account is live with
 ///         CORE_MARGIN on xyz, market C is allow-listed and a borrower sits at 76% LTV ready to be pushed under water.
-abstract contract AfterbellBase is Test {
+abstract contract Seiz3Base is Test {
     using MarketParamsLib for MarketParams;
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
@@ -78,7 +78,7 @@ abstract contract AfterbellBase is Test {
     MarketParams internal market;
 
     IPoolManager internal pm;
-    AfterbellHook internal hook;
+    Seiz3Hook internal hook;
     PoolKey internal key;
     bool internal nvdax0;
     PoolSeeder internal seeder;
@@ -87,7 +87,7 @@ abstract contract AfterbellBase is Test {
     MockHyperCore internal core;
     MockCoreDepositWallet internal depositWallet;
     RiskParams internal risk;
-    AfterbellVault internal vault;
+    Seiz3Vault internal vault;
 
     function setUp() public virtual {
         vm.warp(1_760_000_000);
@@ -152,13 +152,13 @@ abstract contract AfterbellBase is Test {
 
     /// @dev v4 reads a hook's permissions from its address. A fresh address per PoolManager keeps a re-run
     ///      `setUp` from landing on the previous hook's storage.
-    function _deployHook(IPoolManager pm_, address owner_) internal returns (AfterbellHook) {
+    function _deployHook(IPoolManager pm_, address owner_) internal returns (Seiz3Hook) {
         address at = address(
-            uint160(uint256(keccak256(abi.encode(address(pm_), "afterbell-hook")))) & ~Hooks.ALL_HOOK_MASK
-                | AFTERBELL_HOOK_FLAGS
+            uint160(uint256(keccak256(abi.encode(address(pm_), "seiz3-hook")))) & ~Hooks.ALL_HOOK_MASK
+                | SEIZ3_HOOK_FLAGS
         );
-        deployCodeTo("AfterbellHook.sol:AfterbellHook", abi.encode(pm_, owner_), at);
-        return AfterbellHook(at);
+        deployCodeTo("Seiz3Hook.sol:Seiz3Hook", abi.encode(pm_, owner_), at);
+        return Seiz3Hook(at);
     }
 
     /// @dev USDC side of the pool seeded in setUp. Override for weekend (thin) conditions.
@@ -166,10 +166,10 @@ abstract contract AfterbellBase is Test {
         return POOL_DEPTH;
     }
 
-    function _newVault() internal returns (AfterbellVault) {
-        return new AfterbellVault(
+    function _newVault() internal returns (Seiz3Vault) {
+        return new Seiz3Vault(
             owner,
-            AfterbellVault.Wiring({
+            Seiz3Vault.Wiring({
                 usdc: IERC20(address(usdc)),
                 nvdax: IERC20(address(nvdax)),
                 morpho: morpho,

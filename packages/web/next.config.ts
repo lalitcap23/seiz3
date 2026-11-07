@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { NextConfig } from "next";
 
-// @afterbell/shared bundles testnet.json and mainnet.json; the Base Sepolia deployment (deployments/ is git-ignored
+// @seiz3/shared bundles testnet.json and mainnet.json; the Base Sepolia deployment (deployments/ is git-ignored
 // apart from those two) reaches the browser here, read once at build / dev start
 const env: Record<string, string> = {};
 if (process.env.NEXT_PUBLIC_NETWORK === "base-sepolia") {
@@ -15,7 +15,7 @@ if (process.env.NEXT_PUBLIC_NETWORK === "base-sepolia") {
 const nextConfig: NextConfig = {
   env,
   // shared ships TS source; Next compiles it
-  transpilePackages: ["@afterbell/shared"],
+  transpilePackages: ["@seiz3/shared"],
   cacheComponents: true,
   partialPrefetching: true,
   reactCompiler: true,

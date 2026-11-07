@@ -14,7 +14,7 @@
 # keeper's borrower scan uses thirdweb too. The public RPC rate-limits this IP along with the browser and the wallet.
 # deployments/ is shared with the host: testnet.json, the keeper's KILL switch, the bots' BOTS_HOLD, the API's
 # feed-cache.testnet.json (scanned history, so a restart doesn't reload it).
-name: afterbell-testnet
+name: seiz3-testnet
 
 x-logs-rpc: &logs-rpc https://998.rpc.thirdweb.com
 
@@ -22,7 +22,7 @@ x-service: &service
   build:
     context: .
     dockerfile: docker/services.Dockerfile
-  image: afterbell-services:testnet
+  image: seiz3-services:testnet
   restart: unless-stopped
   env_file: .env.local
   volumes:
@@ -31,7 +31,7 @@ x-service: &service
 services:
   risk-engine:
     <<: *service
-    command: ["pnpm", "--filter", "@afterbell/keeper", "risk-engine:stub"]
+    command: ["pnpm", "--filter", "@seiz3/keeper", "risk-engine:stub"]
     environment:
       RISK_ENGINE_PORT: "8081"
     healthcheck:
@@ -49,7 +49,7 @@ services:
     command:
       - sh
       - -c
-      - KEEPER_PK=$$KEEPER_PRIVATE_KEY RPC_URL=$${RPC_URL:-https://rpc.hyperliquid-testnet.xyz/evm} exec pnpm --filter @afterbell/keeper start
+      - KEEPER_PK=$$KEEPER_PRIVATE_KEY RPC_URL=$${RPC_URL:-https://rpc.hyperliquid-testnet.xyz/evm} exec pnpm --filter @seiz3/keeper start
     environment:
       DEPLOYMENTS_PATH: /app/deployments/testnet.json
       KILL_SWITCH_FILE: /app/deployments/KILL
@@ -75,7 +75,7 @@ services:
 
   api:
     <<: *service
-    command: ["pnpm", "--filter", "@afterbell/api", "start"]
+    command: ["pnpm", "--filter", "@seiz3/api", "start"]
     ports: ["8787:8787"]
     environment:
       NETWORK: testnet
@@ -92,7 +92,7 @@ services:
   bots:
     <<: *service
     depends_on: [api]
-    command: ["pnpm", "--filter", "@afterbell/bots", "start"]
+    command: ["pnpm", "--filter", "@seiz3/bots", "start"]
     environment:
       NETWORK: testnet
       # buyer: a demo buyer filled from the vault by the hook while the keeper unwinds into the curve (both ways shown)
@@ -116,7 +116,7 @@ services:
       args:
         NEXT_PUBLIC_API_URL: http://localhost:8787 # the API as the browser reaches it
         NEXT_PUBLIC_NETWORK: testnet
-    image: afterbell-web:testnet
+    image: seiz3-web:testnet
     restart: unless-stopped
     depends_on: [api]
     ports: ["${WEB_PORT:-3000}:3000"] # WEB_PORT=3001 pnpm testnet:up when 3000 is taken

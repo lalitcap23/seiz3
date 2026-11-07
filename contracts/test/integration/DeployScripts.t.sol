@@ -18,9 +18,9 @@ import {TestnetExtras} from "../../script/TestnetExtras.s.sol";
 import {NaiveLiquidator} from "../../src/mocks/NaiveLiquidator.sol";
 import {Faucet} from "../../src/mocks/Faucet.sol";
 import {DeployHelpers} from "../../script/DeployHelpers.sol";
-import {AfterbellVault} from "../../src/AfterbellVault.sol";
-import {AfterbellHook, AFTERBELL_HOOK_FLAGS} from "../../src/AfterbellHook.sol";
-import {MockUSDC} from "../utils/AfterbellBase.sol";
+import {Seiz3Vault} from "../../src/Seiz3Vault.sol";
+import {Seiz3Hook, SEIZ3_HOOK_FLAGS} from "../../src/Seiz3Hook.sol";
+import {MockUSDC} from "../utils/Seiz3Base.sol";
 import {MockHyperCore} from "../utils/MockHyperCore.sol";
 
 /// @notice Runs Deploy → CreateMarkets → SeedPool (thin, then deep) the way `forge script` does: in a plain
@@ -68,7 +68,7 @@ contract DeployScriptsTest is Test {
         vm.pauseGasMetering(); // the whole stack takes more than the 30M a test may use
         string memory path = DeployHelpers.deploymentPath(vm.projectRoot(), NETWORK);
 
-        AfterbellVault vault = _deployStep(path);
+        Seiz3Vault vault = _deployStep(path);
         _marketsStep(path, vault);
         (uint128 thin, uint128 deep) = _seedStep(path, vault);
         _extrasStep(path, vault, thin, deep);
@@ -77,10 +77,10 @@ contract DeployScriptsTest is Test {
     }
 
     /// @dev 1. deploy + seed deposit + Core activation; the hook is mined, deployed and bound to the vault
-    function _deployStep(string memory path) internal returns (AfterbellVault vault) {
+    function _deployStep(string memory path) internal returns (Seiz3Vault vault) {
         Deploy(deployCode("Deploy.s.sol:Deploy")).run();
         string memory json = vm.readFile(path);
-        vault = AfterbellVault(vm.parseJsonAddress(json, ".vault"));
+        vault = Seiz3Vault(vm.parseJsonAddress(json, ".vault"));
         assertEq(vault.owner(), DEFAULT_SENDER, "owned by the broadcaster");
         assertGt(vault.balanceOf(DEFAULT_SENDER), 0, "seed shares");
         assertEq(usdc.balanceOf(address(vault)), 8e6, "10 USDC seed, 2 sent to Core");
@@ -89,10 +89,10 @@ contract DeployScriptsTest is Test {
         assertEq(vm.parseJsonUint(json, ".hypercore.perpIndex"), 10_002);
         assertEq(vm.parseJsonAddress(json, ".coreDepositWallet"), wallet);
 
-        AfterbellHook hook = AfterbellHook(vm.parseJsonAddress(json, ".hook"));
+        Seiz3Hook hook = Seiz3Hook(vm.parseJsonAddress(json, ".hook"));
         assertEq(address(hook.vault()), address(vault), "hook bound to the vault");
         assertEq(hook.owner(), DEFAULT_SENDER);
-        assertEq(uint160(address(hook)) & Hooks.ALL_HOOK_MASK, AFTERBELL_HOOK_FLAGS, "mined address carries the flags");
+        assertEq(uint160(address(hook)) & Hooks.ALL_HOOK_MASK, SEIZ3_HOOK_FLAGS, "mined address carries the flags");
         assertEq(address(_key(vault).hooks), address(hook), "vault's pool key names the hook");
         assertEq(_key(vault).fee, LPFeeLibrary.DYNAMIC_FEE_FLAG);
         assertEq(vm.parseJsonAddress(json, ".poolKey.hooks"), address(hook));
@@ -101,11 +101,11 @@ contract DeployScriptsTest is Test {
     }
 
     /// @dev 2. markets merged into the same file; C allow-listed on the vault
-    function _marketsStep(string memory path, AfterbellVault vault) internal {
+    function _marketsStep(string memory path, Seiz3Vault vault) internal {
         CreateMarkets(deployCode("CreateMarkets.s.sol:CreateMarkets")).run();
         string memory json = vm.readFile(path);
         assertEq(vm.parseJsonAddress(json, ".vault"), address(vault), "deploy output preserved");
-        Id c = Id.wrap(vm.parseJsonBytes32(json, ".markets.C_afterbell.id"));
+        Id c = Id.wrap(vm.parseJsonBytes32(json, ".markets.C_seiz3.id"));
         Id a = Id.wrap(vm.parseJsonBytes32(json, ".markets.A_naive.id"));
         assertTrue(vault.marketAllowed(c));
         assertFalse(vault.marketAllowed(a));
@@ -114,7 +114,7 @@ contract DeployScriptsTest is Test {
     }
 
     /// @dev 3. weekend depth on market A's own hookless pool; the vault's hooked pool is initialised by the deep seed
-    function _seedStep(string memory path, AfterbellVault vault) internal returns (uint128 thin, uint128 deep) {
+    function _seedStep(string memory path, Seiz3Vault vault) internal returns (uint128 thin, uint128 deep) {
         PoolId vaultPool = PoolIdLibrary.toId(_key(vault));
         PoolId thinPool = PoolIdLibrary.toId(_thinKey(vm.readFile(path)));
         SeedPool(deployCode("SeedPool.s.sol:SeedPool")).run(); // THIN defaults to true
@@ -134,7 +134,7 @@ contract DeployScriptsTest is Test {
     }
 
     /// @dev 4. testnet extras: faucet, swap router, and a fresh market A liquidator on the same thin pool
-    function _extrasStep(string memory path, AfterbellVault vault, uint128 thin, uint128 deep) internal {
+    function _extrasStep(string memory path, Seiz3Vault vault, uint128 thin, uint128 deep) internal {
         string memory json = vm.readFile(path);
         address oldNaive = vm.parseJsonAddress(json, ".naiveLiquidator");
         address hook = vm.parseJsonAddress(json, ".hook");
@@ -157,7 +157,7 @@ contract DeployScriptsTest is Test {
         assertEq(pm.getLiquidity(PoolIdLibrary.toId(_key(vault))), deep, "the vault's pool untouched");
     }
 
-    function _key(AfterbellVault vault) internal view returns (PoolKey memory key) {
+    function _key(Seiz3Vault vault) internal view returns (PoolKey memory key) {
         (key.currency0, key.currency1, key.fee, key.tickSpacing, key.hooks) = vault.poolKey();
     }
 

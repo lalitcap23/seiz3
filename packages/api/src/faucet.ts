@@ -1,6 +1,6 @@
 import { createWalletClient, http, isAddress, type Address, type Chain, type Hex, type PublicClient } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { faucetAbi } from "@afterbell/shared/abis";
+import { faucetAbi } from "@seiz3/shared/abis";
 
 export type DripResult =
   | { ok: true; hash: Hex }

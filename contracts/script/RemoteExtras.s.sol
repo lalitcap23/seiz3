@@ -7,8 +7,8 @@ import {IMorpho, MarketParams, Id} from "@morpho-blue/interfaces/IMorpho.sol";
 
 import {Faucet} from "../src/mocks/Faucet.sol";
 import {MockNVDAx} from "../src/mocks/MockNVDAx.sol";
-import {MockUSDC} from "../test/utils/AfterbellBase.sol";
-import {AfterbellVaultRemote} from "../src/remote/AfterbellVaultRemote.sol";
+import {MockUSDC} from "../test/utils/Seiz3Base.sol";
+import {Seiz3VaultRemote} from "../src/remote/Seiz3VaultRemote.sol";
 import {DeployHelpers} from "./DeployHelpers.sol";
 
 /// @notice TestnetExtras.s.sol for the Base Sepolia architecture: what people trying the /try page need, after
@@ -26,7 +26,7 @@ contract RemoteExtras is Script {
         string memory network = vm.envOr("NETWORK", string("base-sepolia"));
         string memory path = DeployHelpers.deploymentPath(vm.projectRoot(), network);
         string memory dep = vm.readFile(path);
-        AfterbellVaultRemote vault = AfterbellVaultRemote(vm.parseJsonAddress(dep, ".vault"));
+        Seiz3VaultRemote vault = Seiz3VaultRemote(vm.parseJsonAddress(dep, ".vault"));
 
         vm.startBroadcast();
         (, address deployer,) = vm.readCallers();
@@ -42,7 +42,7 @@ contract RemoteExtras is Script {
     }
 
     /// @dev The deployment's Faucet if it has one, else a new one; funded either way.
-    function _faucet(string memory dep, AfterbellVaultRemote vault, address deployer) internal returns (Faucet faucet) {
+    function _faucet(string memory dep, Seiz3VaultRemote vault, address deployer) internal returns (Faucet faucet) {
         address existing = vm.keyExistsJson(dep, ".faucet") ? vm.parseJsonAddress(dep, ".faucet") : address(0);
         if (existing != address(0) && existing.code.length > 0) {
             faucet = Faucet(payable(existing));
@@ -66,13 +66,13 @@ contract RemoteExtras is Script {
     }
 
     /// @dev Lender liquidity: market C carries the testers' loans, A and B the dashboard's other two.
-    function _lend(string memory dep, AfterbellVaultRemote vault, address deployer) internal {
+    function _lend(string memory dep, Seiz3VaultRemote vault, address deployer) internal {
         _supply(dep, vault, deployer, "A_naive", 500e6);
         _supply(dep, vault, deployer, "B_conservative", 500e6);
-        _supply(dep, vault, deployer, "C_afterbell", vm.envOr("LENDER_SUPPLY_C", uint256(5000e6)));
+        _supply(dep, vault, deployer, "C_seiz3", vm.envOr("LENDER_SUPPLY_C", uint256(5000e6)));
     }
 
-    function _supply(string memory dep, AfterbellVaultRemote vault, address deployer, string memory name, uint256 amount)
+    function _supply(string memory dep, Seiz3VaultRemote vault, address deployer, string memory name, uint256 amount)
         internal
     {
         IMorpho morpho = vault.morpho();
@@ -84,7 +84,7 @@ contract RemoteExtras is Script {
     }
 
     /// @dev LP cash: each liquidation is repaid from the vault's idle USDC until its unwind sells the stock.
-    function _lp(AfterbellVaultRemote vault, address deployer) internal {
+    function _lp(Seiz3VaultRemote vault, address deployer) internal {
         uint256 lp = vm.envOr("LP_TOPUP", uint256(2000e6));
         if (lp == 0) return;
         MockUSDC(address(vault.usdc())).mint(deployer, lp);

@@ -9,7 +9,7 @@ const feeds = process.argv.slice(2);
 
 async function get(host: string, path: string) {
   const res = await fetch(host + path, {
-    headers: { ...authHeaders("GET", path, "", creds, Date.now()), "User-Agent": "afterbell-cre/1.0" },
+    headers: { ...authHeaders("GET", path, "", creds, Date.now()), "User-Agent": "seiz3-cre/1.0" },
   });
   return { status: res.status, body: await res.text() };
 }

@@ -1,5 +1,5 @@
 {
-  "name": "@afterbell/web",
+  "name": "@seiz3/web",
   "version": "0.0.0",
   "private": true,
   "scripts": {
@@ -10,7 +10,7 @@
     "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
-    "@afterbell/shared": "workspace:*",
+    "@seiz3/shared": "workspace:*",
     "@tanstack/react-query": "^5.104.4",
     "next": "16.4.2",
     "react": "19.3.0",

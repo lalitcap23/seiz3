@@ -1,7 +1,7 @@
 import { TopBar } from "@/components/TopBar";
 import { TryPage } from "@/components/try/TryPage";
 
-export const metadata = { title: "Try Afterbell · testnet" };
+export const metadata = { title: "Try Seiz3 · testnet" };
 
 export default function Try() {
   return (

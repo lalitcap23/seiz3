@@ -1,13 +1,13 @@
 import { createPublicClient, http, type PublicClient } from "viem";
 import { baseSepolia, hyperEvm, hyperliquidEvmTestnet } from "viem/chains";
-import { deploymentSchema, getDeployment } from "@afterbell/shared/deployments";
-import type { Network } from "@afterbell/shared";
+import { deploymentSchema, getDeployment } from "@seiz3/shared/deployments";
+import type { Network } from "@seiz3/shared";
 
 /** The tester page runs against one network: testnet unless NEXT_PUBLIC_NETWORK says otherwise. */
 export const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? "testnet") as Network;
-// from this package's viem, not @afterbell/shared's: the two resolve to different copies
+// from this package's viem, not @seiz3/shared's: the two resolve to different copies
 export const chain = NETWORK === "mainnet" ? hyperEvm : NETWORK === "base-sepolia" ? baseSepolia : hyperliquidEvmTestnet;
-// Base Sepolia's deployment file isn't bundled by @afterbell/shared: next.config.ts hands it over at build time
+// Base Sepolia's deployment file isn't bundled by @seiz3/shared: next.config.ts hands it over at build time
 const injected = process.env.NEXT_PUBLIC_DEPLOYMENT_JSON;
 export const dep = injected ? deploymentSchema.parse(JSON.parse(injected)) : getDeployment(NETWORK);
 export const publicClient = createPublicClient({

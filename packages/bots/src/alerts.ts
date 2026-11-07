@@ -1,5 +1,5 @@
 import { erc20Abi, type Address } from "viem";
-import { afterbellVaultAbi } from "@afterbell/shared/abis";
+import { seiz3VaultAbi } from "@seiz3/shared/abis";
 import { client, dep, log, owner, read, usd } from "./chain.js";
 import { env } from "./env.js";
 import type { MarketMaker } from "./marketMaker.js";
@@ -17,7 +17,7 @@ async function alert(key: string, text: string): Promise<void> {
   await fetch(env.ALERT_WEBHOOK_URL, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ content: `Afterbell ${env.NETWORK}: ${text}`, text: `Afterbell ${env.NETWORK}: ${text}` }),
+    body: JSON.stringify({ content: `Seiz3 ${env.NETWORK}: ${text}`, text: `Seiz3 ${env.NETWORK}: ${text}` }),
   }).catch((error: unknown) => log("alerts", "webhook failed", { error: String(error) }));
 }
 
@@ -31,8 +31,8 @@ const usd6 = (n: number) => BigInt(Math.round(n * 1e6));
 export async function checkAlerts(mm: MarketMaker | null): Promise<void> {
   const [idle, shortfall, coreUsdc] = await Promise.all([
     read<bigint>(dep.usdc, erc20Abi, "balanceOf", [dep.vault]),
-    read<bigint>(dep.vault, afterbellVaultAbi, "marginShortfall"),
-    read<bigint>(dep.vault, afterbellVaultAbi, "coreUsdc"),
+    read<bigint>(dep.vault, seiz3VaultAbi, "marginShortfall"),
+    read<bigint>(dep.vault, seiz3VaultAbi, "coreUsdc"),
   ]);
   if (idle < usd6(env.ALERT_IDLE_USDC)) {
     await alert("vault-idle", `vault idle USDC ${usd(idle)}: liquidations stop once it can't cover a repayment (fund-vault)`);

@@ -1,4 +1,4 @@
-import type { BorrowerRow, MarketSnapshot } from "@afterbell/shared";
+import type { BorrowerRow, MarketSnapshot } from "@seiz3/shared";
 import { nvdax, price, shortHash, usd } from "@/lib/format";
 import { OpBadge } from "./OperationCard";
 import { Label, Meter, Panel, Stat, Tag, TxLink, type Tone } from "./ui";
@@ -6,13 +6,13 @@ import { Label, Meter, Panel, Stat, Tag, TxLink, type Tone } from "./ui";
 const TITLES: Record<MarketSnapshot["name"], { name: string; tag: string; tone: Tone }> = {
   A_naive: { name: "Market A", tag: "naive", tone: "muted" },
   B_conservative: { name: "Market B", tag: "conservative", tone: "muted" },
-  C_afterbell: { name: "Market C", tag: "afterbell", tone: "brand" },
+  C_seiz3: { name: "Market C", tag: "seiz3", tone: "brand" },
 };
 
 const LIQUIDATOR: Record<MarketSnapshot["name"], string> = {
   A_naive: "dumps seized stock into the thin pool",
   B_conservative: "low LLTV, nothing to liquidate",
-  C_afterbell: "the vault buys it and shorts on HyperCore",
+  C_seiz3: "the vault buys it and shorts on HyperCore",
 };
 
 const BORROWERS_SHOWN = 5;
@@ -141,7 +141,7 @@ export function MarketColumns({ markets }: { markets: MarketSnapshot[] }) {
         return (
           <Panel
             key={m.name}
-            accent={m.name === "C_afterbell"}
+            accent={m.name === "C_seiz3"}
             title={
               <>
                 <span className="text-foreground">{t.name}</span>

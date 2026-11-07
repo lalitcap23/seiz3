@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Afterbell on Base Sepolia: the vault, Morpho and Uniswap v4 on Base; the short on HyperCore, placed by the relayer.
+# Seiz3 on Base Sepolia: the vault, Morpho and Uniswap v4 on Base; the short on HyperCore, placed by the relayer.
 #
 #   Morpho Blue + Uniswap v4 PoolManager: Morpho's and Uniswap's own Base Sepolia deployments (no copies of either)
-#   AfterbellVaultRemote + AfterbellHookRemote + HyperCoreGateway: ours (contracts/src/remote)
+#   Seiz3VaultRemote + Seiz3HookRemote + HyperCoreGateway: ours (contracts/src/remote)
 #   relayer (packages/relayer): gateway orders → the hedge account on HyperCore → snapshots back to the gateway
-#   keeper (packages/keeper): unchanged; it drives AfterbellVaultRemote through the same ABI
+#   keeper (packages/keeper): unchanged; it drives Seiz3VaultRemote through the same ABI
 #
 # The HyperEVM stacks (scripts/local-stack.sh, scripts/testnet-stack.sh) are untouched; this one writes its own files:
 # deployments/local-base*.json and deployments/base-sepolia*.json.
@@ -14,7 +14,7 @@
 #   scripts/base-stack.sh local up             # deploy + markets + pools + LP/lender/borrower (~40 s)
 #   scripts/base-stack.sh local relayer        # terminal 2: BACKEND=mock
 #   scripts/base-stack.sh local activate       # once the relayer's first snapshot landed
-#   pnpm --filter @afterbell/keeper risk-engine:stub   # terminal 3
+#   pnpm --filter @seiz3/keeper risk-engine:stub   # terminal 3
 #   scripts/base-stack.sh local keeper         # terminal 4
 #   scripts/base-stack.sh local price 210      # market C under water: liquidate → relayer shorts → sync
 #   scripts/base-stack.sh local hook-fill 50   # a buyer filled from the vault by the hook; buy-back relayed
@@ -113,7 +113,7 @@ single() {
   # in docker, compose runs one container per service, and a pid from its namespace means nothing on the host
   [[ -f /.dockerenv ]] && return 0
   # nor beside the docker stack's own (docker-compose.base.yml): two relayers there and here placed orders twice
-  if [[ $NETWORK == base-sepolia ]] && [[ -n $(docker ps -q --filter label=com.docker.compose.project=afterbell-base \
+  if [[ $NETWORK == base-sepolia ]] && [[ -n $(docker ps -q --filter label=com.docker.compose.project=seiz3-base \
     $([[ $1 != live ]] && echo "--filter label=com.docker.compose.service=$1") 2>/dev/null) ]]; then
     echo "the docker stack (pnpm base:up) already runs $1 for $NETWORK: use it, or pnpm base:down first" >&2
     exit 1
@@ -243,7 +243,7 @@ actors() {
   px=${PRICE_USD6:-$(oracle_usd6)}
   NETWORK=$NETWORK PRICE_USD6=$px BORROWER_PK=${BORROWER_PK:-0} forge_script RemoteActors.s.sol
   borrower=$([[ -n $BORROWER_PK ]] && cast wallet address "$BORROWER_PK" || echo "$DEPLOYER")
-  borrowers "$px" "$borrower:C_afterbell"
+  borrowers "$px" "$borrower:C_seiz3"
   echo "market C borrower $borrower at \$$(usd "$px") (${LTV_BPS} bps); next: relayer, then activate"
 }
 
@@ -279,11 +279,11 @@ relayer() {
   cd "$ROOT"
   if sim; then
     NETWORK=$NETWORK RPC_URL=$RPC RELAYER_PK=$RELAYER_PK BACKEND=mock HEARTBEAT_MS=${HEARTBEAT_MS:-3000} \
-      SETTLE_DELAY_MS=0 exec pnpm --silent --filter @afterbell/relayer start
+      SETTLE_DELAY_MS=0 exec pnpm --silent --filter @seiz3/relayer start
   fi
   : "${HEDGE_PK:?set BASE_HEDGE_PRIVATE_KEY (the hedge account on HyperCore) in .env.local}"
   NETWORK=$NETWORK RPC_URL=$RPC RELAYER_PK=$RELAYER_PK BACKEND=hyperliquid HL_PRIVATE_KEY=$HEDGE_PK HL_ACCOUNT=$HEDGE \
-    HEARTBEAT_MS=${HEARTBEAT_MS:-10000} exec pnpm --silent --filter @afterbell/relayer start
+    HEARTBEAT_MS=${HEARTBEAT_MS:-10000} exec pnpm --silent --filter @seiz3/relayer start
 }
 
 # the vault starts counting the hedge account's HyperCore USDC once the gateway has seen the account
@@ -318,7 +318,7 @@ keeper() {
     CORE_RESERVE_USDC=1000000000 MIN_SIGNER_BALANCE_WEI=${MIN_SIGNER_BALANCE_WEI:-10000000000000} \
     MAX_ACTIONS_PER_MINUTE=${MAX_ACTIONS_PER_MINUTE:-60} TICK_MS=${TICK_MS:-1000} \
     BUYER_WINDOW_SEC=${BUYER_WINDOW_SEC:-$([[ $NET == sepolia ]] && echo 60 || echo 0)} \
-    exec pnpm --silent --filter @afterbell/keeper start
+    exec pnpm --silent --filter @seiz3/keeper start
 }
 # BUYER_WINDOW_SEC (sepolia: 60): each liquidation's stock goes to buyers through the v4 hook before the keeper pushes
 # any of it into the pool; the first hook fill (or the end of the window) lets the pushes start
@@ -345,7 +345,7 @@ bots() {
     MM_SPREAD_BPS=${MM_SPREAD_BPS:-30} MM_SIZE=${MM_SIZE:-1.2} \
     BUYER_EACH_LIQUIDATION=${BUYER_EACH_LIQUIDATION:-1} POOL_ABOVE_ASK_BPS=${POOL_ABOVE_ASK_BPS:-5} \
     UTIL_FREE_USDC=${UTIL_FREE_USDC:-400} \
-    DEPLOYER_PRIVATE_KEY=$DEPLOYER_PK exec pnpm --filter @afterbell/bots start
+    DEPLOYER_PRIVATE_KEY=$DEPLOYER_PK exec pnpm --filter @seiz3/bots start
 }
 
 # The dashboard's data (packages/api) for this deployment, on its own port and watch file (the HyperEVM docker API
@@ -356,7 +356,7 @@ api() {
   NETWORK=$NETWORK RPC_URL=$RPC DEPLOYMENTS_PATH=$DEP_JSON API_PORT=${API_PORT:-8788} \
     WATCH_FILE=$ROOT/deployments/BASE_watch.json LOG_PAGE=${LOG_PAGE:-2000} \
     FAUCET_IP_COOLDOWN_SEC=${FAUCET_IP_COOLDOWN_SEC:-120} \
-    exec pnpm --silent --filter @afterbell/api exec tsx src/index.ts # no watch mode: a crash exits, and `live` restarts it
+    exec pnpm --silent --filter @seiz3/api exec tsx src/index.ts # no watch mode: a crash exits, and `live` restarts it
   # FAUCET_IP_COOLDOWN_SEC 120: try several wallets from one machine (the Faucet contract still allows one drip per
   # address per 10 minutes)
 }
@@ -367,7 +367,7 @@ web() {
   cd "$ROOT"
   NEXT_PUBLIC_NETWORK=base-sepolia NEXT_PUBLIC_API_URL=http://localhost:${API_PORT:-8788} \
     NEXT_PUBLIC_RPC_URL=${NEXT_PUBLIC_RPC_URL:-https://sepolia.base.org} DEPLOYMENTS_PATH=$DEP_JSON \
-    exec pnpm --filter @afterbell/web exec next dev --port "${WEB_PORT:-3001}"
+    exec pnpm --filter @seiz3/web exec next dev --port "${WEB_PORT:-3001}"
 }
 
 # live: every service this deployment needs, in one terminal: risk engine, relayer, keeper, bots, Chainlink CRE loop,
@@ -377,7 +377,7 @@ live() {
   local port
   for port in "${WEB_PORT:-3001}" "${API_PORT:-8788}" 8081 9090; do
     if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-      echo "port $port is already in use: another Afterbell stack is running (Ctrl-C it, or pnpm base:down for" \
+      echo "port $port is already in use: another Seiz3 stack is running (Ctrl-C it, or pnpm base:down for" \
         "the docker one, first)" >&2
       exit 1
     fi
@@ -415,8 +415,8 @@ live() {
     exit 0
   }
   trap stop INT TERM
-  echo "Afterbell on Base Sepolia: vault $(json "$DEP_JSON" vault), hedge account $HEDGE"
-  start risk-engine pnpm --filter @afterbell/keeper risk-engine:stub
+  echo "Seiz3 on Base Sepolia: vault $(json "$DEP_JSON" vault), hedge account $HEDGE"
+  start risk-engine pnpm --filter @seiz3/keeper risk-engine:stub
   start relayer "$0" sepolia relayer
   start api "$0" sepolia api
   start web "$0" sepolia web
@@ -445,7 +445,7 @@ price() {
   sim || { echo "price is local only: HyperCore testnet's oracle can't be moved (use crash)" >&2; exit 1; }
   local usd6
   usd6=$(cast parse-units "${1:?usage: price <usd>}" 6)
-  send "$(json "$DEP_JSON" markets.C_afterbell.oracle)" "setPrice(uint256)" "${usd6}000000000000000000"
+  send "$(json "$DEP_JSON" markets.C_seiz3.oracle)" "setPrice(uint256)" "${usd6}000000000000000000"
   send "$(json "$INFRA_JSON" core)" "setPx(uint64)" "$((usd6 / 10 ** SZ_DECIMALS))"
   echo "NVDA = \$$1 on market C's oracle and on (mock) HyperCore; the relayer's next snapshot carries it"
 }
@@ -503,7 +503,7 @@ crash() {
       "(needs < \$$(usd "$threshold")) and anything lower is outside the oracle band; borrow again first" >&2
     exit 1
   fi
-  oracle=$(json "$DEP_JSON" markets.C_afterbell.oracle)
+  oracle=$(json "$DEP_JSON" markets.C_seiz3.oracle)
   echo crash >"$HOLD_FILE" # or the bots' oracle follower puts it straight back
   send "$oracle" "setPrice(uint256)" "${target}000000000000000000"
   echo "market C oracle \$$(usd "$target"), HyperCore \$$(usd "$live"): the keeper should liquidate"
@@ -518,9 +518,9 @@ release() {
 borrow() {
   local amount=${1:?usage: borrow <nvdax>} px morpho id params nvdax wei pos mkt amt
   px=$(oracle_usd6)
-  send "$(json "$DEP_JSON" markets.C_afterbell.oracle)" "setPrice(uint256)" "${px}000000000000000000"
+  send "$(json "$DEP_JSON" markets.C_seiz3.oracle)" "setPrice(uint256)" "${px}000000000000000000"
   morpho=$(json "$DEP_JSON" morpho)
-  id=$(json "$DEP_JSON" markets.C_afterbell.id)
+  id=$(json "$DEP_JSON" markets.C_seiz3.id)
   params="($(cast call "$morpho" "idToMarketParams(bytes32)(address,address,address,address,uint256)" "$id" \
     --rpc-url "$RPC" | awk '{print $1}' | paste -sd, -))"
   nvdax=$(json "$DEP_JSON" nvdax)
@@ -545,7 +545,7 @@ borrow() {
   [[ $amt == 0 ]] && { echo "nothing to borrow: already at ${LTV_BPS} bps, or the market has no idle USDC" >&2; exit 1; }
   send "$morpho" "borrow((address,address,address,address,uint256),uint256,uint256,address,address)" "$params" "$amt" 0 \
     "$DEPLOYER" "$DEPLOYER"
-  borrowers "$px" "$DEPLOYER:C_afterbell"
+  borrowers "$px" "$DEPLOYER:C_seiz3"
   echo "borrowed \$$(usd "$amt") at \$$(usd "$px") (${LTV_BPS} bps): next, crash"
 }
 
@@ -625,19 +625,19 @@ status() {
   echo "vault        idle=$(usd "$(call "$usdc" "balanceOf(address)(uint256)" "$vault")") USDC  inventory=$(cast format-units \
     "$(call "$vault" "inventory()(uint256)")" 18)  confirmedShort=$(call "$vault" "confirmedShort()(int64)")" \
     " pending=$(cast call "$vault" "pendingHedge()(int64,uint64,uint64,uint8)" --rpc-url "$RPC" | head -1)  paused=$(call "$vault" "paused()(bool)")"
-  echo "prices       market C=\$$(cast format-units "$(call "$(json "$DEP_JSON" markets.C_afterbell.oracle)" "price()(uint256)")" 24)" \
+  echo "prices       market C=\$$(cast format-units "$(call "$(json "$DEP_JSON" markets.C_seiz3.oracle)" "price()(uint256)")" 24)" \
     " market open=$(call "$(json "$DEP_JSON" riskParams)" "marketOpen()(bool)")"
 }
 
 # mm-cancel: the market maker's quotes rest on HyperCore after its bot stops: take them down (live's Ctrl-C, base:down)
 mm_cancel() {
   [[ -n ${BASE_MM_PRIVATE_KEY:-} ]] || return 0
-  (cd "$ROOT" && HL_PRIVATE_KEY=$BASE_MM_PRIVATE_KEY pnpm --silent --filter @afterbell/relayer admin cancel-all)
+  (cd "$ROOT" && HL_PRIVATE_KEY=$BASE_MM_PRIVATE_KEY pnpm --silent --filter @seiz3/relayer admin cancel-all)
 }
 
 hedge_admin() {
   : "${HEDGE_PK:?set BASE_HEDGE_PRIVATE_KEY in .env.local}"
-  (cd "$ROOT" && HL_PRIVATE_KEY=$HEDGE_PK HL_ACCOUNT=$HEDGE pnpm --silent --filter @afterbell/relayer admin "$@")
+  (cd "$ROOT" && HL_PRIVATE_KEY=$HEDGE_PK HL_ACCOUNT=$HEDGE pnpm --silent --filter @seiz3/relayer admin "$@")
 }
 
 # packages/cre/base-feed/config.base-sepolia.json: the testnet feed's config (market hours, Data Feed check, the book)
@@ -692,7 +692,7 @@ cre_loop() {
   set +e
   while true; do
     out=$(cre_feed --broadcast 2>&1)
-    line=$(grep -E "Afterbell market feed:|workflow execution failed" <<<"$out" | tail -1 | sed -E 's/^.*\] //')
+    line=$(grep -E "Seiz3 market feed:|workflow execution failed" <<<"$out" | tail -1 | sed -E 's/^.*\] //')
     echo "$(date -u +%H:%M:%S) ${line:-no result: $(grep -v '^[[:space:]]*$' <<<"$out" | tail -1 | cut -c1-200)}"
     sleep "$interval"
   done

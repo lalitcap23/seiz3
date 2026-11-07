@@ -1,4 +1,4 @@
-import type { ActivityEvent, HedgeOrder, Operation } from "@afterbell/shared";
+import type { ActivityEvent, HedgeOrder, Operation } from "@seiz3/shared";
 
 /** One of the vault's fills on HyperCore, as Hyperliquid's `userFills` returns it. */
 export interface CoreFill {
@@ -70,7 +70,7 @@ export function buildOperations(
         blockNumber: start.blockNumber,
         timestamp: start.timestamp,
         borrower: isLiq ? String(start.args.borrower) : null,
-        market: isLiq ? "C_afterbell" : null, // the vault only liquidates its allow-listed market
+        market: isLiq ? "C_seiz3" : null, // the vault only liquidates its allow-listed market
         nvdax: String(isLiq ? start.args.seized : start.args.chunk),
         usdc: String(isLiq ? start.args.repaid : start.args.usdcOut),
         orders: [],
@@ -106,7 +106,7 @@ export function buildOperations(
       blockNumber: first ? first.blockNumber : "0",
       timestamp: first ? first.timestamp : 0,
       borrower: null,
-      market: "C_afterbell",
+      market: "C_seiz3",
       nvdax: before.toString(),
       usdc: "0",
       orders: [],

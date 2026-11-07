@@ -3,12 +3,12 @@ pragma solidity ^0.8.28;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {MarketParams} from "@morpho-blue/interfaces/IMorpho.sol";
-import {AfterbellBase} from "../utils/AfterbellBase.sol";
+import {Seiz3Base} from "../utils/Seiz3Base.sol";
 import {NaiveLiquidator} from "../../src/mocks/NaiveLiquidator.sol";
 import {UnwindLib} from "../../src/libs/UnwindLib.sol";
 
 /// @notice Demo Market A vs Market C on a thin weekend pool: same crash, same seizure, different outcome.
-contract NaiveLiquidatorTest is AfterbellBase {
+contract NaiveLiquidatorTest is Seiz3Base {
     NaiveLiquidator internal naive;
     address internal borrower2 = makeAddr("borrower2");
 
@@ -35,7 +35,7 @@ contract NaiveLiquidatorTest is AfterbellBase {
         assertGt(nvdax.balanceOf(address(naive)), 0, "the pool ran out before the stock did");
     }
 
-    function test_afterbell_takesTheSameSeizureWithoutAShortfall() public {
+    function test_seiz3_takesTheSameSeizureWithoutAShortfall() public {
         uint256 before = vault.totalAssets();
         vm.prank(keeper);
         vault.liquidate(market, borrower2, SEIZE);

@@ -12,15 +12,15 @@ import {
   type PublicClient,
 } from "viem";
 import {
-  afterbellHookAbi,
-  afterbellVaultAbi,
+  seiz3HookAbi,
+  seiz3VaultAbi,
   demoOracleAbi,
   hyperCoreGatewayAbi,
   iMorphoAbi,
   riskParamsAbi,
-} from "@afterbell/shared/abis";
-import { accruedTotalBorrow, extsloadAbi, poolSlots, type MarketName } from "@afterbell/shared";
-import type { DeploymentFile } from "@afterbell/shared/node";
+} from "@seiz3/shared/abis";
+import { accruedTotalBorrow, extsloadAbi, poolSlots, type MarketName } from "@seiz3/shared";
+import type { DeploymentFile } from "@seiz3/shared/node";
 
 /** Canonical Multicall3: deployed on HyperEVM mainnet and testnet; scripts/local-stack.sh etches it on anvil. */
 export const MULTICALL3: Address = "0xcA11bde05977b3631167028862bE2a173976CA11";
@@ -46,7 +46,7 @@ const irmAbi = parseAbi([
   "function borrowRateView(MarketParams marketParams, Market market) view returns (uint256)",
 ]);
 
-export const MARKETS: readonly MarketName[] = ["A_naive", "B_conservative", "C_afterbell"];
+export const MARKETS: readonly MarketName[] = ["A_naive", "B_conservative", "C_seiz3"];
 const HEDGE_STATES = ["Idle", "Pending", "Retrying", "Paused"] as const;
 
 export interface MarketRead {
@@ -92,7 +92,7 @@ export interface ChainRead {
   pool: { sqrtPriceX96: bigint; liquidity: bigint };
   /** Market A's own weekend pool; null where it shares the vault's pool. */
   thinPool: { sqrtPriceX96: bigint; liquidity: bigint } | null;
-  /** AfterbellHook's quote; null without a hook, or while its HyperCore reads fail. */
+  /** Seiz3Hook's quote; null without a hook, or while its HyperCore reads fail. */
   hook: HookRead | null;
   core: CoreRead | null; // null without HyperCore precompiles
 }
@@ -176,7 +176,7 @@ export async function readChain(
   const perpIndex = dep.hypercore.perpAsset >= 100_000 ? dep.hypercore.perpAsset - 100_000 : dep.hypercore.perpAsset;
   const slots = poolSlots(dep.poolKey);
   const borrowerOf = (name: MarketName) => dep.borrowers.find((b) => b.label === name)?.address ?? null;
-  const vault = (fn: string) => contract(`vault.${fn}`, dep.vault, afterbellVaultAbi, fn);
+  const vault = (fn: string) => contract(`vault.${fn}`, dep.vault, seiz3VaultAbi, fn);
 
   const calls: Call[] = [
     contract("blockNumber", MULTICALL3, multicall3Abi, "getBlockNumber"),
@@ -237,8 +237,8 @@ export async function readChain(
 
   if (dep.hook) {
     calls.push(
-      contract("hook.quote", dep.hook, afterbellHookAbi, "quote"),
-      contract("hook.settings", dep.hook, afterbellHookAbi, "settings"),
+      contract("hook.quote", dep.hook, seiz3HookAbi, "quote"),
+      contract("hook.settings", dep.hook, seiz3HookAbi, "settings"),
     );
   }
 

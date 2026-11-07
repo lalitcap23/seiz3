@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { TopBar } from "@/components/TopBar";
 import { TxView } from "@/components/TxView";
 
-export const metadata = { title: "Transaction · Afterbell" };
+export const metadata = { title: "Transaction · Seiz3" };
 
 // the hash is only known at request time, so the view (useParams) sits under Suspense for the prerender
 export default function Tx() {

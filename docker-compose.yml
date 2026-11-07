@@ -1,12 +1,12 @@
-name: afterbell
+name: seiz3
 
 services:
   risk-engine:
     build:
       context: .
       dockerfile: docker/keeper.Dockerfile
-    image: afterbell-keeper:local
-    command: ["pnpm", "--filter", "@afterbell/keeper", "risk-engine:stub"]
+    image: seiz3-keeper:local
+    command: ["pnpm", "--filter", "@seiz3/keeper", "risk-engine:stub"]
     environment:
       RISK_ENGINE_PORT: "8081"
       # A keeper that hasn't hit /decide for this long loses leadership to the backup
@@ -25,7 +25,7 @@ services:
       retries: 30
 
   keeper:
-    image: afterbell-keeper:local
+    image: seiz3-keeper:local
     profiles: ["demo"]
     depends_on:
       risk-engine:
@@ -59,7 +59,7 @@ services:
   # keeper-b acts at a time — the risk engine elects the lowest-id keeper it has heard from within
   # LEADER_LEASE_MS. Kill one live during the demo: the other takes over within ~3 s.
   keeper-b:
-    image: afterbell-keeper:local
+    image: seiz3-keeper:local
     profiles: ["demo"]
     depends_on:
       risk-engine:

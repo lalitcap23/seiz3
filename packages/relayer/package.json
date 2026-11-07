@@ -1,5 +1,5 @@
 {
-  "name": "@afterbell/relayer",
+  "name": "@seiz3/relayer",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@afterbell/shared": "workspace:*",
+    "@seiz3/shared": "workspace:*",
     "@nktkas/hyperliquid": "0.33.3",
     "viem": "^2.57.7",
     "zod": "^4.6.7"

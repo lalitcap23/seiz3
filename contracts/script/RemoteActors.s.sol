@@ -9,7 +9,7 @@ import {RiskParams} from "../src/RiskParams.sol";
 import {MockNVDAx} from "../src/mocks/MockNVDAx.sol";
 import {DemoOracle} from "../src/mocks/DemoOracle.sol";
 import {Units} from "../src/libs/Units.sol";
-import {AfterbellVaultRemote} from "../src/remote/AfterbellVaultRemote.sol";
+import {Seiz3VaultRemote} from "../src/remote/Seiz3VaultRemote.sol";
 import {DeployHelpers} from "./DeployHelpers.sol";
 
 /// @notice TestnetActors.s.sol for the Base Sepolia architecture, after RemoteInfra → DeployRemote → CreateMarkets →
@@ -25,12 +25,12 @@ contract RemoteActors is Script {
     function run() external {
         string memory network = vm.envOr("NETWORK", string("base-sepolia"));
         string memory dep = vm.readFile(DeployHelpers.deploymentPath(vm.projectRoot(), network));
-        AfterbellVaultRemote vault = AfterbellVaultRemote(vm.parseJsonAddress(dep, ".vault"));
+        Seiz3VaultRemote vault = Seiz3VaultRemote(vm.parseJsonAddress(dep, ".vault"));
         IMorpho morpho = vault.morpho();
         IERC20 usdc = vault.usdc();
         MockNVDAx nvdax = MockNVDAx(address(vault.nvdax()));
         MarketParams memory market =
-            morpho.idToMarketParams(Id.wrap(vm.parseJsonBytes32(dep, ".markets.C_afterbell.id")));
+            morpho.idToMarketParams(Id.wrap(vm.parseJsonBytes32(dep, ".markets.C_seiz3.id")));
         uint256 px = vm.envUint("PRICE_USD6");
         uint256 lpDeposit = vm.envOr("LP_DEPOSIT", uint256(200e6));
         uint256 lenderSupply = vm.envOr("LENDER_SUPPLY", uint256(180e6));

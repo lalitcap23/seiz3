@@ -10,9 +10,9 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 
-import {AfterbellBase, MockUSDC} from "../utils/AfterbellBase.sol";
+import {Seiz3Base, MockUSDC} from "../utils/Seiz3Base.sol";
 import {MockHyperCore} from "../utils/MockHyperCore.sol";
-import {AfterbellVault} from "../../src/AfterbellVault.sol";
+import {Seiz3Vault} from "../../src/Seiz3Vault.sol";
 import {RiskParams} from "../../src/RiskParams.sol";
 import {MockNVDAx} from "../../src/mocks/MockNVDAx.sol";
 import {DemoOracle} from "../../src/mocks/DemoOracle.sol";
@@ -21,7 +21,7 @@ import {Units} from "../../src/libs/Units.sol";
 
 /// @dev Everything the handler drives, wired up by the test.
 struct Refs {
-    AfterbellVault vault;
+    Seiz3Vault vault;
     MockHyperCore core;
     IMorpho morpho;
     MarketParams market;
@@ -42,7 +42,7 @@ contract VaultHandler is Test {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
-    AfterbellVault internal vault;
+    Seiz3Vault internal vault;
     MockHyperCore internal core;
     IMorpho internal morpho;
     MarketParams internal market;
@@ -207,7 +207,7 @@ contract VaultHandler is Test {
     }
 }
 
-contract HedgeInvariantTest is AfterbellBase {
+contract HedgeInvariantTest is Seiz3Base {
     VaultHandler internal handler;
 
     function setUp() public override {

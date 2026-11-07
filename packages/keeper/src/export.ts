@@ -2,14 +2,14 @@ import {
   POLL_EXPORT_SCHEMA_VERSION,
   serializePollExport,
   type PollExport,
-} from "@afterbell/shared/risk";
+} from "@seiz3/shared/risk";
 
 import type { MorphoApiSnapshot } from "./morphoApi.js";
 import type { Config, ScanReport, VaultState } from "./types.js";
 
 /**
  * Builds the single polled-data export the keeper serves on GET /snapshot.
- * The wire schema lives in @afterbell/shared/risk.
+ * The wire schema lives in @seiz3/shared/risk.
  */
 export function buildPollExport(
   state: VaultState,

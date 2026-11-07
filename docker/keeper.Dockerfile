@@ -14,15 +14,15 @@ COPY packages/replay/package.json packages/replay/
 COPY packages/shared/package.json packages/shared/
 COPY packages/web/package.json packages/web/
 
-RUN pnpm install --frozen-lockfile --filter @afterbell/keeper...
+RUN pnpm install --frozen-lockfile --filter @seiz3/keeper...
 
 COPY packages/keeper ./packages/keeper
 COPY packages/shared/src ./packages/shared/src
 
-RUN pnpm --filter @afterbell/keeper typecheck \
-  && pnpm --filter @afterbell/keeper build
+RUN pnpm --filter @seiz3/keeper typecheck \
+  && pnpm --filter @seiz3/keeper build
 
 USER node
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["pnpm", "--filter", "@afterbell/keeper", "start"]
+CMD ["pnpm", "--filter", "@seiz3/keeper", "start"]

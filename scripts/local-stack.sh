@@ -8,7 +8,7 @@
 #   anvil                                  # terminal 1
 #   scripts/local-stack.sh up              # terminal 2: deploy + fund, writes deployments/local.json
 #   scripts/local-stack.sh tick            #   ...then leave HyperCore running
-#   pnpm --filter @afterbell/keeper risk-engine:stub          # terminal 3
+#   pnpm --filter @seiz3/keeper risk-engine:stub          # terminal 3
 #   scripts/local-stack.sh keeper          # terminal 4
 #   scripts/local-stack.sh price 210       # drop NVDA from $217: the market C borrower goes under water
 #
@@ -97,7 +97,7 @@ up() {
 
   echo "→ margin, LP deposit, market C borrower"
   BORROWER_PK=$BORROWER_PK forge_script LocalActors.s.sol
-  borrowers "$(cast wallet address "$BORROWER_PK"):C_afterbell"
+  borrowers "$(cast wallet address "$BORROWER_PK"):C_seiz3"
 
   cast rpc evm_setIntervalMining 1 --rpc-url "$RPC" >/dev/null # HyperEVM-like 1 s blocks from here on
   echo "✓ local stack up: $DEP_JSON (vault $(json "$DEP_JSON" vault))"
@@ -115,7 +115,7 @@ demo() {
   echo "→ lenders and borrowers in markets A, B, C; NaiveLiquidator funding; LP deposit; Core margin"
   BORROWER_A_PK=$BORROWER_A_PK BORROWER_B_PK=$BORROWER_B_PK BORROWER_C_PK=$BORROWER_PK forge_script LocalDemo.s.sol
   borrowers "$(cast wallet address "$BORROWER_A_PK"):A_naive" "$(cast wallet address "$BORROWER_B_PK"):B_conservative" \
-    "$(cast wallet address "$BORROWER_PK"):C_afterbell"
+    "$(cast wallet address "$BORROWER_PK"):C_seiz3"
 
   touch "$KILL_FILE" # the keeper sits out the scene and market A, until the marketC click
   cast rpc evm_setIntervalMining 1 --rpc-url "$RPC" >/dev/null
@@ -152,7 +152,7 @@ tick() {
 price() {
   local usd6
   usd6=$(cast parse-units "$1" 6)
-  cast send "$(json "$DEP_JSON" markets.C_afterbell.oracle)" "setPrice(uint256)" "${usd6}000000000000000000" \
+  cast send "$(json "$DEP_JSON" markets.C_seiz3.oracle)" "setPrice(uint256)" "${usd6}000000000000000000" \
     --private-key "$DEPLOYER_PK" --rpc-url "$RPC" >/dev/null
   cast send "$(json "$CHAIN_JSON" core)" "setPx(uint64)" "$((usd6 / 1000))" \
     --private-key "$DEPLOYER_PK" --rpc-url "$RPC" >/dev/null
@@ -164,7 +164,7 @@ keeper() {
   # an unwind is two actions per chunk (sell + sync); the default 6/min would stretch the local run to minutes
   RPC_URL=$RPC KEEPER_PK=$KEEPER_PK DEPLOYMENTS_PATH=$DEP_JSON KILL_SWITCH_FILE=$ROOT/deployments/KILL \
     MAX_ACTIONS_PER_MINUTE=${MAX_ACTIONS_PER_MINUTE:-60} \
-    exec pnpm --filter @afterbell/keeper start
+    exec pnpm --filter @seiz3/keeper start
 }
 
 # keeper2 <risk-engine-url>: the redundant backup keeper (host process, anvil account 6). It shares the
@@ -177,7 +177,7 @@ keeper2() {
     RISK_ENGINE_URL=${1:-http://127.0.0.1:8081} \
     HEALTH_PORT=${KEEPER2_HEALTH_PORT:-9091} \
     MAX_ACTIONS_PER_MINUTE=${MAX_ACTIONS_PER_MINUTE:-60} \
-    exec pnpm --filter @afterbell/keeper start
+    exec pnpm --filter @seiz3/keeper start
 }
 
 case "${1:-}" in

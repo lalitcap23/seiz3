@@ -14,7 +14,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Afterbell",
+  title: "Seiz3",
   description: "Hedged liquidation vault: Morpho × HyperCore × Uniswap v4",
 };
 

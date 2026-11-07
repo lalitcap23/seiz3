@@ -16,7 +16,7 @@ import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {HLConstants} from "@hyper-evm-lib/src/common/HLConstants.sol";
 
-import {AFTERBELL_HOOK_FLAGS} from "../../src/AfterbellHook.sol";
+import {SEIZ3_HOOK_FLAGS} from "../../src/Seiz3Hook.sol";
 import {RiskParams} from "../../src/RiskParams.sol";
 import {UnwindLib} from "../../src/libs/UnwindLib.sol";
 import {Units} from "../../src/libs/Units.sol";
@@ -24,14 +24,14 @@ import {MockNVDAx} from "../../src/mocks/MockNVDAx.sol";
 import {DemoOracle} from "../../src/mocks/DemoOracle.sol";
 import {PoolSeeder} from "../../src/mocks/PoolSeeder.sol";
 import {HyperCoreGateway} from "../../src/remote/HyperCoreGateway.sol";
-import {AfterbellVaultRemote} from "../../src/remote/AfterbellVaultRemote.sol";
-import {AfterbellHookRemote} from "../../src/remote/AfterbellHookRemote.sol";
+import {Seiz3VaultRemote} from "../../src/remote/Seiz3VaultRemote.sol";
+import {Seiz3HookRemote} from "../../src/remote/Seiz3HookRemote.sol";
 import {DeployHelpers} from "../../script/DeployHelpers.sol";
-import {MockUSDC} from "../utils/AfterbellBase.sol";
+import {MockUSDC} from "../utils/Seiz3Base.sol";
 import {MockHyperCore} from "../utils/MockHyperCore.sol";
 
 /// @notice The Base Sepolia shape of the system: real Morpho Blue and Uniswap v4 bytecode on a chain with no HyperCore,
-///         AfterbellVaultRemote + AfterbellHookRemote wired to a HyperCoreGateway, and HyperCore itself played by
+///         Seiz3VaultRemote + Seiz3HookRemote wired to a HyperCoreGateway, and HyperCore itself played by
 ///         MockHyperCore at an ordinary address that only the test's relayer talks to. Nothing is etched over the
 ///         precompiles or CoreWriter, so any read or write the vault or hook made there would fail these tests.
 /// @dev `_relay()` is the relayer: place every unacknowledged gateway order on HyperCore from the hedge account,
@@ -71,7 +71,7 @@ abstract contract RemoteBase is Test {
     MarketParams internal market;
 
     IPoolManager internal pm;
-    AfterbellHookRemote internal hook;
+    Seiz3HookRemote internal hook;
     PoolKey internal key;
     bool internal nvdax0;
     PoolSeeder internal seeder;
@@ -80,7 +80,7 @@ abstract contract RemoteBase is Test {
     MockHyperCore internal core; // HyperCore, on the other side of the relayer
     HyperCoreGateway internal gateway;
     RiskParams internal risk;
-    AfterbellVaultRemote internal vault;
+    Seiz3VaultRemote internal vault;
 
     function setUp() public virtual {
         _chain();
@@ -148,19 +148,19 @@ abstract contract RemoteBase is Test {
         vm.stopPrank();
     }
 
-    function _deployHook(IPoolManager pm_, address owner_) internal returns (AfterbellHookRemote) {
+    function _deployHook(IPoolManager pm_, address owner_) internal returns (Seiz3HookRemote) {
         address at = address(
-            uint160(uint256(keccak256(abi.encode(address(pm_), "afterbell-hook-remote")))) & ~Hooks.ALL_HOOK_MASK
-                | AFTERBELL_HOOK_FLAGS
+            uint160(uint256(keccak256(abi.encode(address(pm_), "seiz3-hook-remote")))) & ~Hooks.ALL_HOOK_MASK
+                | SEIZ3_HOOK_FLAGS
         );
-        deployCodeTo("AfterbellHookRemote.sol:AfterbellHookRemote", abi.encode(pm_, owner_), at);
-        return AfterbellHookRemote(at);
+        deployCodeTo("Seiz3HookRemote.sol:Seiz3HookRemote", abi.encode(pm_, owner_), at);
+        return Seiz3HookRemote(at);
     }
 
-    function _newVault() internal returns (AfterbellVaultRemote) {
-        return new AfterbellVaultRemote(
+    function _newVault() internal returns (Seiz3VaultRemote) {
+        return new Seiz3VaultRemote(
             owner,
-            AfterbellVaultRemote.Wiring({
+            Seiz3VaultRemote.Wiring({
                 usdc: IERC20(address(usdc)),
                 nvdax: IERC20(address(nvdax)),
                 morpho: morpho,

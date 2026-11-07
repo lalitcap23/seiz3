@@ -1,4 +1,4 @@
-import type { Operation } from "@afterbell/shared";
+import type { Operation } from "@seiz3/shared";
 import { LANES, OperationCard, SoldToTag } from "./OperationCard";
 import { Panel } from "./ui";
 

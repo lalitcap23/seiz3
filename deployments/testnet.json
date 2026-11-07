@@ -2,7 +2,7 @@
   "borrowers": [
     {
       "address": "0x7Ea067328338D368038Fc677A7Fb17C9770D3F54",
-      "label": "C_afterbell"
+      "label": "C_seiz3"
     }
   ],
   "chainId": 998,
@@ -28,7 +28,7 @@
       "lltv": "385000000000000000",
       "oracle": "0x937088717bd23887D02308ed6BC87BB1b0e7848E"
     },
-    "C_afterbell": {
+    "C_seiz3": {
       "id": "0x6812cb8d824ef23d481b1bd4d829492495acc67304d16a6ae6942d3c0b3b21b2",
       "lltv": "770000000000000000",
       "oracle": "0xCe0A8975F6C6122b7771B358526BE941db100B93"

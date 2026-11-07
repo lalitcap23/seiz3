@@ -7,7 +7,7 @@ const creds = { apiKey: process.env.DATA_STREAMS_API_KEY ?? "", apiSecret: proce
 const target = Number(process.argv[2]);
 const host = process.argv[3] ?? "https://api.testnet-dataengine.chain.link";
 const get = async (path: string) => {
-  const res = await fetch(host + path, { headers: { ...authHeaders("GET", path, "", creds, Date.now()), "User-Agent": "afterbell-cre/1.0" } });
+  const res = await fetch(host + path, { headers: { ...authHeaders("GET", path, "", creds, Date.now()), "User-Agent": "seiz3-cre/1.0" } });
   return res.ok ? JSON.parse(await res.text()) : null;
 };
 const ids: string[] = ((await get("/api/v1/feeds"))?.feeds ?? []).map((f: { feedID: string }) => f.feedID);

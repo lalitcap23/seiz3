@@ -9,17 +9,17 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 
-import {AfterbellBase} from "../utils/AfterbellBase.sol";
+import {Seiz3Base} from "../utils/Seiz3Base.sol";
 import {MockHyperCore} from "../utils/MockHyperCore.sol";
-import {AfterbellHook} from "../../src/AfterbellHook.sol";
-import {IAfterbellVault} from "../../src/interfaces/IAfterbellVault.sol";
+import {Seiz3Hook} from "../../src/Seiz3Hook.sol";
+import {ISeiz3Vault} from "../../src/interfaces/ISeiz3Vault.sol";
 import {UnwindLib} from "../../src/libs/UnwindLib.sol";
 import {Units} from "../../src/libs/Units.sol";
 
-/// @notice AfterbellHook against the real v4 PoolManager: buyers of NVDAx are filled from the vault's hedged
+/// @notice Seiz3Hook against the real v4 PoolManager: buyers of NVDAx are filled from the vault's hedged
 ///         inventory at the Core oracle price plus the spread, each fill queues the matching reduce-only buy, and
 ///         curve swaps pay the fee for the market hours.
-contract HookFillTest is AfterbellBase {
+contract HookFillTest is Seiz3Base {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
@@ -104,9 +104,9 @@ contract HookFillTest is AfterbellBase {
         uint256 usdcIn = _usdcFor(1.5e18);
 
         vm.expectEmit(address(vault));
-        emit IAfterbellVault.Unwound(1.5e18, usdcIn); // inside the fill
+        emit ISeiz3Vault.Unwound(1.5e18, usdcIn); // inside the fill
         vm.expectEmit(address(hook));
-        emit AfterbellHook.InventoryFill(address(swapRouter), 1.5e18, usdcIn, ASK, false);
+        emit Seiz3Hook.InventoryFill(address(swapRouter), 1.5e18, usdcIn, ASK, false);
         _buy(int256(1.5e18));
 
         assertEq(nvdax.balanceOf(buyer) - stock, 1.5e18);
@@ -126,7 +126,7 @@ contract HookFillTest is AfterbellBase {
         assertEq(o.sz, 1500 * 1e5);
         vault.syncHedge();
         assertEq(vault.confirmedShort(), -38_500);
-        assertEq(uint8(vault.hedgeState()), uint8(IAfterbellVault.HedgeState.Idle));
+        assertEq(uint8(vault.hedgeState()), uint8(ISeiz3Vault.HedgeState.Idle));
     }
 
     function test_buyExactIn_fillsOnTheCoreGridAndTheCurveTakesTheDust() public {
@@ -238,7 +238,7 @@ contract HookFillTest is AfterbellBase {
     }
 
     function test_fillsDisabled_goesToTheCurve() public {
-        AfterbellHook.Settings memory s = hook.settings();
+        Seiz3Hook.Settings memory s = hook.settings();
         s.fillsEnabled = false;
         vm.prank(owner);
         hook.setSettings(s);
@@ -247,7 +247,7 @@ contract HookFillTest is AfterbellBase {
     }
 
     function test_noInventory_goesToTheCurve() public {
-        AfterbellBase.setUp(); // fresh vault, nothing taken
+        Seiz3Base.setUp(); // fresh vault, nothing taken
         _fundBuyer();
         core.setPx(_raw(CRASH_PX)); // the pool would be above the ask
         (uint256 capacity,,,) = hook.quote();
@@ -309,24 +309,24 @@ contract HookFillTest is AfterbellBase {
     // ─── access ───────────────────────────────────────────────────────────
 
     function test_onHookFill_onlyTheHook() public {
-        vm.expectRevert(IAfterbellVault.NotHook.selector);
+        vm.expectRevert(ISeiz3Vault.NotHook.selector);
         vault.onHookFill(1e18, 1000e6);
     }
 
     function test_onHookFill_neverBelowTheOracle() public {
         vm.prank(address(hook));
-        vm.expectRevert(IAfterbellVault.Slippage.selector);
+        vm.expectRevert(ISeiz3Vault.Slippage.selector);
         vault.onHookFill(1e18, 1);
     }
 
     function test_onHookFill_atMostMaxUnhedged() public {
         vm.prank(address(hook));
-        vm.expectRevert(IAfterbellVault.OverCap.selector);
+        vm.expectRevert(ISeiz3Vault.OverCap.selector);
         vault.onHookFill(CHUNK + 1e15, 1_000_000e6);
     }
 
     function test_beforeSwap_onlyThePoolManager() public {
-        vm.expectRevert(AfterbellHook.NotPoolManager.selector);
+        vm.expectRevert(Seiz3Hook.NotPoolManager.selector);
         hook.beforeSwap(
             address(this),
             key,
@@ -349,15 +349,15 @@ contract HookFillTest is AfterbellBase {
 
     function test_setVault_once() public {
         vm.prank(owner);
-        vm.expectRevert(AfterbellHook.VaultAlreadySet.selector);
+        vm.expectRevert(Seiz3Hook.VaultAlreadySet.selector);
         hook.setVault(vault);
     }
 
     function test_setSettings_rejectsBadFees() public {
-        AfterbellHook.Settings memory s = hook.settings();
+        Seiz3Hook.Settings memory s = hook.settings();
         s.feeClosed = 1_000_001;
         vm.prank(owner);
-        vm.expectRevert(AfterbellHook.BadSettings.selector);
+        vm.expectRevert(Seiz3Hook.BadSettings.selector);
         hook.setSettings(s);
     }
 }

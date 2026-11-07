@@ -1,10 +1,10 @@
-# CRE workflow settings for Afterbell on Base Sepolia: the market feed (RiskParams) plus the DON's snapshot of the hedge
+# CRE workflow settings for Seiz3 on Base Sepolia: the market feed (RiskParams) plus the DON's snapshot of the hedge
 # account on HyperCore (HyperCoreGateway). Same code as market-feed; the config's `gateway` block turns the second on.
 # config.base-sepolia.json is written from deployments/base-sepolia.json by `scripts/base-stack.sh sepolia cre`.
 #   cre workflow simulate base-feed --target base-sepolia-settings              (from packages/cre)
 base-sepolia-settings:
   user-workflow:
-    workflow-name: "afterbell-base-feed"
+    workflow-name: "seiz3-base-feed"
   workflow-artifacts:
     workflow-path: "./main.ts"
     config-path: "./config.base-sepolia.json"
@@ -13,7 +13,7 @@ base-sepolia-settings:
 # The same, against an anvil fork of Base Sepolia (scripts/base-stack.sh fork …): real forwarder bytecode, local chain.
 base-fork-settings:
   user-workflow:
-    workflow-name: "afterbell-base-feed-fork"
+    workflow-name: "seiz3-base-feed-fork"
   workflow-artifacts:
     workflow-path: "./main.ts"
     config-path: "./config.base-sepolia.json"

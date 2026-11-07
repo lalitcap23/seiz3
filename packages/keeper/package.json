@@ -1,5 +1,5 @@
 {
-  "name": "@afterbell/keeper",
+  "name": "@seiz3/keeper",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,7 +13,7 @@
     "risk-engine:stub": "tsx stub/riskEngineStub.ts"
   },
   "dependencies": {
-    "@afterbell/shared": "workspace:*",
+    "@seiz3/shared": "workspace:*",
     "viem": "^2.57.7",
     "zod": "^4.6.7"
   },

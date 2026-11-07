@@ -5,7 +5,7 @@ import {Script, console} from "forge-std/Script.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IMorpho} from "@morpho-blue/interfaces/IMorpho.sol";
 
-import {MockUSDC} from "../test/utils/AfterbellBase.sol";
+import {MockUSDC} from "../test/utils/Seiz3Base.sol";
 import {MockHyperCore} from "../test/utils/MockHyperCore.sol";
 import {DeployHelpers} from "./DeployHelpers.sol";
 

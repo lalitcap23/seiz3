@@ -2,13 +2,13 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { erc20Abi, parseAbi, type Address, type Hex } from "viem";
-import { afterbellVaultAbi, demoOracleAbi, faucetAbi, iMorphoAbi } from "@afterbell/shared/abis";
+import { seiz3VaultAbi, demoOracleAbi, faucetAbi, iMorphoAbi } from "@seiz3/shared/abis";
 import {
   accruedTotalBorrow,
   debtOf,
   liquidationPriceUsd6,
   maxDebt,
-} from "@afterbell/shared/morpho";
+} from "@seiz3/shared/morpho";
 // subpaths, not the package root: Turbopack can't resolve the root's "./x.js" re-exports to TS sources
 import {
   extsloadAbi,
@@ -16,7 +16,7 @@ import {
   poolSlots,
   slot0SqrtPrice,
   usdcPerNvdaxAt,
-} from "@afterbell/shared/pool";
+} from "@seiz3/shared/pool";
 import { dep, publicClient } from "./chain";
 
 const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11";
@@ -31,7 +31,7 @@ const irmAbi = parseAbi([
   "function borrowRateView(MarketParams marketParams, Market market) view returns (uint256)",
 ]);
 
-const marketId = dep.markets!.C_afterbell.id;
+const marketId = dep.markets!.C_seiz3.id;
 
 export interface MarketParams {
   loanToken: Address;
@@ -128,13 +128,13 @@ export function useMe(me: Address | null) {
           },
           { address: dep.morpho, abi: iMorphoAbi, functionName: "market", args: [marketId] },
           { address: dep.morpho, abi: iMorphoAbi, functionName: "position", args: [marketId, who] },
-          { address: dep.markets!.C_afterbell.oracle, abi: demoOracleAbi, functionName: "price" },
-          { address: dep.vault, abi: afterbellVaultAbi, functionName: "balanceOf", args: [who] },
-          { address: dep.vault, abi: afterbellVaultAbi, functionName: "maxRedeem", args: [who] },
-          { address: dep.vault, abi: afterbellVaultAbi, functionName: "queued", args: [who] },
-          { address: dep.vault, abi: afterbellVaultAbi, functionName: "totalAssets" },
-          { address: dep.vault, abi: afterbellVaultAbi, functionName: "totalSupply" },
-          { address: dep.vault, abi: afterbellVaultAbi, functionName: "instantLiquidity" },
+          { address: dep.markets!.C_seiz3.oracle, abi: demoOracleAbi, functionName: "price" },
+          { address: dep.vault, abi: seiz3VaultAbi, functionName: "balanceOf", args: [who] },
+          { address: dep.vault, abi: seiz3VaultAbi, functionName: "maxRedeem", args: [who] },
+          { address: dep.vault, abi: seiz3VaultAbi, functionName: "queued", args: [who] },
+          { address: dep.vault, abi: seiz3VaultAbi, functionName: "totalAssets" },
+          { address: dep.vault, abi: seiz3VaultAbi, functionName: "totalSupply" },
+          { address: dep.vault, abi: seiz3VaultAbi, functionName: "instantLiquidity" },
           {
             address: dep.poolManager,
             abi: extsloadAbi,

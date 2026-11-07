@@ -1,9 +1,9 @@
-# Afterbell market feed (Chainlink CRE)
+# Seiz3 market feed (Chainlink CRE)
 
 The vault needs two facts it can't read on-chain:
 
 1. **Is the US stock market open?** Chainlink Data Streams' `marketStatus` for NVDA, or the exchange's regular hours (see below).
-2. **How much can the xyz:NVDA book absorb?** HyperCore's precompiles give the oracle, not the book depth, and a partial hedge fill on a thin weekend book is Afterbell's main failure mode.
+2. **How much can the xyz:NVDA book absorb?** HyperCore's precompiles give the oracle, not the book depth, and a partial hedge fill on a thin weekend book is Seiz3's main failure mode.
 
 The contract has to trust both, so they come from a CRE workflow: every node fetches them on its own, and the DON signs only what the nodes agree on.
 
@@ -26,9 +26,9 @@ What reads it:
 
 | Consumer | Reads | Effect |
 | --- | --- | --- |
-| `AfterbellVault.liquidate` | `risk.get().maxLiquidation` | capped at the hedge capacity: the vault never buys more stock than HyperCore's book can hedge |
-| `AfterbellHook` | `risk.marketOpen()` | 0.3% fee / 0.1% spread while open, 1% / 1% after the bell |
-| `AfterbellVault.unwindStep` | `risk.cooldown()` | 10 s between unwind chunks while open, 300 s closed |
+| `Seiz3Vault.liquidate` | `risk.get().maxLiquidation` | capped at the hedge capacity: the vault never buys more stock than HyperCore's book can hedge |
+| `Seiz3Hook` | `risk.marketOpen()` | 0.3% fee / 0.1% spread while open, 1% / 1% after the bell |
+| `Seiz3Vault.unwindStep` | `risk.cooldown()` | 10 s between unwind chunks while open, 300 s closed |
 | keeper | `risk.get()`, `marketOpen()` | sizes liquidations to the same cap |
 
 `RiskParams` ([contracts/src/RiskParams.sol](../../contracts/src/RiskParams.sol)) is the receiver, built on Chainlink's `ReceiverTemplate`:
@@ -64,9 +64,9 @@ packages/cre/
 Offline, no keys. The tests run the real handler through the SDK test runtime: secrets, node-mode consensus, the HTTP and EVM capabilities and `writeReport`, with only the far ends mocked.
 
 ```bash
-pnpm --filter @afterbell/cre test        # 31 tests
-pnpm --filter @afterbell/cre typecheck
-pnpm --filter @afterbell/cre compile     # the CLI's own build: cre-compile → dist/market-feed.wasm
+pnpm --filter @seiz3/cre test        # 31 tests
+pnpm --filter @seiz3/cre typecheck
+pnpm --filter @seiz3/cre compile     # the CLI's own build: cre-compile → dist/market-feed.wasm
 ```
 
 With the CRE CLI against HyperEVM testnet, from the repo root. `CRE_PRIVATE_KEY` in `.env.local` pays for `--broadcast` (its own key, so it never races the bots for the deployer's nonce); Data Streams credentials (`DATA_STREAM_USERNAME`, `HMAC_SECRET`) only matter with `marketStatus: "dataStreams"`:

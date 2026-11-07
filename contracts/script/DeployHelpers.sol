@@ -46,7 +46,7 @@ library DeployHelpers {
         return fallback_;
     }
 
-    /// @notice The vault's NVDAx/USDC pool every script agrees on: AfterbellHook with a dynamic fee (the hook sets
+    /// @notice The vault's NVDAx/USDC pool every script agrees on: Seiz3Hook with a dynamic fee (the hook sets
     ///         it per swap: 0.3% while the market is open, wider after the bell).
     function poolKey(address usdc, address nvdax, address hook) internal pure returns (PoolKey memory) {
         (address c0, address c1) = usdc < nvdax ? (usdc, nvdax) : (nvdax, usdc);

@@ -1,5 +1,5 @@
 import type { Address, Hash, PublicClient, WalletClient } from "viem";
-import { hyperCoreGatewayAbi } from "@afterbell/shared/abis";
+import { hyperCoreGatewayAbi } from "@seiz3/shared/abis";
 
 import type { CoreState, GatewayOrder, HyperCoreBackend, PlaceResult } from "./types.js";
 

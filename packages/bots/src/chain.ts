@@ -1,7 +1,7 @@
 import { createPublicClient, createWalletClient, decodeAbiParameters, encodeAbiParameters, http, type Abi, type Address, type Hex, type PublicClient } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { chains, extsloadAbi, hyperCoreGatewayAbi, poolSlots, rpcUrlFor, slot0SqrtPrice, type PoolKey } from "@afterbell/shared";
-import { loadDeployment } from "@afterbell/shared/node";
+import { chains, extsloadAbi, hyperCoreGatewayAbi, poolSlots, rpcUrlFor, slot0SqrtPrice, type PoolKey } from "@seiz3/shared";
+import { loadDeployment } from "@seiz3/shared/node";
 import { env } from "./env.js";
 
 export const dep = loadDeployment(env.NETWORK, env.DEPLOYMENTS_PATH);

@@ -1,4 +1,4 @@
-import { afterbellVaultAbi } from "@afterbell/shared/abis";
+import { seiz3VaultAbi } from "@seiz3/shared/abis";
 
 import type { KeeperClients } from "./clients.js";
 import { sameAddress } from "./riskCalc.js";
@@ -104,7 +104,7 @@ export async function runStartup(
 
   // The deployment file and the chain must agree: same Morpho, and a market the vault will liquidate.
   try {
-    const vault = { address: cfg.vault, abi: afterbellVaultAbi } as const;
+    const vault = { address: cfg.vault, abi: seiz3VaultAbi } as const;
     const [morpho, allowed] = await Promise.all([
       clients.publicClient.readContract({ ...vault, functionName: "morpho" }),
       clients.publicClient.readContract({

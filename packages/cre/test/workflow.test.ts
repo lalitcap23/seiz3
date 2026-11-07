@@ -1,4 +1,4 @@
-// Offline simulations of the Afterbell market feed. They run the real workflow through the CRE SDK's test runtime:
+// Offline simulations of the Seiz3 market feed. They run the real workflow through the CRE SDK's test runtime:
 // secrets, node-mode consensus, the HTTP capability, the EVM read and the signed writeReport all go through the SDK,
 // with only the far ends (Data Streams, Hyperliquid, HyperEVM) mocked. No keys, no network.
 import { describe, expect } from "vitest";
@@ -292,7 +292,7 @@ describe("market feed workflow (SDK test runtime)", () => {
       "X-Authorization-Timestamp": String(NOW_MS), // the node's clock, not the DON's
       // python3: hmac.new(b"s3cr3t", f"GET {path} {sha256(b'').hexdigest()} {key} {ts}".encode(), sha256)
       "X-Authorization-Signature-SHA256": "782fc95fa258cc74646b0303a16b00181cc5964e24ac5c9e945c42fa7a38c458",
-      "User-Agent": "afterbell-cre/1.0",
+      "User-Agent": "seiz3-cre/1.0",
     });
   });
 

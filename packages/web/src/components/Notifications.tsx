@@ -50,7 +50,7 @@ export function NotificationSync() {
   useEffect(() => {
     if (address === null || !snapshot) return;
     addNotes(loanNotes(snapshot, address));
-    const market = snapshot.markets.find((m) => m.name === "C_afterbell");
+    const market = snapshot.markets.find((m) => m.name === "C_seiz3");
     const row = market?.borrowers?.find((b) => b.address.toLowerCase() === address.toLowerCase());
     const status = market && row ? borrowerStatus(row, market.lltv).label : null;
     if (status === currentRisk()) return;

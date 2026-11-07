@@ -1,4 +1,4 @@
-# Afterbell on Base Sepolia (docker-compose.base.yml): every service `scripts/base-stack.sh sepolia live` runs on the
+# Seiz3 on Base Sepolia (docker-compose.base.yml): every service `scripts/base-stack.sh sepolia live` runs on the
 # host, each through that same script, so the env each one gets is written down in one place.
 #   services  risk-engine stub, relayer, keeper, bots, API
 #   cre       + Bun and the Chainlink CRE CLI: the CRE loop (`cre workflow simulate base-feed --broadcast`)
@@ -23,8 +23,8 @@ COPY packages/shared/package.json packages/shared/
 COPY packages/web/package.json packages/web/
 
 RUN pnpm install --frozen-lockfile \
-  --filter @afterbell/keeper... --filter @afterbell/api... --filter @afterbell/replay... \
-  --filter @afterbell/bots... --filter @afterbell/relayer... --filter @afterbell/cre...
+  --filter @seiz3/keeper... --filter @seiz3/api... --filter @seiz3/replay... \
+  --filter @seiz3/bots... --filter @seiz3/relayer... --filter @seiz3/cre...
 
 COPY packages/keeper ./packages/keeper
 COPY packages/api ./packages/api

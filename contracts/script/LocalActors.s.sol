@@ -5,7 +5,7 @@ import {Script, console} from "forge-std/Script.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IMorpho, MarketParams, Id} from "@morpho-blue/interfaces/IMorpho.sol";
 
-import {AfterbellVault} from "../src/AfterbellVault.sol";
+import {Seiz3Vault} from "../src/Seiz3Vault.sol";
 import {RiskParams} from "../src/RiskParams.sol";
 import {MockNVDAx} from "../src/mocks/MockNVDAx.sol";
 import {Units} from "../src/libs/Units.sol";
@@ -29,13 +29,13 @@ contract LocalActors is Script {
     function run() external {
         string memory dep = vm.readFile(DeployHelpers.deploymentPath(vm.projectRoot(), "local"));
         string memory chain = vm.readFile(DeployHelpers.deploymentPath(vm.projectRoot(), "local-chain"));
-        AfterbellVault vault = AfterbellVault(vm.parseJsonAddress(dep, ".vault"));
+        Seiz3Vault vault = Seiz3Vault(vm.parseJsonAddress(dep, ".vault"));
         MockHyperCore core = MockHyperCore(vm.parseJsonAddress(chain, ".core"));
         IMorpho morpho = vault.morpho();
         IERC20 usdc = vault.usdc();
         MockNVDAx nvdax = MockNVDAx(address(vault.nvdax()));
         MarketParams memory market =
-            morpho.idToMarketParams(Id.wrap(vm.parseJsonBytes32(dep, ".markets.C_afterbell.id")));
+            morpho.idToMarketParams(Id.wrap(vm.parseJsonBytes32(dep, ".markets.C_seiz3.id")));
         uint256 borrowerPk = vm.envUint("BORROWER_PK");
         address borrower = vm.addr(borrowerPk);
 

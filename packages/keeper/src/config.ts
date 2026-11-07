@@ -75,12 +75,12 @@ const deploymentSchema = z.object({
   chainId: z.union([z.number().int().positive(), z.string().regex(/^\d+$/)]),
   vault: addressSchema,
   morpho: addressSchema,
-  markets: z.object({ C_afterbell: z.object({ id: hex32Schema }) }),
+  markets: z.object({ C_seiz3: z.object({ id: hex32Schema }) }),
   borrowers: z.array(borrowerSchema).default([]),
   /** Block the markets were created in: where borrower discovery starts. */
   startBlock: z.union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)]).optional(),
   hypercore: z.object({ szDecimals: z.number().int().min(0).max(6), perpAsset: z.number().int().positive() }).optional(),
-  /** AfterbellHook on the vault's pool: buyers can take stock between ticks. */
+  /** Seiz3Hook on the vault's pool: buyers can take stock between ticks. */
   hook: addressSchema.optional(),
 });
 
@@ -110,7 +110,7 @@ function parseDeploymentsJson(raw: string): DeploymentInfo {
     chainId: toBig(d.chainId),
     vault: d.vault as Address,
     morpho: d.morpho as Address,
-    marketId: d.markets.C_afterbell.id as Hex,
+    marketId: d.markets.C_seiz3.id as Hex,
     borrowers: d.borrowers.map((b) => ({
       address: b.address as Address,
       ...(b.label === undefined ? {} : { label: b.label }),

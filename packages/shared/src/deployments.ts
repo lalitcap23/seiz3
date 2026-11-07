@@ -23,7 +23,7 @@ export const deploymentSchema = z.object({
   nvdax: address,
   riskParams: address,
   vault: address,
-  /** AfterbellHook on the vault's pool (Deploy.s.sol since the hook); absent in older deployments. */
+  /** Seiz3Hook on the vault's pool (Deploy.s.sol since the hook); absent in older deployments. */
   hook: address.optional(),
   poolKey: z.object({
     currency0: address,
@@ -37,7 +37,7 @@ export const deploymentSchema = z.object({
     perpDexIndex: z.number(),
     szDecimals: z.number(),
   }),
-  markets: z.object({ A_naive: market, B_conservative: market, C_afterbell: market }).optional(),
+  markets: z.object({ A_naive: market, B_conservative: market, C_seiz3: market }).optional(),
   // testnet extras (TestnetExtras.s.sol): what the public tester page calls
   faucet: address.optional(),
   swapRouter: address.optional(),
@@ -47,9 +47,9 @@ export const deploymentSchema = z.object({
 });
 
 export type Deployment = z.infer<typeof deploymentSchema>;
-export type MarketName = "A_naive" | "B_conservative" | "C_afterbell";
+export type MarketName = "A_naive" | "B_conservative" | "C_seiz3";
 
-/** Bundled for the browser; Base Sepolia's file is read at runtime (`@afterbell/shared/node`'s loadDeployment). */
+/** Bundled for the browser; Base Sepolia's file is read at runtime (`@seiz3/shared/node`'s loadDeployment). */
 const raw: Partial<Record<Network, unknown>> = { testnet, mainnet };
 
 /** Single source of addresses for every off-chain package. Written by contracts/script/Deploy.s.sol. */

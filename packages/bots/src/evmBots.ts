@@ -1,18 +1,18 @@
 import { erc20Abi, maxUint256, parseEventLogs, type Address } from "viem";
 import {
-  afterbellHookAbi,
-  afterbellVaultAbi,
+  seiz3HookAbi,
+  seiz3VaultAbi,
   demoOracleAbi,
   mockNvdAxAbi,
   poolSeederAbi,
   poolSwapTestAbi,
   riskParamsAbi,
-} from "@afterbell/shared/abis";
-import { nvdaxIsCurrency0, sqrtPriceAt, usdcPerNvdaxAt, type MarketName } from "@afterbell/shared";
+} from "@seiz3/shared/abis";
+import { nvdaxIsCurrency0, sqrtPriceAt, usdcPerNvdaxAt, type MarketName } from "@seiz3/shared";
 import { client, coreOracleUsd6, dep, diffBps, log, owner, poolState, read, send, usd } from "./chain.js";
 import { env } from "./env.js";
 
-const MARKETS: readonly MarketName[] = ["A_naive", "B_conservative", "C_afterbell"];
+const MARKETS: readonly MarketName[] = ["A_naive", "B_conservative", "C_seiz3"];
 const MORPHO_SCALE = 10n ** 18n; // DemoOracle price = usd6 × 1e18
 
 /**
@@ -77,8 +77,8 @@ export async function rebalancePool(core: bigint): Promise<void> {
  */
 async function poolTarget(core: bigint): Promise<bigint> {
   if (env.POOL_ABOVE_ASK_BPS === undefined || dep.hook === undefined) return core;
-  if ((await read<bigint>(dep.vault, afterbellVaultAbi, "inventory")) === 0n) return core;
-  const [, ask] = await read<readonly [bigint, bigint, number, boolean]>(dep.hook, afterbellHookAbi, "quote");
+  if ((await read<bigint>(dep.vault, seiz3VaultAbi, "inventory")) === 0n) return core;
+  const [, ask] = await read<readonly [bigint, bigint, number, boolean]>(dep.hook, seiz3HookAbi, "quote");
   return (ask * (BPS + BigInt(env.POOL_ABOVE_ASK_BPS))) / BPS;
 }
 
@@ -86,17 +86,17 @@ async function poolTarget(core: bigint): Promise<bigint> {
 async function recycleFromVault(me: Address, usdc: bigint): Promise<void> {
   const want = BigInt(Math.round(env.USDC_TOPUP * 1e6));
   const floor = BigInt(Math.round(env.VAULT_FLOOR_USDC * 1e6));
-  const instant = await read<bigint>(dep.vault, afterbellVaultAbi, "instantLiquidity");
+  const instant = await read<bigint>(dep.vault, seiz3VaultAbi, "instantLiquidity");
   if (instant < floor + want) {
     log("pool", `deployer has only ${usd(usdc)} and the vault ${usd(instant)} to spare: refill the deployer by hand`);
     return;
   }
-  const shares = await read<bigint>(dep.vault, afterbellVaultAbi, "convertToShares", [want]);
-  if (shares > (await read<bigint>(dep.vault, afterbellVaultAbi, "maxRedeem", [me]))) {
+  const shares = await read<bigint>(dep.vault, seiz3VaultAbi, "convertToShares", [want]);
+  if (shares > (await read<bigint>(dep.vault, seiz3VaultAbi, "maxRedeem", [me]))) {
     log("pool", `deployer has only ${usd(usdc)} and not enough vault shares left: refill it by hand`);
     return;
   }
-  await send(dep.vault, afterbellVaultAbi, "requestWithdraw", [shares]);
+  await send(dep.vault, seiz3VaultAbi, "requestWithdraw", [shares]);
   log("pool", `deployer ${usd(usdc)} → redeemed ${usd(want)} of its vault shares for rebalancing`);
 }
 
@@ -115,7 +115,7 @@ async function approveOnce(token: Address, spender: Address): Promise<void> {
 
 /**
  * A demo buyer on the vault's pool, so a round shows both ways the vault sells: the keeper's unwindStep pushes stock
- * into the Uniswap curve, and a buyer is filled straight from the vault by AfterbellHook (InventoryFill), at HyperCore's
+ * into the Uniswap curve, and a buyer is filled straight from the vault by Seiz3Hook (InventoryFill), at HyperCore's
  * oracle plus the spread. While the vault holds stock and no buy-back is in flight, every BUYER_INTERVAL_MS it buys
  * BUYER_USDC of NVDAx. The hook only sells while the pool trades at or above its ask, and the pool bot holds the pool
  * on the oracle, so the buyer first bids the curve just past the ask (buy pressure, through PoolSeeder), then buys
@@ -130,10 +130,10 @@ export async function buyFromVault(): Promise<void> {
   const router = dep.swapRouter;
   if (hook === undefined || router === undefined) return;
   const [inventory, pending, paused, lastUnwindAt, cooldown, block] = await Promise.all([
-    read<bigint>(dep.vault, afterbellVaultAbi, "inventory"),
-    read<readonly [bigint, bigint, bigint, number]>(dep.vault, afterbellVaultAbi, "pendingHedge"),
-    read<boolean>(dep.vault, afterbellVaultAbi, "paused"),
-    read<bigint>(dep.vault, afterbellVaultAbi, "lastUnwindAt"),
+    read<bigint>(dep.vault, seiz3VaultAbi, "inventory"),
+    read<readonly [bigint, bigint, bigint, number]>(dep.vault, seiz3VaultAbi, "pendingHedge"),
+    read<boolean>(dep.vault, seiz3VaultAbi, "paused"),
+    read<bigint>(dep.vault, seiz3VaultAbi, "lastUnwindAt"),
     read<number>(dep.riskParams, riskParamsAbi, "cooldown"),
     client.getBlock(),
   ]);
@@ -159,7 +159,7 @@ export async function buyFromVault(): Promise<void> {
     return;
   }
   const nvdax0 = nvdaxIsCurrency0(dep.poolKey, dep.nvdax);
-  const [ready, ask] = await read<readonly [bigint, bigint, number, boolean]>(hook, afterbellHookAbi, "quote");
+  const [ready, ask] = await read<readonly [bigint, bigint, number, boolean]>(hook, seiz3HookAbi, "quote");
   await approveOnce(dep.usdc, dep.poolSeeder as Address);
   await approveOnce(dep.usdc, router);
 
@@ -171,7 +171,7 @@ export async function buyFromVault(): Promise<void> {
       sqrtPriceAt((ask * (BPS + BigInt(env.BUYER_PUSH_BPS))) / BPS, nvdax0),
     ]);
   }
-  const [capacity] = await read<readonly [bigint, bigint, number, boolean]>(hook, afterbellHookAbi, "quote");
+  const [capacity] = await read<readonly [bigint, bigint, number, boolean]>(hook, seiz3HookAbi, "quote");
   lastBuyAt = Date.now();
   if (capacity === 0n) {
     log("buyer", "the hook has nothing to sell right now (a keeper unwind landed first): next round");
@@ -185,7 +185,7 @@ export async function buyFromVault(): Promise<void> {
     "0x",
   ]);
   const receipt = await client.getTransactionReceipt({ hash });
-  const [fill] = parseEventLogs({ abi: afterbellHookAbi, eventName: "InventoryFill", logs: receipt.logs });
+  const [fill] = parseEventLogs({ abi: seiz3HookAbi, eventName: "InventoryFill", logs: receipt.logs });
   if (fill === undefined) {
     log("buyer", `bought on the curve, not from the vault (${hash})`);
     return;

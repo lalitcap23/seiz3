@@ -16,7 +16,7 @@ importers:
 
   packages/api:
     dependencies:
-      '@afterbell/shared':
+      '@seiz3/shared':
         specifier: workspace:*
         version: link:../shared
       '@hono/node-server':
@@ -44,7 +44,7 @@ importers:
 
   packages/bots:
     dependencies:
-      '@afterbell/shared':
+      '@seiz3/shared':
         specifier: workspace:*
         version: link:../shared
       '@nktkas/hyperliquid':
@@ -94,7 +94,7 @@ importers:
 
   packages/keeper:
     dependencies:
-      '@afterbell/shared':
+      '@seiz3/shared':
         specifier: workspace:*
         version: link:../shared
       viem:
@@ -119,7 +119,7 @@ importers:
 
   packages/relayer:
     dependencies:
-      '@afterbell/shared':
+      '@seiz3/shared':
         specifier: workspace:*
         version: link:../shared
       '@nktkas/hyperliquid':
@@ -147,7 +147,7 @@ importers:
 
   packages/replay:
     dependencies:
-      '@afterbell/shared':
+      '@seiz3/shared':
         specifier: workspace:*
         version: link:../shared
       viem:
@@ -188,7 +188,7 @@ importers:
 
   packages/web:
     dependencies:
-      '@afterbell/shared':
+      '@seiz3/shared':
         specifier: workspace:*
         version: link:../shared
       '@tanstack/react-query':

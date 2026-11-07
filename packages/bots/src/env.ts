@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DEPLOYMENTS_DIR } from "@afterbell/shared/node";
+import { DEPLOYMENTS_DIR } from "@seiz3/shared/node";
 
 const key = z.string().regex(/^0x[0-9a-fA-F]{64}$/);
 

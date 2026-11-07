@@ -1,5 +1,5 @@
 {
-  "name": "@afterbell/api",
+  "name": "@seiz3/api",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@afterbell/shared": "workspace:*",
+    "@seiz3/shared": "workspace:*",
     "@hono/node-server": "^2.1.5",
     "hono": "^4.13.13",
     "viem": "^2.57.7",

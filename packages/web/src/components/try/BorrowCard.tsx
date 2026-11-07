@@ -1,7 +1,7 @@
 "use client";
 
 import { erc20Abi, maxUint256 } from "viem";
-import { iMorphoAbi } from "@afterbell/shared/abis";
+import { iMorphoAbi } from "@seiz3/shared/abis";
 import { dep } from "@/lib/chain";
 import type { Me } from "@/lib/me";
 import { useWallet } from "@/lib/wallet";
@@ -90,7 +90,7 @@ export function BorrowCard({ me }: { me: Me | undefined }) {
     <Card
       title={
         <>
-          {TITLE} <Tag tone="brand">afterbell</Tag>
+          {TITLE} <Tag tone="brand">seiz3</Tag>
         </>
       }
       meta={<span>LLTV {(lltv * 100).toFixed(0)}%</span>}
@@ -144,7 +144,7 @@ export function BorrowCard({ me }: { me: Me | undefined }) {
         <Note>
           Max borrows right up to the {(lltv * 100).toFixed(0)}% limit. Interest crosses it{" "}
           {tipOverSec(me) === null ? "soon after" : `about ${tipOverSec(me)} s after the borrow lands`}, and the
-          keeper liquidates you through the Afterbell vault: it buys your NVDAx at Morpho&apos;s discount and shorts the same
+          keeper liquidates you through the Seiz3 vault: it buys your NVDAx at Morpho&apos;s discount and shorts the same
           amount on HyperCore. You keep the USDC; the collateral goes.
         </Note>
         <Action label="Borrow" onClick={doBorrow} disabled={!borrow.value || p.collateral === 0n} className="w-full" />

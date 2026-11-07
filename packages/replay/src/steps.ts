@@ -1,7 +1,7 @@
 import { erc20Abi, maxUint256, parseAbi, parseEventLogs, type Address, type Hex } from "viem";
 import {
-  afterbellHookAbi,
-  afterbellVaultAbi,
+  seiz3HookAbi,
+  seiz3VaultAbi,
   demoOracleAbi,
   iMorphoAbi,
   mockNvdAxAbi,
@@ -9,7 +9,7 @@ import {
   poolSeederAbi,
   poolSwapTestAbi,
   riskParamsAbi,
-} from "@afterbell/shared/abis";
+} from "@seiz3/shared/abis";
 import {
   extsloadAbi,
   poolSlots,
@@ -18,7 +18,7 @@ import {
   sqrtPriceAt,
   usdcPerNvdaxAt,
   type MarketName,
-} from "@afterbell/shared";
+} from "@seiz3/shared";
 import {
   borrowerOf,
   bots,
@@ -39,9 +39,9 @@ import {
   writeDeployment,
 } from "./context.js";
 
-const MARKETS: readonly MarketName[] = ["A_naive", "B_conservative", "C_afterbell"];
+const MARKETS: readonly MarketName[] = ["A_naive", "B_conservative", "C_seiz3"];
 /** Testnet setup's borrowers: A and C just under the 77% LLTV (the scene's 1.4% drop tips them over), B safe. */
-const SHOW_LTV_BPS: Record<MarketName, bigint> = { A_naive: 7680n, B_conservative: 3000n, C_afterbell: 7680n };
+const SHOW_LTV_BPS: Record<MarketName, bigint> = { A_naive: 7680n, B_conservative: 3000n, C_seiz3: 7680n };
 const WAD = 10n ** 18n;
 const ORACLE_SCALE = 10n ** 36n;
 const mockCoreAbi = parseAbi(["function setPx(uint64 px)"]);
@@ -102,18 +102,18 @@ async function report(market: MarketName) {
 async function vaultState() {
   const d = dep();
   const [inventory, confirmedShort, pending] = await Promise.all([
-    read<bigint>(d.vault, afterbellVaultAbi, "inventory"),
-    read<bigint>(d.vault, afterbellVaultAbi, "confirmedShort"),
-    read<readonly [bigint, bigint, bigint, number]>(d.vault, afterbellVaultAbi, "pendingHedge"),
+    read<bigint>(d.vault, seiz3VaultAbi, "inventory"),
+    read<bigint>(d.vault, seiz3VaultAbi, "confirmedShort"),
+    read<readonly [bigint, bigint, bigint, number]>(d.vault, seiz3VaultAbi, "pendingHedge"),
   ]);
   return { inventory, confirmedShort, pendingDelta: pending[0] };
 }
 
-/** AfterbellHook.quote(): what one buy can take from the vault right now, at what ask. */
+/** Seiz3Hook.quote(): what one buy can take from the vault right now, at what ask. */
 async function hookQuote() {
   const hook = dep().hook;
   if (hook === undefined) throw new Error("no hook in the deployment file: redeploy with Deploy.s.sol");
-  const [capacity, ask, fee, open] = await read<readonly [bigint, bigint, number, boolean]>(hook, afterbellHookAbi, "quote");
+  const [capacity, ask, fee, open] = await read<readonly [bigint, bigint, number, boolean]>(hook, seiz3HookAbi, "quote");
   return { capacity, ask, fee: Number(fee), open };
 }
 

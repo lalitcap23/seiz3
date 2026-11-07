@@ -6,7 +6,7 @@
  *
  * Sections:
  *   - units      decimal parse/format helpers
- *   - math       Morpho health/size math, mirrored from Morpho Blue and AfterbellVault
+ *   - math       Morpho health/size math, mirrored from Morpho Blue and Seiz3Vault
  *   - reports    borrower report rows for logs + the risk engine
  *   - decide     picks AT MOST ONE action per tick
  *   - guards     per-action preconditions, checked right before simulating
@@ -104,7 +104,7 @@ const MAX_LIQUIDATION_INCENTIVE_FACTOR = 115n * 10n ** 16n;
 const VIRTUAL_SHARES = 10n ** 6n;
 const VIRTUAL_ASSETS = 1n;
 
-// AfterbellVault pause flags
+// Seiz3Vault pause flags
 export const PAUSE_HEDGE = 1n;
 export const PAUSE_MARGIN = 2n;
 export const PAUSE_OWNER = 4n;
@@ -426,7 +426,7 @@ const fail = (reason: Exclude<GuardResult, { ok: true }>["reason"]): GuardResult
   reason,
 });
 
-/** Each guard mirrors the matching AfterbellVault function's own preconditions. */
+/** Each guard mirrors the matching Seiz3Vault function's own preconditions. */
 export function guards(action: Action, state: VaultState, now: bigint, cfg: PolicyConfig): GuardResult {
   switch (action.kind) {
     case "syncHedge":

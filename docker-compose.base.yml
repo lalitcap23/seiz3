@@ -1,4 +1,4 @@
-# Afterbell on Base Sepolia, every service in docker: what `scripts/base-stack.sh sepolia live` runs on the host.
+# Seiz3 on Base Sepolia, every service in docker: what `scripts/base-stack.sh sepolia live` runs on the host.
 #
 #   pnpm base:up      # docker compose -f docker-compose.base.yml up -d --build
 #   pnpm base:logs    # follow every service (pnpm base:logs keeper: one)
@@ -14,14 +14,14 @@
 # INFURA_API_KEY or BASE_SEPOLIA_RPC_URL. The script overrides RPC_URL / HL_MM_* from .env.local (the HyperEVM stack's).
 # Don't run this and `live` (or a host keeper / relayer / bots) at once: two relayers place every order twice. `live`
 # refuses while this stack holds :3001 / :8788.
-name: afterbell-base
+name: seiz3-base
 
 x-service: &service
   build:
     context: .
     dockerfile: docker/base.Dockerfile
     target: services
-  image: afterbell-base-services
+  image: seiz3-base-services
   restart: unless-stopped
   env_file: .env.local
   volumes:
@@ -30,7 +30,7 @@ x-service: &service
 services:
   risk-engine:
     <<: *service
-    command: ["pnpm", "--filter", "@afterbell/keeper", "risk-engine:stub"]
+    command: ["pnpm", "--filter", "@seiz3/keeper", "risk-engine:stub"]
     environment:
       RISK_ENGINE_PORT: "8081"
     healthcheck:
@@ -83,7 +83,7 @@ services:
       context: .
       dockerfile: docker/base.Dockerfile
       target: cre
-    image: afterbell-base-cre
+    image: seiz3-base-cre
     command: ["scripts/base-stack.sh", "sepolia", "cre-loop"]
     volumes:
       - ./deployments:/app/deployments
@@ -99,7 +99,7 @@ services:
         NEXT_PUBLIC_NETWORK: base-sepolia
         # the browser's reads; the public RPC rate-limits per IP (the page says so when a read fails)
         NEXT_PUBLIC_RPC_URL: https://sepolia.base.org
-    image: afterbell-web:base
+    image: seiz3-web:base
     restart: unless-stopped
     depends_on: [api]
     ports: ["${BASE_WEB_PORT:-3001}:3000"]

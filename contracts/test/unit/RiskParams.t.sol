@@ -159,7 +159,7 @@ contract RiskParamsTest is Test {
         vm.prank(owner);
         risk.setExpectedWorkflowId(workflowId);
 
-        bytes memory metadata = abi.encodePacked(workflowId, bytes10("afterbell"), address(0xA11CE));
+        bytes memory metadata = abi.encodePacked(workflowId, bytes10("seiz3"), address(0xA11CE));
         assertEq(metadata.length, 62);
         vm.prank(forwarder);
         risk.onReport(metadata, _payload(true, 1000e6, uint64(block.timestamp)));
@@ -169,7 +169,7 @@ contract RiskParamsTest is Test {
         bytes memory payload = _payload(false, 1, uint64(block.timestamp + 1));
         vm.prank(forwarder);
         vm.expectRevert(abi.encodeWithSelector(ReceiverTemplate.InvalidWorkflowId.selector, wrong, workflowId));
-        risk.onReport(abi.encodePacked(wrong, bytes10("afterbell"), address(0xA11CE)), payload);
+        risk.onReport(abi.encodePacked(wrong, bytes10("seiz3"), address(0xA11CE)), payload);
     }
 
     function _report(bool open, uint256 capacity, uint256 observedAt) internal {

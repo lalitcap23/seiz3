@@ -18,7 +18,7 @@ COPY packages/shared/package.json packages/shared/
 COPY packages/web/package.json packages/web/
 
 RUN pnpm install --frozen-lockfile \
-  --filter @afterbell/keeper... --filter @afterbell/api... --filter @afterbell/replay... --filter @afterbell/bots...
+  --filter @seiz3/keeper... --filter @seiz3/api... --filter @seiz3/replay... --filter @seiz3/bots...
 
 COPY packages/keeper ./packages/keeper
 COPY packages/api ./packages/api

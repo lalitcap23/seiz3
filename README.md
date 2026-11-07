@@ -1,15 +1,17 @@
-# Afterbell
+# Seiz3
 
 A vault that buys seized stock collateral from Morpho, shorts the same stock on HyperCore in the same transaction, then sells the stock through Uniswap v4 while closing the short: buyers on the vault's pool are filled from its hedged stock by a v4 hook, and the keeper pushes whatever nobody buys. A Chainlink CRE workflow tells the contracts whether the stock market is open and how much HyperCore's book can hedge.
 
-The full design is in [`Afterbell system architecture.md`](Afterbell%20system%20architecture.md).
+Live on Base Sepolia at [seiz3.xyz](https://seiz3.xyz) (API: [api.seiz3.xyz](https://api.seiz3.xyz)).
+
+The full design is in [`Seiz3 system architecture.md`](Seiz3%20system%20architecture.md).
 
 ## Layout
 
 ```
-afterbell/
+seiz3/
 ├─ contracts/            Foundry (solc 0.8.28 for src/, cancun)
-│  ├─ src/               AfterbellVault, AfterbellHook, RiskParams, libs/{HedgeLib,UnwindLib,Units},
+│  ├─ src/               Seiz3Vault, Seiz3Hook, RiskParams, libs/{HedgeLib,UnwindLib,Units},
 │  │                     cre/ (Chainlink ReceiverTemplate), mocks/{MockNVDAx,DemoOracle,NaiveLiquidator,PoolSeeder}
 │  ├─ script/            Deploy, CreateMarkets, SeedPool (+ DeployHelpers: risk defaults, pool key)
 │  └─ test/              unit/ · integration/ (real Morpho + v4 bytecode, MockHyperCore, HookFill) ·
@@ -24,18 +26,18 @@ afterbell/
 └─ deployments/          testnet.json / mainnet.json, written by Deploy.s.sol
 ```
 
-All addresses and ABIs reach the off-chain code through one path: `forge build` + `Deploy.s.sol` → `deployments/*.json` + `contracts/out` → `@afterbell/shared`.
+All addresses and ABIs reach the off-chain code through one path: `forge build` + `Deploy.s.sol` → `deployments/*.json` + `contracts/out` → `@seiz3/shared`.
 
-## Uniswap v4 hook (AfterbellHook)
+## Uniswap v4 hook (Seiz3Hook)
 
-The vault's NVDAx/USDC pool carries [`AfterbellHook`](contracts/src/AfterbellHook.sol) with a dynamic fee. A buyer of NVDAx is filled from the vault's hedged inventory at the HyperCore oracle price plus a spread, off the curve, and each fill queues the matching reduce-only buy on HyperCore. Whatever the hook doesn't fill goes to the curve at a fee set by market hours.
+The vault's NVDAx/USDC pool carries [`Seiz3Hook`](contracts/src/Seiz3Hook.sol) with a dynamic fee. A buyer of NVDAx is filled from the vault's hedged inventory at the HyperCore oracle price plus a spread, off the curve, and each fill queues the matching reduce-only buy on HyperCore. Whatever the hook doesn't fill goes to the curve at a fee set by market hours.
 
 | What | Where |
 | --- | --- |
-| Permissions: `beforeInitialize`, `beforeSwap`, `beforeSwapReturnDelta` | [`AfterbellHook.sol:31`](contracts/src/AfterbellHook.sol#L31) |
-| The fill: price, size, settle, return the delta | [`beforeSwap` 192–217](contracts/src/AfterbellHook.sol#L192-L217), [`_fill` 221–246](contracts/src/AfterbellHook.sol#L221-L246) |
-| What one buy can take, at what ask (also the dashboard's quote) | [`quote` 144–158](contracts/src/AfterbellHook.sol#L144-L158), [`_capacity` 162–181](contracts/src/AfterbellHook.sol#L162-L181) |
-| The vault's side: send the stock, queue the buy-back | [`AfterbellVault.onHookFill` 398–414](contracts/src/AfterbellVault.sol#L398-L414) |
+| Permissions: `beforeInitialize`, `beforeSwap`, `beforeSwapReturnDelta` | [`Seiz3Hook.sol:31`](contracts/src/Seiz3Hook.sol#L31) |
+| The fill: price, size, settle, return the delta | [`beforeSwap` 192–217](contracts/src/Seiz3Hook.sol#L192-L217), [`_fill` 221–246](contracts/src/Seiz3Hook.sol#L221-L246) |
+| What one buy can take, at what ask (also the dashboard's quote) | [`quote` 144–158](contracts/src/Seiz3Hook.sol#L144-L158), [`_capacity` 162–181](contracts/src/Seiz3Hook.sol#L162-L181) |
+| The vault's side: send the stock, queue the buy-back | [`Seiz3Vault.onHookFill` 398–414](contracts/src/Seiz3Vault.sol#L398-L414) |
 | Address mining and deploy order (hook → vault → `setVault`) | [`Deploy.s.sol` 59–77](contracts/script/Deploy.s.sol#L59-L77), [`_deployHook` 101–109](contracts/script/Deploy.s.sol#L101-L109), [`DeployHelpers.mineHookSalt` 67–87](contracts/script/DeployHelpers.sol#L67-L87) |
 | Tests | [`HookFill.t.sol`](contracts/test/integration/HookFill.t.sol), hook buys in [`HedgeInvariant.t.sol`](contracts/test/integration/HedgeInvariant.t.sol), `test_sim_hookFill_buyBackLandsOnCore` (CoreSimulator), `test_hookFill_onTheDeployedPoolManager` (mainnet fork) |
 
@@ -97,7 +99,7 @@ pnpm codegen                              # forge build + wagmi ABIs → package
 | `pnpm web`                                                      | Dashboard only; set `NEXT_PUBLIC_USE_FIXTURE=1` in `packages/web/.env.local` to run without the API |
 | `pnpm keeper`                                                   | Keeper bot                                                                                          |
 | `pnpm test` / `pnpm test:scenarios`                             | Keeper unit tests / keeper against the real contracts on the local stack (below)                    |
-| `pnpm --filter @afterbell/cre test` / `compile`                 | CRE workflow on the SDK's test runtime / build its WASM with `cre-compile`                          |
+| `pnpm --filter @seiz3/cre test` / `compile`                 | CRE workflow on the SDK's test runtime / build its WASM with `cre-compile`                          |
 | `pnpm replay <setup\|reset\|scene\|marketA\|marketB\|marketC\|buyers\|monday>` | One demo step (see "Demo replay")                                              |
 
 ## Deploying
@@ -152,7 +154,7 @@ The keeper reads the same `deployments/<NETWORK>.json` (`DEPLOYMENTS_PATH`) and 
 ```bash
 anvil                                              # 1
 scripts/local-stack.sh up                          # 2: deploy + fund → deployments/local.json (~40 s)
-pnpm --filter @afterbell/keeper risk-engine:stub   # 3
+pnpm --filter @seiz3/keeper risk-engine:stub   # 3
 pnpm test:scenarios                                # 4: keeper scenarios, each from the same anvil snapshot
 
 # or watch the real keeper binary instead of 4:
@@ -172,7 +174,7 @@ Locally nothing arbitrages the pool, so after a few chunks its price sags more t
 anvil
 pnpm replay setup                                  # = scripts/local-stack.sh demo (~45 s)
 scripts/local-stack.sh tick                        # own terminals, as for the local stack
-pnpm --filter @afterbell/keeper risk-engine:stub
+pnpm --filter @seiz3/keeper risk-engine:stub
 scripts/local-stack.sh keeper
 NETWORK=local pnpm api
 
@@ -203,7 +205,7 @@ scripts/testnet-stack.sh actors          # LP deposit, lender, borrower at 76.8%
 scripts/testnet-stack.sh fund-core       # 120 USDC (spot) to the vault on HyperCore (or Send it in the app)
 # post a bid ≥ 1 NVDA on xyz:NVDA near the oracle (the bots' market maker does)
 scripts/testnet-stack.sh sweep           # spot → xyz margin
-pnpm --filter @afterbell/keeper risk-engine:stub   # own terminal
+pnpm --filter @seiz3/keeper risk-engine:stub   # own terminal
 scripts/testnet-stack.sh keeper                    # own terminal
 scripts/testnet-stack.sh crash           # market C 1.4% under HyperCore's oracle → liquidate → hedge
 scripts/testnet-stack.sh status
@@ -228,7 +230,7 @@ scripts/testnet-stack.sh cre-status        # the CRE report the vault and hook a
 After a liquidation the stock leaves the vault two ways at once, both on the vault's Uniswap v4 pool:
 
 - **Vault → AMM:** the keeper's `unwindStep` sells a chunk into the curve every cooldown (`Unwound`); the hook only sets the fee.
-- **Vault → buyer:** the bots' `buyer` (`BOTS=…,buyer`, `BUYER_USDC` every `BUYER_INTERVAL_MS`) plays organic demand. It bids the curve just past the hook's ask, then buys through the public swap router, and AfterbellHook fills it straight from the vault's stock at HyperCore's oracle plus the spread (`InventoryFill`), off the curve.
+- **Vault → buyer:** the bots' `buyer` (`BOTS=…,buyer`, `BUYER_USDC` every `BUYER_INTERVAL_MS`) plays organic demand. It bids the curve just past the hook's ask, then buys through the public swap router, and Seiz3Hook fills it straight from the vault's stock at HyperCore's oracle plus the spread (`InventoryFill`), off the curve.
 
 Each sale queues a reduce-only buy-back on HyperCore, filled against the market maker's standing ask.
 
@@ -258,8 +260,8 @@ Uniswap v4 isn't deployed on HyperEVM testnet, so this variant runs the vault wh
 
 ```
 Base Sepolia                                              HyperCore testnet
-Morpho (theirs) ─liquidate─► AfterbellVaultRemote ─placeOrder─► HyperCoreGateway ─► relayer ─IOC─► hedge account (short)
-Uniswap v4 (theirs) ◄─ AfterbellHookRemote ─┘   ▲                     ▲   ◄── snapshot + ack ──┘          │
+Morpho (theirs) ─liquidate─► Seiz3VaultRemote ─placeOrder─► HyperCoreGateway ─► relayer ─IOC─► hedge account (short)
+Uniswap v4 (theirs) ◄─ Seiz3HookRemote ─┘   ▲                     ▲   ◄── snapshot + ack ──┘          │
                                                 └─ reads (precompile   └── Chainlink CRE: DON-signed snapshot ◄┘
                                                    shapes) ─────────        of the hedge account, + RiskParams
 ```
@@ -267,8 +269,8 @@ Uniswap v4 (theirs) ◄─ AfterbellHookRemote ─┘   ▲                     
 | Piece | What it is |
 | --- | --- |
 | [`HyperCoreGateway`](contracts/src/remote/HyperCoreGateway.sol) | HyperCore's precompiles + CoreWriter for a chain without them: stores the vault's orders for the relayer, serves the precompile reads from the last snapshot (newer of relayer / CRE wins; older than `maxStateAge` → reads revert, the vault fails closed), and `settled()` once every order is acknowledged |
-| [`AfterbellVaultRemote`](contracts/src/remote/AfterbellVaultRemote.sol) | AfterbellVault with every HyperCore call through the gateway. Same ABI (`AbiParity.t.sol`), so the keeper, API and scripts drive it unchanged. `syncHedge` waits for `settled()`; margin moves revert `NoBridge` (fund the hedge account on HyperCore) |
-| [`AfterbellHookRemote`](contracts/src/remote/AfterbellHookRemote.sol) | AfterbellHook with its two HyperCore reads through the gateway; same flags, events and quote |
+| [`Seiz3VaultRemote`](contracts/src/remote/Seiz3VaultRemote.sol) | Seiz3Vault with every HyperCore call through the gateway. Same ABI (`AbiParity.t.sol`), so the keeper, API and scripts drive it unchanged. `syncHedge` waits for `settled()`; margin moves revert `NoBridge` (fund the hedge account on HyperCore) |
+| [`Seiz3HookRemote`](contracts/src/remote/Seiz3HookRemote.sol) | Seiz3Hook with its two HyperCore reads through the gateway; same flags, events and quote |
 | [`packages/relayer`](packages/relayer) | Places each gateway order on HyperCore from the hedge account (vault's cloid; never twice), posts the account back with the acknowledgement, heartbeats in between. `BACKEND=hyperliquid` or `mock` (MockHyperCore on anvil) |
 | CRE ([`src/gateway.ts`](packages/cre/src/gateway.ts), `base-feed/`) | The same market feed to RiskParams on Base, plus every node's own read of the hedge account → one DON-signed snapshot to the gateway |
 
@@ -309,7 +311,7 @@ Tests: `test/remote/` (gateway, the whole round with MockHyperCore behind a test
 - **HyperEVM, in one Multicall3 `eth_call`:** the three Morpho markets and their borrowers, the vault, RiskParams' market-open flag, the v4 pool's `slot0`, and the HyperCore precompiles (vault position, xyz margin, mark and oracle price).
 - **Hyperliquid's info API:** `clearinghouseState` (dex `xyz`) for the vault. On the local stack the panel comes from MockHyperCore's precompiles instead.
 - **Logs:** vault events and the hook's `InventoryFill` for the activity feed; Morpho's `Liquidate.badDebtAssets` and NaiveLiquidator's `Shortfall` for each market's bad debt. An unwind with an `InventoryFill` in the same transaction is `soldTo: "buyer"`, otherwise `"pool"`.
-- **Hook:** `AfterbellHook.quote()` (ask, what one buy can take, the fee now) as the snapshot's `hook` block.
+- **Hook:** `Seiz3Hook.quote()` (ask, what one buy can take, the fee now) as the snapshot's `hook` block.
 
 Each market's borrower comes from the deployment file's `borrowers` (`label` = market name).
 
@@ -323,7 +325,7 @@ NETWORK=testnet pnpm api                        # optional: RPC_URL, FROM_BLOCK 
 
 ## Keeper notes
 
-- **ABIs come from the contracts.** Every call goes through the wagmi-generated ABIs in `@afterbell/shared/abis`, so a renamed function or changed argument list is a type error. Run `pnpm codegen` after changing a contract.
+- **ABIs come from the contracts.** Every call goes through the wagmi-generated ABIs in `@seiz3/shared/abis`, so a renamed function or changed argument list is a type error. Run `pnpm codegen` after changing a contract.
 - **It mirrors the vault's rules, the contract decides.** Pauses, cooldowns and Morpho's liquidation maths (seize no more than the debt and idle USDC can repay) are checked before simulating; an `eth_call` that reverts anyway (pool or lending oracle out of band, low Core margin) is skipped and logged with its error name, not sent and not counted by the breaker.
 - **Block clock.** Order delays and cooldowns are compared against the latest block's timestamp, the clock the vault uses.
 - **Margin.** It tops up the vault's `marginShortfall()` plus 10%, syncs to clear a margin pause once the shortfall is gone, and only sends back Core USDC above `marginTarget()` (enough for the next max-size liquidation).
@@ -350,7 +352,7 @@ Contracts, scripts and tests follow the architecture doc. The offline suite (uni
 - [ ] Leverage on xyz: CoreWriter can't set it. If the default is wrong, `addApiWallet` lets an agent set it
 - [x] Morpho on HyperEVM mainnet: `0x68e37dE8…` with 77% and 38.5% LLTVs and the AdaptiveCurve IRM `0xD4a426F0…` enabled. Not on testnet → `TestnetInfra.s.sol`
 - [x] Uniswap v4 PoolManager on HyperEVM mainnet: `0x12D4Fd9C…`. Not on testnet → same. `pnpm contracts:test:fork` passes against both
-- [x] AfterbellHook on HyperEVM testnet: mined at `0x5Bf6…6088` (flags `0x2088`), pool initialised, a live buy paid its after-hours fee (1%), and a live buyer was filled from the vault's stock at the ask (`hook-fill`, tx in "Demo round")
+- [x] Seiz3Hook on HyperEVM testnet: mined at `0x5Bf6…6088` (flags `0x2088`), pool initialised, a live buy paid its after-hours fee (1%), and a live buyer was filled from the vault's stock at the ask (`hook-fill`, tx in "Demo round")
 - [x] CRE: `hyperliquid-testnet` / `hyperliquid-mainnet` are in the SDK's chain registry; the workflow compiles to WASM with `cre-compile`; the simulation forwarder `0xB27f…24CB` is on HyperEVM testnet
 - [x] CRE CLI simulation with `--broadcast` on HyperEVM testnet: the report lands in RiskParams (market status from market hours, book depth from Hyperliquid, Chainlink Data Feed observed)
 - [ ] Data Streams `marketStatus` instead of market hours: waiting on Chainlink to authorize our key for the NVDA feed (`marketStatus: "dataStreams"` in the config)

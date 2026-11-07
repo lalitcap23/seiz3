@@ -89,8 +89,8 @@ contract HedgeLibTest is Test {
     }
 
     function test_addApiWallet_payload() public {
-        h.addApiWallet(address(0xBEEF), "afterbell-agent");
-        assertEq(_last(), abi.encodePacked(hex"01", hex"000009", abi.encode(address(0xBEEF), "afterbell-agent")));
+        h.addApiWallet(address(0xBEEF), "seiz3-agent");
+        assertEq(_last(), abi.encodePacked(hex"01", hex"000009", abi.encode(address(0xBEEF), "seiz3-agent")));
     }
 
     function test_perpIndexOf() public pure {
